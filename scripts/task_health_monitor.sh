@@ -402,12 +402,8 @@ self_heal_sedaemon()
 
 xle_device_mode=0
 if [ "$BOX_TYPE" = "WNXL11BWL" ]; then
-
     lte_down=$(sysevent get LTE_DOWN)
-    if [ "$lte_down" = "1" ]; then
-        echo_t "[RDKB_SELFHEAL] : Rebooting device due to LTE connectivity down"
-        rebootNeeded RM LTE_DOWN LTE_DOWN 1
-    fi
+
     # checking device mode
     xle_device_mode=`syscfg get Device_Mode`
     if [ "$xle_device_mode" -eq "1" ]; then
@@ -416,12 +412,22 @@ if [ "$BOX_TYPE" = "WNXL11BWL" ]; then
     else
         RESOLV_CONF="/etc/resolv.conf"
         echo_t "[RDKB_SELFHEAL] : Device is in router mode"
+        if [ -n "$lte_down" ]; then
+            echo_t "[RDKB_SELFHEAL] : Rebooting device due to LTE connectivity down"
+            rebootNeeded RM $lte_down $lte_down 1
+        fi
     fi
     checkMaintenanceWindow
         IsAlreadyCellularCountResetted=`sysevent get isAlreadyCellularCountResetted`
         if [ $reb_window -eq 1 ]; then
+             if [ -n "$lte_down" ] && [ "$xle_device_mode" -eq "1" ]; then
+                 echo_t "[RDKB_SELFHEAL] : Rebooting device due to LTE connectivity down within maintenance window"
+                 rebootNeeded RM $lte_down $lte_down 1
+             fi
+
              if [ $IsAlreadyCellularCountResetted -eq 0 ]; then
                   echo_t "[RDKB_SELFHEAL] : Resetting cellular_restart_count within maintenance window"
+                  sysevent set cellular_retry_count 0
                   sysevent set cellular_restart_count 0
                   sysevent set isAlreadyCellularCountResetted 1
              fi
