@@ -1,0 +1,29 @@
+- move arch/source/TandDSsp/* to
+       source/TandDSsp
+- move arch/source/dmltad/* to
+       source/dmltad
+- move arch/source/diagnostic/BbhmDiagIpPing/* to
+       source/diagnostic/BbhmDiagIpPing/
+- mkdir -p source-arm/dmltad
+- move arch/intel_usg/boards/arm_shared/source/dmltad/* to
+       source/dmltad
+- move arch/intel_usg/boards/arm_shared/source/dmltad/* to
+       source-arm/dmltad/
+- move source/dmltad/* to
+       source-arm/dmltad
+- mkdir -p source-arm/diagnostic/BbhmDiagIpPing
+- move arch/intel_usg/boards/arm_shared/source/diagnostic/BbhmDiagIpPing/* to
+       source-arm/diagnostic/BbhmDiagIpPing/
+- mkdir config
+- move arch/intel_usg/boards/arm_shared/config/TestAndDiagnostic.XML to
+       config/
+- move config/TestAndDiagnostic.XML to
+       config/TestAndDiagnostic_arm.XML 
+- move arch/config/TestAndDiagnostic.XML to
+       config
+- move arch/pc/config/TestAndDiagnostic.XML to
+       config/TestAndDiagnostic_pc.XML 
+- remove arch directory
+- move Makefile Makefile.orig
+- add ChangeLog file
+

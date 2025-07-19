@@ -1,0 +1,63 @@
+#!/bin/sh
+#######################################################################################
+# If not stated otherwise in this file or this component's Licenses.txt file the
+# following copyright and licenses apply:
+
+#  Copyright 2018 RDK Management
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+# http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#######################################################################################
+
+UTOPIA_PATH="/etc/utopia/service.d"
+TAD_PATH="/usr/ccsp/tad"
+
+if [ -f /etc/device.properties ]
+then
+    source /etc/device.properties
+fi
+
+source $TAD_PATH/corrective_action.sh
+source /etc/log_timestamp.sh
+
+source $UTOPIA_PATH/log_env_var.sh
+exec 3>&1 4>&2 >>$SELFHEALFILE 2>&1
+
+arping -I $SOURCE_ARPING_INTF $PEER_ARPING_IP -c 3 > /tmp/.arpingresult
+
+#upstreamed 0001-TCXB6-9313-ARPING_FROM_SOURCE-Failed-no-Reply.patch,0001-ARPING_FROM_SOURCE-Failed-no-Reply.patch as part of RDKB-41505.
+if [ "$MANUFACTURE" = "Technicolor" ] || [ "$MANUFACTURE" = "Sercomm" ] || [ "$MANUFACTURE" = "Arris" ]
+then
+	arpingSuccess=`cat /tmp/.arpingresult | tail -n1 | grep "response"`
+else
+	arpingSuccess=`cat /tmp/.arpingresult | tail -n1 | grep "reply"`
+fi
+
+if [ "$arpingSuccess" != "" ]
+then
+    isSuccess=`echo $arpingSuccess | cut -f2 -d" "`
+    if [ "$isSuccess" != "" ]
+    then
+        if [ $isSuccess -gt 0 ]
+        then
+            echo_t "ARPING_FROM_SOURCE:Success"
+        else
+            echo_t "ARPING_FROM_SOURCE:Failed 0 Reply"
+        fi
+    else
+        echo_t "ARPING_FROM_SOURCE:Failed no count"
+    fi
+else
+   echo_t "ARPING_FROM_SOURCE:Failed no Reply"
+fi
+
+rm -rf /tmp/.arpingresult
