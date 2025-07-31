@@ -266,29 +266,6 @@ struct _rbusValue
     rbusValueType_t type;
 };
 
-struct xle_attributes
-{
-  int devicemode;
-  int is_lte_wan_up;
-  int iswan_dhcp_client;
-  int iswan_dhcp_server;
-  int isdhcp_server_running;
-  char mesh_wan_status[128];
-  int is_ipv6present;
-  int is_ipv4present;
-  int is_ipv4_wan_route_table;
-  int is_ipv6_wan_route_table;
-  int is_ipv4_mesh_route_table;
-  int is_ipv6_mesh_route_table;
-  int is_ipv4_mesh_brWan_link;
-  int is_ipv6_mesh_brWan_link;
-  int is_default_route;
-  int is_mesh_default_route;
-  int cellular_restart_count;
-}xle_attributes;
-
-extern struct xle_attributes xle_params;
-
 using namespace std;
 using namespace testing;
 using ::testing::_;
