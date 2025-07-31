@@ -22,7 +22,7 @@
 
 extern "C" {
 
-struct xle_attributes
+/*struct xle_attributes
 {
   int devicemode;
   int is_lte_wan_up;
@@ -41,7 +41,7 @@ struct xle_attributes
   int is_default_route;
   int is_mesh_default_route;
   int cellular_restart_count;
-}xle_attributes;
+}xle_attributes;*/
 
 extern struct xle_attributes xle_params;
 }
