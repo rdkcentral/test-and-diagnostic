@@ -41,7 +41,7 @@ struct xle_attributes
   int is_default_route;
   int is_mesh_default_route;
   int cellular_restart_count;
-}
+};
 
 extern struct xle_attributes xle_params;
 }
