@@ -85,7 +85,8 @@ CcspTandD_Dml_Test_gtest_bin_SOURCES = CcspTandD_IP_DmlTest.cpp \
                                   $(top_builddir)/source/dmltad/cosa_wanconnectivity_rbus_apis.c \
                                   $(top_builddir)/source/dmltad/cosa_wanconnectivity_operations.c \
                                   $(top_builddir)/source/dmltad/cosa_wanconnectivity_apis.c \
-                                  $(top_builddir)/source/xle_selfheal/xle_selfheal_util.c
+                                  $(top_builddir)/source/xle_selfheal/xle_selfheal_util.c \
+                                  $(top_builddir)/source/xle_selfheal/xle_reliability_monitoring.c
 CcspTandD_Dml_Test_gtest_bin_LDADD = $(HOME)/usr/local/lib/libmock_ccsp_common.la \
                                   $(HOME)/usr/local/lib/libmock_rbus.la \
                                   $(HOME)/usr/local/lib/libmock_rdklogger.la \
