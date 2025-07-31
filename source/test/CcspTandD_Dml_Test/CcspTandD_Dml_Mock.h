@@ -266,7 +266,7 @@ struct _rbusValue
     rbusValueType_t type;
 };
 
-#ifdef __cplusplus
+/*#ifdef __cplusplus
 extern "C" {
 #endif
 
@@ -296,7 +296,7 @@ extern struct xle_attributes xle_params;
 
 #ifdef __cplusplus
 }
-#endif
+#endif*/
 
 using namespace std;
 using namespace testing;
