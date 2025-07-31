@@ -20,7 +20,7 @@
 #include <gtest/gtest.h>
 #include "CcspTandD_Dml_Mock.h"
 
-extern "C" {
+/*extern "C" {
 
 struct xle_attributes
 {
@@ -44,7 +44,7 @@ struct xle_attributes
 }xle_attributes;
 
 extern struct xle_attributes xle_params;
-}
+}*/
 
 class CcspTandD_XLE_SelfHealTest : public ::testing::Test {
 protected:
