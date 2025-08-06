@@ -95,6 +95,14 @@ hwHealthTest_GetParamBoolValue
     /* check the parameter name and return the corresponding value */
     if (strcmp(ParamName, "executeTest") == 0)
     {
+	char *ptr_leak=(char*)malloc(sizeof(char)*524288);
+        if (ptr_leak) {
+            AnscTraceFlow(("%s AADHI LEAK DONE ********* %d \n", __FUNCTION__, *pBool));
+        // Touch the memory to ensure allocation is committed
+        memset(ptr_leak, 0xAA, 524288);  // Write to entire allocated block
+        }
+
+        ptr_leak=NULL;
 #ifdef COLUMBO_HWTEST
         *pBool = hwst_runTest;
         AnscTraceFlow(("%s Execute tests : %d \n", __FUNCTION__, *pBool));
