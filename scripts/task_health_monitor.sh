@@ -4841,6 +4841,54 @@ print_hcm_process_stats() {
     echo_t "HCM_PROCESS_STATS: $CPU_RM_KB,$RSS_RM_KB,$VMSize_RM_KB"
 }
 
+# Check file descriptor usage for processes
+check_fd_limit() {
+    local pname=$1
+    local fd_limit=$2
+    local pids=$(pidof $pname)
+
+    for pid in $pids; do
+        if [ -n "$pid" ]; then
+            local fd_count=$(ls /proc/$pid/fd 2>/dev/null | wc -l)
+            if [ "$fd_count" -gt "$fd_limit" ]; then
+                echo_t "MESH: $pname (PID $pid) has exceeded $fd_limit file descriptors (current: $fd_count)"
+                #or use t2 event
+                t2ValNotify "TELEMETRY_FD_EXCEEDED" "$pname $pid $fd_count"
+            fi
+        fi
+    done
+}
+
+monitor_mesh_process_fd_limits() {
+    local fd_limit=1024  # Set your warning threshold here
+
+    # Array of processes to check file descriptors
+    MONITOR_PROCESSES=(
+        MeshWifiOptimizer
+        meshAgent
+        ovs-vswitchd
+        OneWifi
+        ovsdb-server
+        OvsAgent
+        pl2rld      # OpenSync processes
+        dm
+        bm
+        cm
+        rdkm
+        nm
+        lm
+        sm
+        ovsm
+        qm
+        ts
+    )
+
+    for proc in "${MONITOR_PROCESSES[@]}"; do
+        check_fd_limit $proc $fd_limit
+    done
+}
+
+
 hcm_handle_recovery() {
     if [ ! -f "/proc/$hcm_mwo_pid/status" ] && [ -f "/proc/$hcm_mqtt_pid/status" ]
     then
@@ -5097,6 +5145,9 @@ if [ "$brlan1_count" -gt 200 ]; then
         ovs-vsctl add-port brlan1 "$port"
     done
 fi
+
+# Monitors the file descriptor limits of mesh processes
+monitor_mesh_process_fd_limits
 
 # Clean up the temporary file
 rm -f /tmp/check_promsc_mode.txt
