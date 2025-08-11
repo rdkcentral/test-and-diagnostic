@@ -1385,7 +1385,6 @@
                         <writable>true</writable>
                     </parameter>
                 </parameters>
-              <objects>
              <object>
                 <name>MemoryIncreaseDetection</name>
                 <objectType>object</objectType>
@@ -1435,7 +1434,6 @@
                     </parameter>
                 </parameters>
             </object>
-            </objects>
         </object>
         <object>
             <name>LogBackup</name>
