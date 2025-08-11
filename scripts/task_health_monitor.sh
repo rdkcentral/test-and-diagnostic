@@ -4860,7 +4860,7 @@ check_fd_limit() {
 }
 
 monitor_mesh_process_fd_limits() {
-    local fd_limit=1024  # Set your warning threshold here
+    local fd_limit=819  # 80% of 1024 = 819
 
     # Array of processes to check file descriptors
     MONITOR_PROCESSES=(
