@@ -306,6 +306,7 @@ int main(int argc, char* argv[])
     AnscSetTraceLevel(CCSP_TRACE_LEVEL_INFO);
 #endif
 
+	t2_init("CcspTandDSsp");
     for (idx = 1; idx < argc; idx++)
     {
         if ( (strcmp(argv[idx], "-subsys") == 0) )
