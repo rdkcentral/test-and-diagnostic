@@ -69,6 +69,13 @@
 #include "ccsp_base_api.h"
 #include <rbus/rbus.h>
 #include "sysevent/sysevent.h"
+#include <ctype.h>
+#include <unistd.h>
+#include <limits.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <errno.h>
+#include <pthread.h>
 #include "rdk_debug.h"
 
 /* supporting only primary and secondary now*/
@@ -339,6 +346,19 @@ _WANCNCTVTY_CHK_GLOBAL_INTF_INFO
     struct _WANCNCTVTY_CHK_GLOBAL_INTF_INFO       *next;
 }
 WANCNCTVTY_CHK_GLOBAL_INTF_INFO,  *PWANCNCTVTY_CHK_GLOBAL_INTF_INFO;
+// typedef struct
+// _ASYNC_EXEC_CTXT {
+//     rbusMethodAsyncHandle_t asyncHandle;
+//     char script_path[PATH_MAX];
+// } ASYNC_EXEC_CTXT, *PASYNC_EXEC_CTXT;
+
+// typedef struct
+// _ASYNC_SERVICE_CTXT {
+//     rbusMethodAsyncHandle_t asyncHandle;
+//     char service[128];
+//     char operation[32];
+// } ASYNC_SERVICE_CTXT, *PASYNC_SERVICE_CTXT;
+
 
 /*************************************
     The actual function declaration
@@ -380,4 +400,6 @@ BOOL check_for_change_in_dns(char* alias, char* Ipv4_nameserver_list, char* IPv6
                                                        int newIPv4DnsCount, int newIPv6DnsCount);
 ANSC_STATUS CosaWanCnctvtyChk_DNS_UpdateEntry(char *InterfaceName, char* alias, char *IPv4_nameserver_list,
                                               char *IPv6_nameserver_list, int IPv4DnsServerCount, int IPv6DnsServerCount);
+// void* exec_script_thread(void* arg);
+// void* service_handler_thread(void* arg);
 #endif

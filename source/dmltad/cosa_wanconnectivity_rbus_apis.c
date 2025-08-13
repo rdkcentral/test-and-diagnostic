@@ -86,7 +86,9 @@ rbusDataElement_t WANCHK_Feature_Enabled_RbusElements[] =
     { "Device.Diagnostics.X_RDK_DNSInternet.WANInterface.{i}.RecordType", RBUS_ELEMENT_TYPE_PROPERTY, {WANCNCTVTYCHK_GetIntfHandler, WANCNCTVTYCHK_SetIntfHandler, NULL, NULL, NULL, NULL} },
     { "Device.Diagnostics.X_RDK_DNSInternet.WANInterface.{i}.ServerType", RBUS_ELEMENT_TYPE_PROPERTY, {WANCNCTVTYCHK_GetIntfHandler, WANCNCTVTYCHK_SetIntfHandler, NULL, NULL, NULL, NULL} },
     { "Device.X_RDK_DNSInternet.StartConnectivityCheck()", RBUS_ELEMENT_TYPE_METHOD, {NULL, NULL, NULL, NULL, NULL, WANCNCTVTYCHK_StartConnectivityCheck} },
-    { "Device.X_RDK_DNSInternet.StopConnectivityCheck()", RBUS_ELEMENT_TYPE_METHOD, {NULL, NULL, NULL, NULL, NULL, WANCNCTVTYCHK_StopConnectivityCheck} }
+    { "Device.X_RDK_DNSInternet.StopConnectivityCheck()", RBUS_ELEMENT_TYPE_METHOD, {NULL, NULL, NULL, NULL, NULL, WANCNCTVTYCHK_StopConnectivityCheck} },
+    {"Device.X_RDK_Method.ServiceHandler()", RBUS_ELEMENT_TYPE_METHOD, {NULL, NULL, NULL, NULL, NULL, Method_ServiceHandler} },
+    {"Device.X_RDK_Method.Execute()", RBUS_ELEMENT_TYPE_METHOD, {NULL, NULL, NULL, NULL, NULL, Method_ExecuteScriptHandler} }
 };
 
 /**********************************************************************

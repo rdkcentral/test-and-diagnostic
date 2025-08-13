@@ -40,4 +40,4 @@ endif
 
 libdmltad_la_DEPENDENCIES = $(EXTRA_DEPENDENCIES)
 libdmltad_la_LIBADD = $(libdmltad_la_DEPENDENCIES)
-libdmltad_la_LDFLAGS = -lccsp_common -lsyscfg -lsysevent -lsecure_wrapper -lrbus -lresolv -lev -lpcap
+libdmltad_la_LDFLAGS = -lccsp_common -lsyscfg -lsysevent -lsecure_wrapper -lrbus -lresolv -lev -lpcap -lmsgpackc -lwebconfig_framework

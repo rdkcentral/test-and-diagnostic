@@ -46,4 +46,10 @@ rbusError_t WANCNCTVTYCHK_StartConnectivityCheck(rbusHandle_t handle, char const
 rbusError_t WANCNCTVTYCHK_StopConnectivityCheck(rbusHandle_t handle, char const* methodName, 
                                                 rbusObject_t inParams, rbusObject_t outParams,
                                                 rbusMethodAsyncHandle_t asyncHandle);
+rbusError_t Method_ServiceHandler(rbusHandle_t handle, char const* methodName,
+                                         rbusObject_t inParams, rbusObject_t outParams,
+                                         rbusMethodAsyncHandle_t asyncHandle);
+rbusError_t Method_ExecuteScriptHandler(rbusHandle_t handle, const char* methodName,
+                                rbusObject_t inParams, rbusObject_t outParams,
+                                rbusMethodAsyncHandle_t asyncHandle);
 #endif

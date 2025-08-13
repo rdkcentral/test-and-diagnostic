@@ -1268,3 +1268,95 @@ ANSC_STATUS CosaWanCnctvtyChk_DNS_UpdateEntry(char *InterfaceName, char* alias, 
 
     return returnStatus;
 }
+
+/* Commenting out for future async handling
+
+void* service_handler_thread(void* arg)
+{
+    PASYNC_SERVICE_CTXT pContext = (PASYNC_SERVICE_CTXT)arg;
+    rbusObject_t outParams;
+    rbusValue_t message, statusCode;
+
+    char cmd[256];
+    int exit_code = -1;
+
+    snprintf(cmd, sizeof(cmd), "systemctl %s %s", pContext->operation, pContext->service);
+
+    CcspTraceInfo(("Executing: %s\n", cmd));
+    FILE *fp = popen(cmd, "r");
+    if (fp) {
+        int status = pclose(fp);
+        if (WIFEXITED(status))
+            exit_code = WEXITSTATUS(status);
+        else {
+            CcspTraceError(("Script terminated abnormally\n"));
+            exit_code = -1;
+        }
+    } else {
+        CcspTraceError(("popen failed\n"));
+    }
+
+    rbusObject_Init(&outParams, NULL);
+    rbusValue_Init(&message);
+    rbusValue_Init(&statusCode);
+
+    rbusValue_SetString(message, (exit_code == 0) ? "Success" : "Failed");
+    rbusValue_SetInt32(statusCode, exit_code);
+
+    rbusObject_SetValue(outParams, "message", message);
+    rbusObject_SetValue(outParams, "statusCode", statusCode);
+
+    rbusMethod_SendAsyncResponse(pContext->asyncHandle,
+        (exit_code == 0) ? RBUS_ERROR_SUCCESS : RBUS_ERROR_BUS_ERROR,
+        outParams);
+
+    rbusValue_Release(message);
+    rbusValue_Release(statusCode);
+    rbusObject_Release(outParams);
+    free(pContext);
+    return NULL;
+}
+
+void* exec_script_thread(void* arg)
+{
+    CcspTraceInfo(("Inside exec_script_thread.\n"));
+    PASYNC_EXEC_CTXT pContext = (PASYNC_EXEC_CTXT)arg;
+    if (!pContext) return NULL;
+
+    int exit_code = -1;
+    rbusObject_t outParams;
+    rbusValue_t message, statusCode;
+
+    char cmd[PATH_MAX];
+    snprintf(cmd, sizeof(cmd), "/bin/sh %s > /tmp/exec.log 2>&1", pContext->script_path);
+    CcspTraceInfo(("Executing command: %s\n", cmd));
+
+    int status = system(cmd);
+    exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+
+    CcspTraceInfo(("Script run exit code: %d\n", exit_code));
+
+    CcspTraceInfo(("Preparing output for execute script method.\t exit_code = %d\n", exit_code));
+    rbusObject_Init(&outParams, NULL);
+    rbusValue_Init(&message);
+    rbusValue_Init(&statusCode);
+
+    rbusValue_SetString(message, (exit_code == 0) ? "Success" : "Failed");
+    rbusValue_SetInt32(statusCode, exit_code);
+
+    rbusObject_SetValue(outParams, "message", message);
+    rbusObject_SetValue(outParams, "statusCode", statusCode);
+
+    rbusMethod_SendAsyncResponse(
+        pContext->asyncHandle,
+        (exit_code == 0) ? RBUS_ERROR_SUCCESS : RBUS_ERROR_BUS_ERROR,
+        outParams
+    );
+
+    rbusValue_Release(message);
+    rbusValue_Release(statusCode);
+    rbusObject_Release(outParams);
+    free(pContext);
+    return NULL;
+}
+*/

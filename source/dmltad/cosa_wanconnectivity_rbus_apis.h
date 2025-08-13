@@ -39,6 +39,8 @@
 
 
 #include "ansc_platform.h"
+#include "secure_wrapper.h"
+#include "safec_lib_common.h"
 #include <rbus/rbus.h>
 #include <cosa_wanconnectivity_apis.h>
 
