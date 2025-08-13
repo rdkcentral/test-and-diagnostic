@@ -43,6 +43,7 @@
 #include <stdbool.h>
 #include "syscfg/syscfg.h"
 #include "current_time.h"
+#include <telemetry_busmessage_sender.h>
 
 static long long stored_time = -1;
 char buf[MAX_BUF_SIZE] = {'\0'};
@@ -158,14 +159,21 @@ bool setSystemTime(time_t desired_epoch_time)
     struct timeval new_timeval;
     new_timeval.tv_sec = desired_epoch_time;
     new_timeval.tv_usec = 0;
-
+    struct timespec uptime;
+	
     if (settimeofday(&new_timeval, NULL) != 0) 
     {
         CcspTraceError(("Error setting system time\n"));
+		t2_event_d("SYST_ERROR_SYSTIME_FAIL",1);
         return false;
     }
 
-    CcspTraceInfo(("System time set successfully.\n"));
+     if (clock_gettime(CLOCK_MONOTONIC, &uptime) == 0)
+    {
+        long long uptime_ms = (long long)uptime.tv_sec * 1000LL + (uptime.tv_nsec / 1000000LL);
+    }
+    CcspTraceInfo(("System time set successfully.Uptime: %lld ms\n", uptime_ms));
+    t2_event_s("SYST_INFO_SETSYSTIME", uptime_ms); 
 
     return true;
 }
@@ -234,6 +242,7 @@ void UpdatedeviceTimeorbuildTime(long long currentEpochTime, long long build_epo
             //set system time as build time
             setSystemTime(stored_time);
             CcspTraceInfo(("System time set to build time: %lld\n", stored_time));
+			t2_event_s("SYST_INFO_SYSBUILD",stored_time);
         }
     } 
 }
@@ -291,6 +300,7 @@ void* updateTimeThread(void* arg)
           			if(setSystemTime(stored_time))
                                 {
           				CcspTraceInfo(("System time set as stored time: %lld after reboot as it is greater\n",stored_time));
+									t2_event_s("SYST_INFO_SYSLKG",stored_time);
                                 }
           		}
           		else
@@ -386,6 +396,7 @@ void* updateTimeThread(void* arg)
         	else
         	{
         		CcspTraceError(("System time update failed\n"));	
+				t2_event_d("SYST_ERROR_SYSTIME_FAIL",1);
         	}
         }
     }
