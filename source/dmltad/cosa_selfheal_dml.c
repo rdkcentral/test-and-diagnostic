@@ -2402,17 +2402,10 @@ MemoryIncreaseDetection_SetParamUlongValue
 {
     if( (strcmp(ParamName, "Intervals") == 0) || (strcmp(ParamName, "RSSThreshold") == 0) )
     {
-        if( !CosaIsProcAnalRunning() )
-        {
-            char res[24];
-            snprintf(res, sizeof(res), "%lu", uValue);
-            CosaWriteProcAnalConfig(ParamName, res);
-        }
-        else
-        {
-            CcspTraceWarning(("%s - ProcAnalyzer is already running, cannot change config\n",
-                                    __FUNCTION__));
-        }
+        char res[24];
+        snprintf(res, sizeof(res), "%lu", uValue);
+        CosaWriteProcAnalConfig(ParamName, res);
+        CcspTraceWarning(("%s - ProcAnalyzer setting Interval of %s for MemmoryIncreaseDectection \n", res, __FUNCTION__));
     }
     else
     {
@@ -2469,6 +2462,7 @@ MemoryIncreaseDetection_GetParamStringValue
             return *pUlSize;
         }
     } else {
+        CcspTraceWarning(("%s - MemmoryIncreaseDectection has no bucket list\n", res, __FUNCTION__));
         return 0;
     }
     return 0;
