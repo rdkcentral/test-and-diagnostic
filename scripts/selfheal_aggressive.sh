@@ -24,6 +24,11 @@ source /etc/waninfo.sh
 source /etc/utopia/service.d/event_handler_functions.sh
 DIBBLER_SERVER_CONF="/etc/dibbler/server.conf"
 
+if [ "$MODEL_NUM" = "SCER11BEL" ]
+then
+   source /etc/SelfHeal_Driver_Sanity_Check.sh
+fi
+
 SelfHeal_Support=`sysevent get SelfhelpWANConnectionDiagSupport`
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
 
@@ -1683,6 +1688,12 @@ do
     if [ -f /tmp/started_ssad ]; then
          self_heal_sedaemon
     fi
+
+    if [ "$MODEL_NUM" = "SCER11BEL" ]
+    then
+	self_heal_driver_sanity
+    fi
+
     STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
     echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec"
