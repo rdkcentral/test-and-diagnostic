@@ -44,6 +44,7 @@
 #define BUILD_TIME_PATH 	"/version.txt"
 #define TIMEOFFSET_VALUE 	"timeoffset_ethwan_enable"
 #define CLOCK_EVENT_PATH 	"/tmp/clock-event"
+define SYSTIME_SET_PATH 	"/tmp/systimeset"
 #define SLEEP_TIME 		3600
 #define MAX_BUF_SIZE		128
 
