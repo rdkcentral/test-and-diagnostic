@@ -160,6 +160,7 @@ bool setSystemTime(time_t desired_epoch_time)
     new_timeval.tv_sec = desired_epoch_time;
     new_timeval.tv_usec = 0;
     struct timespec uptime;
+	long long uptime_ms = 0;
 	
     if (settimeofday(&new_timeval, NULL) != 0) 
     {
