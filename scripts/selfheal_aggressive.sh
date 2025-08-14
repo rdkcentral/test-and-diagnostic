@@ -24,11 +24,6 @@ source /etc/waninfo.sh
 source /etc/utopia/service.d/event_handler_functions.sh
 DIBBLER_SERVER_CONF="/etc/dibbler/server.conf"
 
-if [ "$MODEL_NUM" = "SCER11BEL" ]
-then
-   source /etc/SelfHeal_Driver_Sanity_Check.sh
-fi
-
 SelfHeal_Support=`sysevent get SelfhelpWANConnectionDiagSupport`
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
 
@@ -1691,7 +1686,7 @@ do
 
     if [ "$MODEL_NUM" = "SCER11BEL" ]
     then
-	self_heal_driver_sanity
+         /etc/SelfHeal_Driver_Sanity_Check.sh &
     fi
 
     STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
