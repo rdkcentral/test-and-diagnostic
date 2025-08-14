@@ -29,6 +29,10 @@ APIs for Object:
 
 ***********************************************************************/
 
+#define filePath "/nvram/rats_enabled"
+#define DHCP_CLIENT_LIB "libdhcpclient.so"
+#define FLOW_MANAGER_LIB "libflowManager.so"
+
 BOOL
 DHCPClientv4Test_GetParamBoolValue
 	(
@@ -90,3 +94,32 @@ DHCPClientv6Test_GetParamStringValue
         char*                       pValue,
         ULONG*                      pUlSize
     );
+
+/***********************************************************************
+
+APIs for Object:
+
+    X_RDK_Test.FlowManagerTest.
+
+    *  FlowManagerTest_GetParamStringValue
+    *  DHCPClientv4Test_SetParamBoolValue
+
+***********************************************************************/
+
+ULONG
+FlowManagerTest_GetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pValue,
+        ULONG*                      pUlSize
+    );
+
+BOOL
+FlowManagerTest_SetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pString
+    );
+
