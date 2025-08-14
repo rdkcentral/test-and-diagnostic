@@ -49,6 +49,7 @@
 #include "tad_rbus_apis.h"
 #include "lowlatency_apis.h"
 #include "current_time.h"
+#include <telemetry_busmessage_sender.h>
 
 #ifdef DEVICE_PRIORITIZATION_ENABLED
 #include "device_prio_apis.h"
