@@ -233,6 +233,7 @@ long long str_to_int_conv(char *str_value)
 //Function to check if device time is greater or build time
 void UpdatedeviceTimeorbuildTime(long long currentEpochTime, long long build_epoch)
 {
+	char time_str[32];
     CcspTraceInfo(("Current Epoch Time: %lld, Build Epoch Time: %lld\n", (long long)currentEpochTime, (long long)build_epoch));
     timeoffset_ethwan_enable = (build_epoch > currentEpochTime) ? build_epoch : currentEpochTime;
     // Store initial timeoffset_ethwan_enable value
@@ -245,7 +246,8 @@ void UpdatedeviceTimeorbuildTime(long long currentEpochTime, long long build_epo
             //set system time as build time
             setSystemTime(stored_time);
             CcspTraceInfo(("System time set to build time: %lld\n", stored_time));
-			t2_event_s("SYST_INFO_SYSBUILD",stored_time);
+			snprintf(time_str, sizeof(time_str), "%lld", stored_time);
+			t2_event_s("SYST_INFO_SYSBUILD",time_str);
         }
     } 
 }
@@ -271,6 +273,7 @@ void get_sleep_time(unsigned int *sleep_time)
 void* updateTimeThread(void* arg) 
 {
     unsigned int sleep_time;
+	char time_str[32];
     pthread_detach(pthread_self());
     CcspTraceInfo(("updateTimeThread_create thread created successfully\n"));
     
@@ -303,7 +306,8 @@ void* updateTimeThread(void* arg)
           			if(setSystemTime(stored_time))
                                 {
           				CcspTraceInfo(("System time set as stored time: %lld after reboot as it is greater\n",stored_time));
-									t2_event_s("SYST_INFO_SYSLKG",stored_time);
+									snprintf(time_str, sizeof(time_str), "%lld", stored_time);
+									t2_event_s("SYST_INFO_SYSLKG",time_str);
                                 }
           		}
           		else
