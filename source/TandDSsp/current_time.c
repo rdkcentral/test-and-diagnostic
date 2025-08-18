@@ -162,7 +162,6 @@ bool setSystemTime(time_t desired_epoch_time)
     if (settimeofday(&new_timeval, NULL) == 0) 
     {
         CcspTraceError(("Error setting system time\n"));
-		t2_event_d("SYST_ERROR_SYSTIME_FAIL",1);
         return false;
     }
 
@@ -388,7 +387,6 @@ void* updateTimeThread(void* arg)
         	else
         	{
         		CcspTraceError(("System time update failed\n"));	
-				t2_event_d("SYST_ERROR_SYSTIME_FAIL",1);
         	}
         }
     }
