@@ -194,13 +194,12 @@ void setClockEventFile()
     }
 }
 //create /tmp/systimeset when system time is set
-void setSystimeSetFile() 
+void activateSystimeTarget() 
 {
-    CcspTraceInfo(("File /tmp/systimeset going to set\n"))
     // Check if file already exists
     if (access(SYSTIME_SET_PATH, F_OK) != -1) 
     {
-    	CcspTraceInfo(("File /tmp/systimeset already exists\n"));
+    	CcspTraceInfo(("File system time set file already exists\n"));
     }
     else
     {
@@ -209,11 +208,11 @@ void setSystimeSetFile()
     	if (fileDescriptor != -1) 
     	{
        		close(fileDescriptor);
-        	CcspTraceInfo(("File /tmp/systimeset created successfully\n"));
+        	CcspTraceInfo(("File system  time set file created successfully\n"));
     	} 
     	else 
     	{
-        	CcspTraceError(("Failed to create /tmp/systimeset file\n"));
+        	CcspTraceError(("Failed to create system time set file\n"));
     	}
     }
 }
@@ -326,8 +325,8 @@ void* updateTimeThread(void* arg)
         }
     }
 
-    CcspTraceInfo(("Setting system-time-set target activation\n"));
-    setSystimeSetFile();
+    CcspTraceInfo(("Activating system-time-set.target\n"));
+    activateSystimeTarget();
     while (1) 
     {	
     	get_sleep_time(&sleep_time);
