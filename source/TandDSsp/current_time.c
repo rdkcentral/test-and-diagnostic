@@ -159,10 +159,11 @@ bool setSystemTime(time_t desired_epoch_time)
     struct timeval new_timeval;
     new_timeval.tv_sec = desired_epoch_time;
     new_timeval.tv_usec = 0;
-
-
-    if (settimeofday(&new_timeval, NULL) == 0) 
-
+    struct timespec uptime;
+	long long uptime_ms = 0;
+	char str[32];
+	
+    if (settimeofday(&new_timeval, NULL) != 0) 
     {
         CcspTraceError(("Error setting system time\n"));
 		t2_event_d("SYST_ERROR_SYSTIME_FAIL",1);
@@ -392,7 +393,6 @@ void* updateTimeThread(void* arg)
         {
         	CcspTraceInfo(("Updating System time\n"));
         	updated_system_time = setSystemTime(stored_time);
-			updated_system_time = 0;
         	if (updated_system_time) 
         	{
         		// Create the file /tmp/clock-event
