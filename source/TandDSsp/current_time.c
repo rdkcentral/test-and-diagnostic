@@ -161,7 +161,7 @@ bool setSystemTime(time_t desired_epoch_time)
     new_timeval.tv_usec = 0;
     struct timespec uptime;
 	long long uptime_ms = 0;
-	char str[32];
+	char uptime_str[32];
 	
     if (settimeofday(&new_timeval, NULL) != 0) 
     {
@@ -175,8 +175,8 @@ bool setSystemTime(time_t desired_epoch_time)
         uptime_ms = (long long)uptime.tv_sec * 1000LL + (uptime.tv_nsec / 1000000LL);
     }
     CcspTraceInfo(("System time set successfully.Uptime: %lld ms\n", uptime_ms));
-	snprintf(str, sizeof(str), "%lld", uptime_ms);
-    t2_event_s("SYST_INFO_SETSYSTIME", str); 
+	snprintf(uptime_str, sizeof(uptime_str), "%lld", uptime_ms);
+    t2_event_s("SYST_INFO_SETSYSTIME", uptime_str); 
 
     return true;
 }
