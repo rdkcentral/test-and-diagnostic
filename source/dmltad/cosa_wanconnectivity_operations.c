@@ -73,7 +73,7 @@ static void cleanup_querynow(void *arg);
 static void cleanup_querynow_fd(void *arg);
 static void cleanup_activemonitor_ev(void *arg);
 static void cleanup_activequery(void *arg);
-static void cleanup_passivemonitor_ev(void *arg);
+static void cleanup_passivemonitor(void *arg);
 static void _get_shell_output (FILE *fp, char *buf, size_t len);
 void WanCnctvtyChk_CreateEthernetHeader (struct ethhdr *ethernet_header,char *src_mac, char *dst_mac, int protocol);
 void WanCnctvtyChk_CreatePseudoHeaderAndComputeUdpChecksum (int family, struct udphdr *udp_header, void *ip_header,
@@ -546,12 +546,18 @@ static void cleanup_activemonitor_ev(void *arg)
     pActive = NULL;
 }
 
-static void cleanup_passivemonitor_ev(void *arg)
+static void cleanup_passivemonitor(void *arg)
 {
     PWAN_CNCTVTY_CHK_PASSIVE_MONITOR pPassive = (PWAN_CNCTVTY_CHK_PASSIVE_MONITOR)arg;
-    WANCHK_LOG_INFO("stopping passive monitor loop\n");
     if (!pPassive)
         return;
+    WANCHK_LOG_INFO("passive monitor pcap cleanup\n");
+    if (pPassive->pcap)
+    {
+        pcap_freecode(&pPassive->bpf_fp);
+        pcap_close(pPassive->pcap);
+    }
+    WANCHK_LOG_INFO("stopping passive monitor loop\n");
     if (pPassive->bgtimer.data == pPassive)
     {
         ev_timer_stop(pPassive->loop, &pPassive->bgtimer);
@@ -793,7 +799,7 @@ void *wancnctvty_chk_passive_thread( void *arg )
     pPassive->bgtimer.repeat = (pIPInterface->PassiveMonitorTimeout / 1000);
     ev_timer_start (pPassive->loop, &pPassive->bgtimer);
 
-    pthread_cleanup_push(cleanup_passivemonitor_ev, pPassive);
+    pthread_cleanup_push(cleanup_passivemonitor, pPassive);
 
     ev_run (pPassive->loop, 0);
 
@@ -803,6 +809,11 @@ passive_mon_thrd_error:
 
     if (pPassive)
     {
+        if (pPassive->pcap)
+        {
+            pcap_freecode(&pPassive->bpf_fp);
+            pcap_close(pPassive->pcap);
+        }
         AnscFreeMemory(pPassive);
         pPassive = NULL;
     }
