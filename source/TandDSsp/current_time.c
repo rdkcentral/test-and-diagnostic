@@ -174,7 +174,7 @@ bool setSystemTime(time_t desired_epoch_time)
     {
         uptime_ms = (long long)uptime.tv_sec * 1000LL + (uptime.tv_nsec / 1000000LL);
     }
-    CcspTraceInfo(("System time set successfully.", uptime_ms));
+    CcspTraceInfo(("System time set successfully.\n"));
 	snprintf(uptime_str, sizeof(uptime_str), "%lld", uptime_ms);
     t2_event_s("SYST_INFO_SETSYSTIME", uptime_str); 
 
