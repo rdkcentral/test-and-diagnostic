@@ -2462,7 +2462,7 @@ MemoryIncreaseDetection_GetParamStringValue
             return *pUlSize;
         }
     } else {
-        CcspTraceWarning(("%s - MemmoryIncreaseDectection has no bucket list\n", res, __FUNCTION__));
+        CcspTraceWarning(("%s - MemmoryIncreaseDectection has no bucket list\n", __FUNCTION__));
         return 0;
     }
     return 0;
