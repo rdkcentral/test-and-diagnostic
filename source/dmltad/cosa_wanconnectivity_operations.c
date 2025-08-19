@@ -39,6 +39,11 @@
 #include <linux/if_packet.h>
 #include <ctype.h>
 
+/*core net lib*/
+#ifdef CORE_NET_LIB
+#include <libnet.h>
+#endif
+
 /*Macro's*/
 #define IP_V4_V6_DNS_FILTER "udp src port 53"
 #define PCAP_BUFFER_SIZE 51200
@@ -74,7 +79,9 @@ static void cleanup_querynow_fd(void *arg);
 static void cleanup_activemonitor_ev(void *arg);
 static void cleanup_activequery(void *arg);
 static void cleanup_passivemonitor(void *arg);
+#ifndef CORE_NET_LIB
 static void _get_shell_output (FILE *fp, char *buf, size_t len);
+#endif
 void WanCnctvtyChk_CreateEthernetHeader (struct ethhdr *ethernet_header,char *src_mac, char *dst_mac, int protocol);
 void WanCnctvtyChk_CreatePseudoHeaderAndComputeUdpChecksum (int family, struct udphdr *udp_header, void *ip_header,
                                                         unsigned char *data, unsigned int dataSize);
@@ -1358,7 +1365,6 @@ unsigned int send_query_frame_raw_pkt(struct query *query_info,struct mk_query *
     struct ethhdr ethernet_header ={0};
     unsigned int pkt_len = 0;
     int ip_offset = 0;
-    FILE *fp = NULL;
 
     char gw_addr[BUFLEN_64] = {0};
     memset(gw_addr, 0, sizeof(gw_addr));
@@ -1389,6 +1395,37 @@ unsigned int send_query_frame_raw_pkt(struct query *query_info,struct mk_query *
              calling own ping utily to send icmp v4/v6 echo with worst time of 20ms*/
             _send_ping(gw_addr,query_info->skt_family,query_info->ifname);
         }
+#ifdef CORE_NET_LIB
+        struct neighbour_info *neighbors = malloc(sizeof(struct neighbour_info));
+        if (neighbors == NULL) {
+            WANCHK_LOG_DBG("%s: Failed to allocate memory for neighbors struct\n", __FUNCTION__);
+            return CNL_STATUS_FAILURE;
+        }
+
+        *neighbors = (struct neighbour_info){0};
+        libnet_status status;
+        int af = query_info->skt_family;
+
+        status = neighbour_get_list(neighbors, NULL, query_info->ifname, af);
+        if (status != CNL_STATUS_SUCCESS || neighbors->neigh_arr == NULL) {
+            WANCHK_LOG_DBG("%s: neighbour_get_list failed on interface %s for %s\n", __FUNCTION__, query_info->ifname, (af == AF_INET) ? "IPv4" : "IPv6");
+            neighbour_free_neigh(neighbors);
+            return CNL_STATUS_FAILURE;
+        }
+
+        for (int i = 0; i < neighbors->neigh_count; i++) {
+            char *local = neighbors->neigh_arr[i].local;
+            char *mac   = neighbors->neigh_arr[i].mac;
+
+            if (local && mac && strcmp(local, gw_addr) == 0) {
+              snprintf(dstMac, sizeof(dstMac), "%s", mac);
+              WANCHK_LOG_DBG("%s: Match found for gw_addr %s. MAC: %s\n", __FUNCTION__, gw_addr, dstMac);
+              break;
+            }
+        }
+        neighbour_free_neigh(neighbors);
+#else
+        FILE *fp = NULL;
         if (query_info->skt_family == AF_INET) {
             fp = v_secure_popen("r","ip -4 neigh show %s dev %s | cut -d ' ' -f 3", gw_addr,
                                                                         query_info->ifname);
@@ -1402,7 +1439,7 @@ unsigned int send_query_frame_raw_pkt(struct query *query_info,struct mk_query *
             _get_shell_output(fp, dstMac, sizeof(dstMac));
             v_secure_pclose(fp);
         }
-
+#endif
         if (!strlen(dstMac))
         {
             if (!retry_count)
@@ -2639,6 +2676,7 @@ ANSC_STATUS wancnctvty_chk_monitor_result_update(ULONG InstanceNumber,monitor_re
     return ANSC_STATUS_SUCCESS;
 }
 
+#ifndef CORE_NET_LIB
 static void _get_shell_output (FILE *fp, char *buf, size_t len)
 {
     if (len > 0)
@@ -2652,6 +2690,7 @@ static void _get_shell_output (FILE *fp, char *buf, size_t len)
               buf[len - 1] = 0;
       }
 }
+#endif
 
 static int64_t clock_mono_ms()
 {
