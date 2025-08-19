@@ -170,7 +170,7 @@ bool setSystemTime(time_t desired_epoch_time)
         return false;
     }
 
-     if (clock_gettime(CLOCK_MONOTONIC, &uptime) == 0)
+     if (clock_gettime(CLOCK_MONOTONIC_RAW, &uptime) == 0)
     {
         uptime_ms = (long long)uptime.tv_sec * 1000LL + (uptime.tv_nsec / 1000000LL);
     }
