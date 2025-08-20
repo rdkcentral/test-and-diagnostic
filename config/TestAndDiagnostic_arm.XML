@@ -1530,9 +1530,9 @@
                             <name>Result</name>
                             <type>string(120)</type>
                             <syntax>string</syntax>
-		                </parameter>
+                        </parameter>
                     </parameters>
-	            </object>
+                </object>
                 <object>
                     <name>DHCPClientv6Test</name>
                     <objectType>object</objectType>
@@ -1552,9 +1552,30 @@
                             <name>Result</name>
                             <type>string(160)</type>
                             <syntax>string</syntax>
-		                </parameter>
+                        </parameter>
                     </parameters>
-	            </object>
+                </object>
+                <object>
+                    <name>FlowManagerTest</name>
+                    <objectType>object</objectType>
+                    <functions>
+                        <func_GetParamStringValue>FlowManagerTest_GetParamStringValue</func_GetParamStringValue>
+                        <func_SetParamStringValue>FlowManagerTest_SetParamStringValue</func_SetParamStringValue>
+                    </functions>
+                    <parameters>
+                        <parameter>
+                            <name>Run</name>
+                            <type>string(180)</type>
+                            <syntax>string</syntax>
+                            <writable>true</writable>
+                        </parameter>
+                        <parameter>
+                            <name>Result</name>
+                            <type>string(120)</type>
+                            <syntax>string</syntax>
+                        </parameter>
+                    </parameters>
+                </object>
             </objects>
         </object>
     </objects>

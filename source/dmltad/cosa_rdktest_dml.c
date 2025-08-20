@@ -23,7 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <unistd.h> 
+#include <unistd.h>
 #include "ansc_platform.h"
 #include "plugin_main_apis.h"
 #include "ansc_string_util.h"
@@ -33,8 +33,6 @@
 #include "platform_hal.h"
 #include "safec_lib_common.h"
 #include "cosa_rdktest_dml.h"
-
-#define filePath "/nvram/rats_enabled"
 
 BOOL isTestEnabled() {
     if (access(filePath, F_OK) == 0) {
@@ -105,9 +103,9 @@ DHCPClientv4Test_GetParamBoolValue
         }
         BOOL (*is_dhcpClientv4Test_running)();
         // Load the shared library
-        handle = dlopen("libdhcpclient.so", RTLD_LAZY);
+        handle = dlopen(DHCP_CLIENT_LIB, RTLD_LAZY);
         if (!handle) {
-            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable", __FUNCTION__));
+            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable\n", __FUNCTION__));
             return FALSE;
         }
         // Clear any existing error
@@ -125,7 +123,7 @@ DHCPClientv4Test_GetParamBoolValue
         *pBool = is_dhcpClientv4Test_running();
         dlclose(handle);
 	    return TRUE;
-    } 
+    }
 
     /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
     return FALSE;
@@ -169,7 +167,7 @@ DHCPClientv4Test_GetParamStringValue
     errno_t rc = -1;
     void *handle = NULL;
     char *error = NULL;
-    
+
     if (strcmp(ParamName, "Result") == 0)
     {
         // Check Test enabled
@@ -180,12 +178,12 @@ DHCPClientv4Test_GetParamStringValue
             ERR_CHK(rc);
             return 0;
         }
-        
+
         const char* (*get_dhcpClientv4Test_result)();
         // Load the shared library
-        handle = dlopen("libdhcpclient.so", RTLD_LAZY);
+        handle = dlopen(DHCP_CLIENT_LIB, RTLD_LAZY);
         if (!handle) {
-            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable", __FUNCTION__));
+            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable\n", __FUNCTION__));
             char* result = "Library for DHCPClient test is unavailable";
             rc = strcpy_s(pValue, *pUlSize, result);
             ERR_CHK(rc);
@@ -285,14 +283,14 @@ DHCPClientv4Test_SetParamBoolValue
             AnscTraceFlow(("%s : Test not enabled, skipping test\n", __FUNCTION__));
             return FALSE;
         }
-        
+
         int (*Trigger_dhcpClientv4test)();
         BOOL (*is_dhcpClientv4Test_running)();
 
         // Load the shared library
-        handle = dlopen("libdhcpclient.so", RTLD_LAZY);
+        handle = dlopen(DHCP_CLIENT_LIB, RTLD_LAZY);
         if (!handle) {
-            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable",__FUNCTION__));
+            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable\n",__FUNCTION__));
             return FALSE;
         }
 
@@ -341,7 +339,7 @@ DHCPClientv4Test_SetParamBoolValue
 			}
 			else
 			{
-				AnscTraceFlow(("%s : DHCPClientv4 test is already running \n", __FUNCTION__));
+				AnscTraceFlow(("%s : DHCPClientv4 test is already running\n", __FUNCTION__));
                 dlclose(handle);
             }
             return TRUE;
@@ -413,9 +411,9 @@ DHCPClientv6Test_GetParamBoolValue
     {
         BOOL (*is_dhcpClientv6Test_running)();
         // Load the shared library
-        handle = dlopen("libdhcpclient.so", RTLD_LAZY);
+        handle = dlopen(DHCP_CLIENT_LIB, RTLD_LAZY);
         if (!handle) {
-            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable", __FUNCTION__));
+            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable\n", __FUNCTION__));
             return FALSE;
         }
         // Clear any existing error
@@ -433,7 +431,7 @@ DHCPClientv6Test_GetParamBoolValue
         *pBool = is_dhcpClientv6Test_running();
         dlclose(handle);
 	    return TRUE;
-    } 
+    }
 
     /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
     return FALSE;
@@ -490,9 +488,9 @@ DHCPClientv6Test_GetParamStringValue
 
         const char* (*get_dhcpClientv6Test_result)();
         // Load the shared library
-        handle = dlopen("libdhcpclient.so", RTLD_LAZY);
+        handle = dlopen(DHCP_CLIENT_LIB, RTLD_LAZY);
         if (!handle) {
-            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable", __FUNCTION__));
+            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable\n", __FUNCTION__));
             char* result = "Library for DHCPClient test is unavailable";
             rc = strcpy_s(pValue, *pUlSize, result);
             ERR_CHK(rc);
@@ -594,9 +592,9 @@ DHCPClientv6Test_SetParamBoolValue
         BOOL (*is_dhcpClientv6Test_running)();
 
         // Load the shared library
-        handle = dlopen("libdhcpclient.so", RTLD_LAZY);
+        handle = dlopen(DHCP_CLIENT_LIB, RTLD_LAZY);
         if (!handle) {
-            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable", __FUNCTION__));
+            AnscTraceFlow(("%s : Library for DHCPClient test is unavailable\n", __FUNCTION__));
             return FALSE;
         }
 
@@ -654,3 +652,279 @@ DHCPClientv6Test_SetParamBoolValue
     }
     return TRUE;
 }
+
+/***********************************************************************
+
+ APIs for Object:
+
+    X_RDK_Test.FlowManagerTest.
+
+    *  FlowManagerTest_GetParamStringValue
+    *  FlowManagerTest_SetParamStringValue
+
+***********************************************************************/
+/**********************************************************************
+    caller:     owner of this object
+    prototype:
+        ULONG
+        FlowManagerTest_GetParamStringValue
+            (
+                ANSC_HANDLE                 hInsContext,
+                char*                       ParamName,
+                char*                       pValue,
+                ULONG*                      pUlSize
+            );
+    description:
+        This function is called to retrieve string parameter value;
+    argument:   ANSC_HANDLE                 hInsContext,
+                The instance handle;
+                char*                       ParamName,
+                The parameter name;
+                char*                       pValue,
+                The string value buffer;
+                ULONG*                      pUlSize
+                The buffer of length of string value;
+                Usually size of 1023 will be used.
+                If it's not big enough, put required size here and return 1;
+    return:     0 if succeeded;
+                -1 if not supported.
+**********************************************************************/
+ULONG
+FlowManagerTest_GetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pValue,
+        ULONG*                      pUlSize
+    )
+{
+    errno_t rc = -1;
+    void *handle = NULL;
+    char *error = NULL;
+    if (strcmp(ParamName, "Run") == 0)
+    {
+        // Check Test enabled
+        if (!isTestEnabled()) {
+            AnscTraceFlow(("%s : Test not enabled, skipping test\n", __FUNCTION__));
+            char* result = "Test not enabled";
+            rc = strcpy_s(pValue, *pUlSize, result);
+            ERR_CHK(rc);
+            return 0;
+        }
+
+        const char* (*get_flowManagerTest_run)();
+        // Load the shared library
+        handle = dlopen(FLOW_MANAGER_LIB, RTLD_LAZY);
+        if (!handle) {
+            AnscTraceFlow(("%s : Library for FlowManager test is unavailable\n", __FUNCTION__));
+            char* result = "Library for FlowManager test is unavailable";
+            rc = strcpy_s(pValue, *pUlSize, result);
+            ERR_CHK(rc);
+            return 0;
+        }
+        // Clear any existing error
+        dlerror();
+
+        // Get the function pointer
+        *(void **) (&get_flowManagerTest_run) = dlsym(handle, "get_flowManagerTest_run");
+        if ((error = dlerror()) != NULL)  {
+            fprintf(stderr, "%s\n", error);
+            dlclose(handle);
+            return -1;
+        }
+
+        /* collect value */
+        const char* run = get_flowManagerTest_run();
+        if (run == NULL) {
+            return -1;
+        }
+        rc = strcpy_s(pValue, *pUlSize, run);
+        ERR_CHK(rc);
+        dlclose(handle);
+        free((char*)run);
+        run = NULL;
+        return 0;
+    }
+    else if (strcmp(ParamName, "Result") == 0)
+    {
+        const char* (*get_flowManagerTest_result)();
+        // Load the shared library
+        handle = dlopen(FLOW_MANAGER_LIB, RTLD_LAZY);
+        if (!handle) {
+            AnscTraceFlow(("%s : Library for FlowManager test is unavailable\n", __FUNCTION__));
+            char* result = "Library for FlowManager test is unavailable";
+            rc = strcpy_s(pValue, *pUlSize, result);
+            ERR_CHK(rc);
+            return 0;
+        }
+        // Clear any existing error
+        dlerror();
+
+        // Get the function pointer
+        *(void **) (&get_flowManagerTest_result) = dlsym(handle, "get_flowManagerTest_result");
+        if ((error = dlerror()) != NULL)  {
+            fprintf(stderr, "%s\n", error);
+            dlclose(handle);
+            return -1;
+        }
+        /* collect value */
+        const char* result = get_flowManagerTest_result();
+        if (result == NULL) {
+            return -1;
+        }
+        rc = strcpy_s(pValue, *pUlSize, result);
+        ERR_CHK(rc);
+        dlclose(handle);
+        free((char*)result);
+        result = NULL;
+        return 0;
+    }
+    /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
+    return -1;
+ }
+
+ /**********************************************************************
+
+    caller:     owner of this object
+
+    prototype:
+
+        BOOL
+        FlowManagerTest_SetParamStringValue
+            (
+                ANSC_HANDLE                 hInsContext,
+                char*                       ParamName,
+                char*                       pString
+            );
+
+    description:
+
+        This function is called to set string parameter value;
+
+    argument:   ANSC_HANDLE                 hInsContext,
+                The instance handle;
+
+                char*                       ParamName,
+                The parameter name;
+
+                char*                       pString
+                The updated string value;
+
+    return:     TRUE if succeeded.
+
+**********************************************************************/
+typedef struct {
+    void *handle;
+    BOOL (*is_flowManagerTest_running)();
+} fmThreadArgs;
+
+// Function to monitor the thread and close the handle
+void *monitor_fmthread(void *args) {
+    fmThreadArgs *threadArgs = (fmThreadArgs *)args;
+
+    // Wait for the thread in the shared library to complete
+    while (threadArgs->is_flowManagerTest_running()) {
+        sleep(5); // Poll every 5 second
+    }
+
+    // Close the shared library handle
+    dlclose(threadArgs->handle);
+    free(threadArgs);
+    return NULL;
+}
+
+BOOL
+FlowManagerTest_SetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pString
+    )
+{
+    void *handle = NULL;
+    char *error = NULL;
+    if(strcmp(ParamName, "Run") == 0)
+    {
+        // Check Test enabled
+        if (!isTestEnabled()) {
+            AnscTraceFlow(("%s : Test not enabled, skipping test\n", __FUNCTION__));
+            return FALSE;
+        }
+
+        int (*TriggerFlowManagerTest)(char*);
+        BOOL (*is_flowManagerTest_running)();
+
+        // Load the shared library
+        handle = dlopen(FLOW_MANAGER_LIB, RTLD_LAZY);
+        if (!handle) {
+            AnscTraceFlow(("%s : Library for FlowManager test is unavailable\n",__FUNCTION__));
+            return TRUE;
+        }
+
+        // Clear any existing error
+        dlerror();
+
+        // Get the function pointer
+        *(void **) (&TriggerFlowManagerTest) = dlsym(handle, "TriggerFlowManagerTest");
+        if ((error = dlerror()) != NULL)  {
+            fprintf(stderr, "%s\n", error);
+            dlclose(handle);
+            return FALSE;
+        }
+
+        // Get the function pointer
+        *(void **) (&is_flowManagerTest_running) = dlsym(handle, "is_flowManagerTest_running");
+        if ((error = dlerror()) != NULL)  {
+            fprintf(stderr, "%s\n", error);
+            dlclose(handle);
+            return FALSE;
+        }
+
+        if( pString != NULL)
+        {
+            // Validate mandatory fields (srcip and dstip)
+            if (strstr(pString, "srcip=") == NULL || strstr(pString, "dstip=") == NULL) {
+                AnscTraceWarning(("%s : Missing mandatory fields (srcip or dstip).\n", __FUNCTION__));
+                dlclose(handle);
+                return FALSE;
+            }
+
+            AnscTraceFlow(("Input string: %s\n", pString));
+
+			if( FALSE == is_flowManagerTest_running() )
+			{
+			    int status = TriggerFlowManagerTest(pString);
+                if( status != 0 ) {
+                    AnscTraceWarning(("%s : Failed to start FlowManager test\n", __FUNCTION__));
+                    dlclose(handle);
+                    return FALSE;
+                }
+                // Create a detached thread to monitor the test and close the handle
+                pthread_t monitorThread;
+                fmThreadArgs *threadArgs = (fmThreadArgs *)malloc(sizeof(fmThreadArgs));
+                threadArgs->handle = handle;
+                threadArgs->is_flowManagerTest_running = is_flowManagerTest_running;
+
+                if (pthread_create(&monitorThread, NULL, monitor_fmthread, threadArgs) != 0) {
+                    AnscTraceWarning(("%s : Failed to create thread to monitor FlowManager test\n", __FUNCTION__));
+                    free(threadArgs);
+                    dlclose(handle);
+                    return FALSE;
+                }
+                pthread_detach(monitorThread);
+			}
+			else
+			{
+				AnscTraceFlow(("%s : FlowManager test is already running\n", __FUNCTION__));
+                dlclose(handle);
+                return FALSE;
+            }
+            return TRUE;
+		}
+        dlclose(handle);
+    }
+    return FALSE;
+}
+
+
+
