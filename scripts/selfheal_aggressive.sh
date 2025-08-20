@@ -1684,7 +1684,7 @@ do
          self_heal_sedaemon
     fi
 
-    if [ "$MODEL_NUM" = "SCER11BEL" ]
+    if [ -f /etc/SelfHeal_Driver_Sanity_Check.sh ]; then
     then
          /etc/SelfHeal_Driver_Sanity_Check.sh &
     fi
