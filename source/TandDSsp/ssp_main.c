@@ -49,6 +49,7 @@
 #include "tad_rbus_apis.h"
 #include "lowlatency_apis.h"
 #include "current_time.h"
+#include <telemetry_busmessage_sender.h>
 
 #ifdef DEVICE_PRIORITIZATION_ENABLED
 #include "device_prio_apis.h"
@@ -306,6 +307,7 @@ int main(int argc, char* argv[])
     AnscSetTraceLevel(CCSP_TRACE_LEVEL_INFO);
 #endif
 
+	t2_init("CcspTandDSsp");
     for (idx = 1; idx < argc; idx++)
     {
         if ( (strcmp(argv[idx], "-subsys") == 0) )
