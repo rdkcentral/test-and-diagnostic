@@ -34,7 +34,7 @@ CcspTandDSsp_CFLAGS = $(DEVICE_PRIORITIZATION_CFLAGS)
 endif
 
 CcspTandDSsp_SOURCES = tad_rbus_apis.c ssp_messagebus_interface.c ssp_action_priv.c ssp_main.c ssp_action.c ssp_messagebus_interface_priv.c dm_pack_datamodel.c current_time.c
-CcspTandDSsp_LDFLAGS = -lccsp_common -ldl -rdynamic -lrbus -lsyscfg
+CcspTandDSsp_LDFLAGS = -lccsp_common -ldl -rdynamic -lrbus -lsyscfg -lsecure_wrapper -ltelemetry_msgsender
 
 CcspTandDSsp_DEPENDENCIES = ${top_builddir}/source/LatencyMeasurement/TR-181/libLowLatency.la \
                             ${top_builddir}/source/LatencyMeasurement/ServiceMonitor/libCcspTandDSsp_ServiceMonitor.la 
