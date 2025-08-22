@@ -49,10 +49,31 @@ t2ValNotify() {
     fi
 }
 
+get_dmcli_value() {
+    param=$1
+    retries=3
+    delay=5
+    value=""
+    attempt=1
+    while [ $retries -gt 0 ]; do
+        value=$(dmcli eRT retv "$param")
+        if [ -n "$value" ]; then
+            echo "$value"
+            return 0
+        fi
+        echo_t "Warning: dmcli returned empty for parameter '$param'. Retrying attempt $attempt in $delay seconds..."
+        sleep $delay
+        retries=$((retries - 1))
+        attempt=$((attempt + 1))
+    done
+    echo ""
+    return 1
+}
+
 CheckandSetCMStatus()
 {
 	cm_status=""
-	cm_status=`dmcli eRT retv Device.X_CISCO_COM_CableModem.CMStatus`
+	cm_status=$(get_dmcli_value "Device.X_CISCO_COM_CableModem.CMStatus")
 	echo_t "cm_status=$cm_status"
 
 	if [ "$cm_status" == "OPERATIONAL" ];then
@@ -70,14 +91,14 @@ CheckandSetCMIPStatus()
 	cm_ipv4=""
 	cm_ipv6=""
 	cm_prov=""
-	cm_prov=`dmcli eRT retv Device.X_CISCO_COM_CableModem.ProvIpType`
+	cm_prov=$(get_dmcli_value "Device.X_CISCO_COM_CableModem.ProvIpType")
 
 	echo_t "cm_prov=$cm_prov"
         
 # checking also if cm prove type is APM(Alternate provision mode) in docsis 3.1 version of AXB6 and CMXB7
 	if [ "x$cm_prov" == "xIPv4" ] || [ "x$cm_prov" == "xIPV4" ] || [ "x$cm_prov" == "xAPM" ];then
 
-		cm_ipv4=`dmcli eRT retv Device.X_CISCO_COM_CableModem.IPAddress`
+		cm_ipv4=$(get_dmcli_value "Device.X_CISCO_COM_CableModem.IPAddress")
 		echo_t "cm_ipv4=$cm_ipv4"
 
 		if [ "$cm_ipv4" != "" ] && [ "$cm_ipv4" != "0.0.0.0" ];then
@@ -91,7 +112,7 @@ CheckandSetCMIPStatus()
 
 	if [ "x$cm_prov" == "xIPv6" ] || [ "x$cm_prov" == "xIPV6" ] || [ "x$cm_prov" == "xAPM" ];then
 
-		cm_ipv6=`dmcli eRT retv Device.X_CISCO_COM_CableModem.IPv6Address`
+		cm_ipv6=$(get_dmcli_value "Device.X_CISCO_COM_CableModem.IPv6Address")
 		echo_t "cm_ipv6=$cm_ipv6"
 
 		if [ "$cm_ipv6" != "" ] && [ "$cm_ipv6" != "0000::0000" ];then
@@ -201,7 +222,7 @@ CheckandSetConnectivityStatus() {
 
     # Get WebPA and Xconf URLs
     webpa_url=`dmcli eRT retv Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL`
-    xconf_url=`dmcli eRT retv Device.DeviceInfo.X_RDKCENTRAL-COM_Syndication.XconfURL`
+    xconf_url=`dmcli eRT retv Device.DeviceInfo.X_RDKCENTRAL-COM_Syndication.XconfURL | sed -e 's~http[s]*://~~'`
     ntp_url=`dmcli eRT retv Device.Time.NTPServer1`
 
     # Log empty URL warnings
@@ -341,6 +362,9 @@ CheckAndRebootIfNeeded()
 	if [ -z "$1" ]; then
 	    echo_t "  CMStatus = $current_CMstatus"
 	    echo_t "  CMIPStatus = $current_CMIPstatus"
+	    if [ $current_CMIPstatus -eq 0 ]; then
+		echo_t "CM is Operational,but CMIPStatus is not healthy, checking WAN and Connectivity status..."
+	    fi
 	fi
 	echo_t "  WANIPStatus = $current_WANIPstatus"
 	echo_t "  ConnectivityStatus = $current_ConnectivityStatus"
@@ -348,24 +372,19 @@ CheckAndRebootIfNeeded()
 	fail_status=""
 	IsNeedtoRebootDevice=0
 
-	if [ -z "$1" ]; then
-            echo_t "Checking Status with CM Operational Mode"
-            if [ $current_CMstatus -eq 0 ] || [ $current_CMIPstatus -eq 0 ] || [ $current_WANIPstatus -eq 0 ] || [ $current_ConnectivityStatus -eq 0 ]; then
-                [ $current_CMstatus -eq 0 ] && fail_status="${fail_status}CM "
-                [ $current_CMIPstatus -eq 0 ] && fail_status="${fail_status}CMIP "
-                [ $current_WANIPstatus -eq 0 ] && fail_status="${fail_status}WANIP "
-                [ $current_ConnectivityStatus -eq 0 ] && fail_status="${fail_status}Connectivity "
-                IsNeedtoRebootDevice=1
-            fi
-        else
-            echo_t "Checking Status without CM Operational Mode"
-            if [ $current_WANIPstatus -eq 0 ] || [ $current_ConnectivityStatus -eq 0 ]; then
-                [ $current_WANIPstatus -eq 0 ] && fail_status="${fail_status}WANIP "
-                [ $current_ConnectivityStatus -eq 0 ] && fail_status="${fail_status}Connectivity "
-                echo_t "WAN and Connectivity are not recovered, checking CM status again..."
-                return
-            fi
-        fi
+	echo_t "Checking WAN and Connectivity status..."
+	if [ $current_WANIPstatus -eq 0 ] || [ $current_ConnectivityStatus -eq 0 ]; then
+            [ $current_WANIPstatus -eq 0 ] && fail_status="${fail_status}WANIP "
+            [ $current_ConnectivityStatus -eq 0 ] && fail_status="${fail_status}Connectivity "
+
+	    if [ -z "$1" ]; then
+		IsNeedtoRebootDevice=1
+		echo_t "RDKB_SELFHEAL_BOOTUP : Device is not healthy, failure in: ${fail_status}"
+	    else
+		echo_t "WAN and Connectivity are not recovered, checking CM status again..."
+		return
+	    fi
+	fi
 
 
 	if [ $IsNeedtoRebootDevice -eq 1 ]; then
@@ -403,6 +422,7 @@ CheckandRebootBasedOnCurrentHealth()
         current_CMstatus=$((bitmask & CMStatus_mask))
 
 	if [ "$current_CMstatus" -eq 0 ]; then
+	    echo "CM still not operational. Checking other status..."
             CheckAndRebootIfNeeded "skip_cm_ip_check"
         fi
     done
