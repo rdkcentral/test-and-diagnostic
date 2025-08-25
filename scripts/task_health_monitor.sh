@@ -4933,6 +4933,22 @@ if [ $precondition_check_mesh -eq 1 ]; then
     fi
 fi
 
+self_heal_rfc_sync() {
+    if [ -f /tmp/.rfcSyncDone ]; then
+        echo_t "RDKB_SELFHEAL : RFC sync is completed"
+    else
+        if [ ! -f /tmp/rfc_selfhealLock ]; then
+            echo_t "RDKB_SELFHEAL : Triggering RFC sync"
+            if [ -f /usr/ccsp/tad/selfheal_rfc_sync.sh ]; then
+                sh /usr/ccsp/tad/selfheal_rfc_sync.sh &
+            else
+                echo_t "RDKB_SELFHEAL : selfheal_rfc_sync.sh script is not present"
+            fi
+        else
+            echo_t "RDKB_SELFHEAL : RFC sync is already in progress"
+        fi
+    fi
+}
 
 #Restart MeshWifi services, if the Wifi_VIf_Config and Wifi_VIF_State parameters are not matching
 
@@ -5050,6 +5066,8 @@ self_heal_ethwan_mode_recover
 if [ "$T2_ENABLE" = "true" ]; then
     self_heal_t2
 fi
+
+self_heal_rfc_sync
 
 #checking MAPT is enabled or not
 if [ "$(syscfg get MAPT_Enable)" = "true" ]; then
