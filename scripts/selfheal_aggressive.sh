@@ -1685,7 +1685,6 @@ do
     fi
 
     if [ -f /etc/SelfHeal_Driver_Sanity_Check.sh ]; then
-    then
          /etc/SelfHeal_Driver_Sanity_Check.sh &
     fi
 
