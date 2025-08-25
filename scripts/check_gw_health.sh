@@ -21,6 +21,7 @@
 source /etc/log_timestamp.sh
 source /etc/utopia/service.d/log_env_var.sh
 source /etc/waninfo.sh
+source /usr/ccsp/tad/corrective_action.sh
 
 WAN_INTERFACE=$(getWanInterfaceName)
 
@@ -28,7 +29,7 @@ WAN_INTERFACE=$(getWanInterfaceName)
 CMStatus_mask=$((1<<0))
 CMIPStatus_mask=$((1<<1))
 WANIPStatus_mask=$((1<<2))
-IPv4PingStatus_mask=$((1<<3))
+ConnectivityStatus_mask=$((1<<3))
 
 bitmask=0
 stored_gw_health=0
@@ -48,10 +49,31 @@ t2ValNotify() {
     fi
 }
 
+get_dmcli_value() {
+    param=$1
+    retries=3
+    delay=5
+    value=""
+    attempt=1
+    while [ $retries -gt 0 ]; do
+        value=$(dmcli eRT retv "$param")
+        if [ -n "$value" ]; then
+            echo "$value"
+            return 0
+        fi
+        echo_t "Warning: dmcli returned empty for parameter '$param'. Retrying attempt $attempt in $delay seconds..."
+        sleep $delay
+        retries=$((retries - 1))
+        attempt=$((attempt + 1))
+    done
+    echo ""
+    return 1
+}
+
 CheckandSetCMStatus()
 {
 	cm_status=""
-	cm_status=`dmcli eRT retv Device.X_CISCO_COM_CableModem.CMStatus`
+	cm_status=$(get_dmcli_value "Device.X_CISCO_COM_CableModem.CMStatus")
 	echo_t "cm_status=$cm_status"
 
 	if [ "$cm_status" == "OPERATIONAL" ];then
@@ -69,14 +91,14 @@ CheckandSetCMIPStatus()
 	cm_ipv4=""
 	cm_ipv6=""
 	cm_prov=""
-	cm_prov=`dmcli eRT retv Device.X_CISCO_COM_CableModem.ProvIpType`
+	cm_prov=$(get_dmcli_value "Device.X_CISCO_COM_CableModem.ProvIpType")
 
 	echo_t "cm_prov=$cm_prov"
         
 # checking also if cm prove type is APM(Alternate provision mode) in docsis 3.1 version of AXB6 and CMXB7
 	if [ "x$cm_prov" == "xIPv4" ] || [ "x$cm_prov" == "xIPV4" ] || [ "x$cm_prov" == "xAPM" ];then
 
-		cm_ipv4=`dmcli eRT retv Device.X_CISCO_COM_CableModem.IPAddress`
+		cm_ipv4=$(get_dmcli_value "Device.X_CISCO_COM_CableModem.IPAddress")
 		echo_t "cm_ipv4=$cm_ipv4"
 
 		if [ "$cm_ipv4" != "" ] && [ "$cm_ipv4" != "0.0.0.0" ];then
@@ -90,7 +112,7 @@ CheckandSetCMIPStatus()
 
 	if [ "x$cm_prov" == "xIPv6" ] || [ "x$cm_prov" == "xIPV6" ] || [ "x$cm_prov" == "xAPM" ];then
 
-		cm_ipv6=`dmcli eRT retv Device.X_CISCO_COM_CableModem.IPv6Address`
+		cm_ipv6=$(get_dmcli_value "Device.X_CISCO_COM_CableModem.IPv6Address")
 		echo_t "cm_ipv6=$cm_ipv6"
 
 		if [ "$cm_ipv6" != "" ] && [ "$cm_ipv6" != "0000::0000" ];then
@@ -118,129 +140,190 @@ CheckandSetCMIPStatus()
 
 CheckandSetWANIPStatus()
 {
-	wan_ipv4=""
-	wan_ipv6=""
-	wan_ipv4=`dmcli eRT retv Device.DeviceInfo.X_COMCAST-COM_WAN_IP`
+    routerMode=`syscfg get last_erouter_mode`
+    if [ -z "$routerMode" ]; then
+        echo_t "routerMode is not set. Defaulting to 3."
+        routerMode=3
+    fi
 
-	if [ "$wan_ipv4" == "" ];then
-		wan_ipv4=`ifconfig $WAN_INTERFACE | grep "inet addr" | awk '{print $(NF-2)}' | cut -f2 -d:`
-	fi
+    wan_ipv4=""
+    wan_ipv6=""
 
-	wan_ipv6=`dmcli eRT retv Device.DeviceInfo.X_COMCAST-COM_WAN_IPv6`
+    wan_ipv4=`dmcli eRT retv Device.DeviceInfo.X_COMCAST-COM_WAN_IP`
+    if [ "$wan_ipv4" == "" ]; then
+        wan_ipv4=`ifconfig $WAN_INTERFACE | grep "inet addr" | awk '{print $(NF-2)}' | cut -f2 -d:`
+    fi
 
-	if [ "$wan_ipv6" == "" ];then
-		wan_ipv6=`ifconfig $WAN_INTERFACE | grep inet6 | grep Global | awk '{print $(NF-1)}' | cut -f1 -d\/`
-	fi
+    wan_ipv6=`dmcli eRT retv Device.DeviceInfo.X_COMCAST-COM_WAN_IPv6`
+    if [ "$wan_ipv6" == "" ]; then
+        wan_ipv6=`ifconfig $WAN_INTERFACE | grep inet6 | grep Global | awk '{print $(NF-1)}' | cut -f1 -d\/`
+    fi
 
-	echo_t "wan_ipv4=$wan_ipv4"
-	echo_t "wan_ipv6=$wan_ipv6"
+    echo_t "routerMode=$routerMode"
+    echo_t "wan_ipv4=$wan_ipv4"
+    echo_t "wan_ipv6=$wan_ipv6"
 
-	if [ "$wan_ipv4" != "" ] && [ "$wan_ipv4" != "0.0.0.0" ];then
-		wan_ipv4_bit=1
-	else
-		wan_ipv4_bit=0
-	fi
-#	echo_t "wan_ipv4_bit=$wan_ipv4_bit"
+    if [ "$wan_ipv4" != "" ] && [ "$wan_ipv4" != "0.0.0.0" ]; then
+        wan_ipv4_bit=1
+    else
+        wan_ipv4_bit=0
+    fi
 
-	if [ "$wan_ipv6" != "" ] && [ "$wan_ipv6" != "0000::0000" ];then
-		wan_ipv6_bit=1
-	else
-		wan_ipv6_bit=0
-	fi
-#	echo_t "wan_ipv6_bit=$wan_ipv6_bit"
+    if [ "$wan_ipv6" != "" ] && [ "$wan_ipv6" != "0000::0000" ]; then
+        wan_ipv6_bit=1
+    else
+        wan_ipv6_bit=0
+    fi
 
-	if [ "$wan_ipv4_bit" == "1" ] || [ "$wan_ipv6_bit" == "1" ];then
-		wan_ip_bit=1
-		bitmask=$((bitmask | WANIPStatus_mask))
-	else
-		wan_ip_bit=0
-	fi
+    case "$routerMode" in
+        1)
+            wan_ip_bit=$wan_ipv4_bit
+            ;;
+        2)
+            wan_ip_bit=$wan_ipv6_bit
+            ;;
+        3)
+            if [ "$wan_ipv4_bit" == "1" ] && [ "$wan_ipv6_bit" == "1" ]; then
+                wan_ip_bit=1
+            else
+                wan_ip_bit=0
+            fi
+            ;;
+        *)
+            # Treat unknown or empty mode as dual stack
+            if [ "$wan_ipv4_bit" == "1" ] && [ "$wan_ipv6_bit" == "1" ]; then
+                wan_ip_bit=1
+            else
+                wan_ip_bit=0
+            fi
+            ;;
+    esac
 
-	echo_t "wan_ip_status=$wan_ip_bit"
-#	echo_t "bitmask=$bitmask"
+    if [ "$wan_ip_bit" == "1" ]; then
+        bitmask=$((bitmask | WANIPStatus_mask))
+    fi
+
+    echo_t "wan_ip_status=$wan_ip_bit"
 }
 
-CheckandSetIPv4PingStatus()
-{
-	WAN_INTERFACE=$(getWanInterfaceName)
-	PING_PACKET_SIZE=56
-	PINGCOUNT=3
-	RESWAITTIME=3
 
-	IPv4_Gateway_addr=""
-	IPv4_Gateway_addr=`sysevent get default_router`
-	ping4_success=0
-	if [ "$IPv4_Gateway_addr" != "" ]
-	then
-		PING_OUTPUT=`ping -I $WAN_INTERFACE -c $PINGCOUNT -w $RESWAITTIME -s $PING_PACKET_SIZE $IPv4_Gateway_addr`
-		CHECK_PACKET_RECEIVED=`echo $PING_OUTPUT | grep "packet loss" | cut -d"%" -f1 | awk '{print $NF}'`
 
-		if [ "$CHECK_PACKET_RECEIVED" != "" ]
-		then
-			if [ "$CHECK_PACKET_RECEIVED" -ne 100 ]
-			then
-				ping4_success=1
-				bitmask=$((bitmask | IPv4PingStatus_mask))
-			else
-				ping4_success=0
-			fi
-		else
-			ping4_success=0
-		fi
-	fi
+CheckandSetConnectivityStatus() {
 
-	echo_t "ping4_status=$ping4_success"
-#	echo_t "bitmask=$bitmask"
-}
+    # Get DNS servers
+    ipv4_dns_0=$(sysevent get ipv4_dns_0)
+    ipv4_dns_1=$(sysevent get ipv4_dns_1)
+    ipv6_dns_0=$(sysevent get ipv6_dns_0)
+    ipv6_dns_1=$(sysevent get ipv6_dns_1)
 
-CompareStoredAndCurrGWHealthStatus()
-{
-	IsCMFailure=0
-	IsCMIPFailure=0
-	IsWANIPFailure=0
-	IsIPv4Failure=0
-	timestamp=`date +%Y-%m-%d_%H-%M-%S`
+    # Fallback to secondary DNS if primary is empty
+    [ -z "$ipv4_dns_0" ] && ipv4_dns_0="$ipv4_dns_1"
+    [ -z "$ipv6_dns_0" ] && ipv6_dns_0="$ipv6_dns_1"
 
-	#CM_Status
-	stored_CMstatus=$((stored_gw_health & CMStatus_mask))
-	current_CMstatus=$((bitmask & CMStatus_mask))
+    # Get WebPA and Xconf URLs
+    webpa_url=`dmcli eRT retv Device.X_RDKCENTRAL-COM_Webpa.DNSText.URL`
+    xconf_url=`dmcli eRT retv Device.DeviceInfo.X_RDKCENTRAL-COM_Syndication.XconfURL | sed -e 's~http[s]*://~~'`
+    ntp_url=`dmcli eRT retv Device.Time.NTPServer1`
 
-	#CM_IP_Status
-	stored_CMIPstatus=$((stored_gw_health & CMIPStatus_mask))
-	current_CMIPstatus=$((bitmask & CMIPStatus_mask))
+    # Log empty URL warnings
+    [ -z "$webpa_url" ] && echo_t "Warning: WebPA URL is empty"
+    [ -z "$xconf_url" ] && echo_t "Warning: Xconf URL is empty"
+    [ -z "$ntp_url" ] && echo_t "Warning: NTP URL is empty"
 
-	#WAN_IP_Status
-	stored_WANIPstatus=$((stored_gw_health & WANIPStatus_mask))
-	current_WANIPstatus=$((bitmask & WANIPStatus_mask))
+    # Function to check DNS resolution
+    check_dns() {
+        nslookup "$1" "$2" > /dev/null 2>&1
+        return $?
+    }
 
-	#IPv4_Ping_Status
-	stored_IPv4Pingstatus=$((stored_gw_health & IPv4PingStatus_mask))
-	current_IPv4Pingstatus=$((bitmask & IPv4PingStatus_mask))
+    # Initialize status flags
+    webpa_status=1
+    xconf_status=1
+    ntp_status=1
 
-	if [ $current_CMstatus -eq 0 ] && [ $current_CMstatus -ne $stored_CMstatus ]; then
-	   IsCMFailure=1
-	fi
+    # Perform lookups based on router mode
+    case "$routerMode" in
+        1)
+            echo "Router Mode: IPv4 only"
+            [ -n "$webpa_url" ] && check_dns "$webpa_url" "$ipv4_dns_0" && webpa_status=0
+            [ -n "$xconf_url" ] && check_dns "$xconf_url" "$ipv4_dns_0" && xconf_status=0
+            [ -n "$ntp_url" ] && check_dns "$ntp_url" "$ipv4_dns_0" && ntp_status=0
+            ;;
+        2)
+            echo "Router Mode: IPv6 only"
+            [ -n "$webpa_url" ] && check_dns "$webpa_url" "$ipv6_dns_0" && webpa_status=0
+            [ -n "$xconf_url" ] && check_dns "$xconf_url" "$ipv6_dns_0" && xconf_status=0
+            [ -n "$ntp_url" ] && check_dns "$ntp_url" "$ipv6_dns_0" && ntp_status=0
+            ;;
+        3)
+            echo "Router Mode: Dual stack"
+            if [ -n "$webpa_url" ]; then
+                check_dns "$webpa_url" "$ipv4_dns_0"
+                webpa_ipv4=$?
+                check_dns "$webpa_url" "$ipv6_dns_0"
+                webpa_ipv6=$?
+                [ $webpa_ipv4 -eq 0 ] && [ $webpa_ipv6 -eq 0 ] && webpa_status=0 || webpa_status=1
+            fi
 
-	if [ $current_CMIPstatus -eq 0 ] && [ $current_CMIPstatus -ne $stored_CMIPstatus ]; then
-	   IsCMIPFailure=1
-	fi
+            if [ -n "$xconf_url" ]; then
+                check_dns "$xconf_url" "$ipv4_dns_0"
+                xconf_ipv4=$?
+                check_dns "$xconf_url" "$ipv6_dns_0"
+                xconf_ipv6=$?
+                [ $xconf_ipv4 -eq 0 ] && [ $xconf_ipv6 -eq 0 ] && xconf_status=0 || xconf_status=1
+            fi
 
-	if [ $current_WANIPstatus -eq 0 ] && [ $current_WANIPstatus -ne $stored_WANIPstatus ]; then
-	   IsWANIPFailure=1
-	fi
+            if [ -n "$ntp_url" ]; then
+                check_dns "$ntp_url" "$ipv4_dns_0"
+                ntp_ipv4=$?
+                check_dns "$ntp_url" "$ipv6_dns_0"
+                ntp_ipv6=$?
+                [ $ntp_ipv4 -eq 0 ] && [ $ntp_ipv6 -eq 0 ] && ntp_status=0 || ntp_status=1
+            fi
+            ;;
+        *)
+            echo "Unknown router mode: $routerMode. Defaulting to dual stack."
+            if [ -n "$webpa_url" ]; then
+                check_dns "$webpa_url" "$ipv4_dns_0"
+                webpa_ipv4=$?
+                check_dns "$webpa_url" "$ipv6_dns_0"
+                webpa_ipv6=$?
+                [ $webpa_ipv4 -eq 0 ] && [ $webpa_ipv6 -eq 0 ] && webpa_status=0 || webpa_status=1
+            fi
 
-	if [ $current_IPv4Pingstatus -eq 0 ] && [ $current_IPv4Pingstatus -ne $stored_IPv4Pingstatus ]; then
-	   IsIPv4Failure=1
-	fi
+            if [ -n "$xconf_url" ]; then
+                check_dns "$xconf_url" "$ipv4_dns_0"
+                xconf_ipv4=$?
+                check_dns "$xconf_url" "$ipv6_dns_0"
+                xconf_ipv6=$?
+                [ $xconf_ipv4 -eq 0 ] && [ $xconf_ipv6 -eq 0 ] && xconf_status=0 || xconf_status=1
+            fi
 
-	#Check whether we need to reboot the device or not
-	if [ $IsCMFailure -eq 1 ] || [ $IsCMIPFailure -eq 1 ] || [ $IsWANIPFailure -eq 1 ] || [ $IsIPv4Failure -eq 1 ]; then
-	   IsNeedtoRebootDevice=1
-	   RebootReason="wan_link_heal"
-	   t2ValNotify "RDKB_SELFHEAL:WAN_Link_Heal" "$timestamp"
-	   echo_t "RDKB_SELFHEAL:WAN_Link_Heal"
-	fi
-	echo_t "IsNeedtoRebootDevice = $IsNeedtoRebootDevice"
+            if [ -n "$ntp_url" ]; then
+                check_dns "$ntp_url" "$ipv4_dns_0"
+                ntp_ipv4=$?
+                check_dns "$ntp_url" "$ipv6_dns_0"
+                ntp_ipv6=$?
+                [ $ntp_ipv4 -eq 0 ] && [ $ntp_ipv6 -eq 0 ] && ntp_status=0 || ntp_status=1
+            fi
+            ;;
+    esac
+
+    # Log results
+    echo "WebPA DNS status: $webpa_status"
+    echo "Xconf DNS status: $xconf_status"
+    echo "NTP DNS status: $ntp_status"
+
+    # Set connectivity status bit based on DNS resolution results
+    if [ $webpa_status -ne 0 ] && [ $xconf_status -ne 0 ] && [ $ntp_status -ne 0 ]; then
+        connectivity_status_bit=0
+    else
+        echo "At least one DNS resolution succeeded."
+        connectivity_status_bit=1
+        bitmask=$((bitmask | ConnectivityStatus_mask))
+    fi
+
+    echo_t "Connectivity status bit: $connectivity_status_bit"
 }
 
 RfcRebootDebug()
@@ -255,61 +338,104 @@ RfcRebootDebug()
 	echo_t "####### mount List #######"
 	echo "$mount"
 }
-CheckandRebootBasedOnCurrentHealth()
+
+CheckAndRebootIfNeeded()
 {
-#	echo_t "RDKB_SELFHEAL_BOOTUP : gw_health inside CheckandRebootBasedOnCurrentHealth"
+	echo_t "RDKB_SELFHEAL_BOOTUP : Checking if reboot is needed based on current health status"
+	timestamp=$(date +%s)
+	echo_t "RDKB_SELFHEAL_BOOTUP : Current timestamp = $timestamp"
 
-	stored_gw_health=`syscfg get gw_health`
-	echo_t "gw_health stored = $stored_gw_health"
+	if [ -z "$1" ]; then
+	    CheckandSetCMIPStatus
+	    current_CMstatus=$((bitmask & CMStatus_mask))
+	    current_CMIPstatus=$((bitmask & CMIPStatus_mask))
+	fi
 
-	CheckandSetCMStatus
-	CheckandSetCMIPStatus
-if [ "x$MAPT_CONFIG" != "xset" ]; then
-	CheckandSetIPv4PingStatus
-fi
 	CheckandSetWANIPStatus
-	CompareStoredAndCurrGWHealthStatus
 
-	echo_t "gw_health current = $bitmask"
-	#Check and reboot the device
-	if [ $IsNeedtoRebootDevice -eq 1 ]; then
-	    echo_t "RDKB_SELFHEAL_BOOTUP : Device is going to reboot Reason[$RebootReason]"
-	    if [ -e "/usr/bin/onboarding_log" ]; then
-	        /usr/bin/onboarding_log "RDKB_SELFHEAL_BOOTUP : Device is going to reboot Reason[$RebootReason]"
+	CheckandSetConnectivityStatus
+
+	current_WANIPstatus=$((bitmask & WANIPStatus_mask))
+	current_ConnectivityStatus=$((bitmask & ConnectivityStatus_mask))
+
+	echo_t "Status Breakdown:"
+	if [ -z "$1" ]; then
+	    echo_t "  CMStatus = $current_CMstatus"
+	    echo_t "  CMIPStatus = $current_CMIPstatus"
+	    if [ $current_CMIPstatus -eq 0 ]; then
+		echo_t "CM is Operational,but CMIPStatus is not healthy, checking WAN and Connectivity status..."
 	    fi
-	    syscfg set X_RDKCENTRAL-COM_LastRebootReason "$RebootReason"
-	    syscfg set X_RDKCENTRAL-COM_LastRebootCounter "1"
-	    syscfg set gw_health "$bitmask"
-	    syscfg commit
+	fi
+	echo_t "  WANIPStatus = $current_WANIPstatus"
+	echo_t "  ConnectivityStatus = $current_ConnectivityStatus"
+
+	fail_status=""
+	IsNeedtoRebootDevice=0
+
+	echo_t "Checking WAN and Connectivity status..."
+	if [ $current_WANIPstatus -eq 0 ] || [ $current_ConnectivityStatus -eq 0 ]; then
+            [ $current_WANIPstatus -eq 0 ] && fail_status="${fail_status}WANIP "
+            [ $current_ConnectivityStatus -eq 0 ] && fail_status="${fail_status}Connectivity "
+
+	    if [ -z "$1" ]; then
+		IsNeedtoRebootDevice=1
+		echo_t "RDKB_SELFHEAL_BOOTUP : Device is not healthy, failure in: ${fail_status}"
+	    else
+		echo_t "WAN and Connectivity are not recovered, checking CM status again..."
+		return
+	    fi
+	fi
+
+
+	if [ $IsNeedtoRebootDevice -eq 1 ]; then
+	    echo_t "RDKB_SELFHEAL_BOOTUP : Device is not healthy, failure in: ${fail_status}"
+	    RebootReason="wan_link_heal"
+	    echo_t "RDKB_SELFHEAL_BOOTUP : Device is going to reboot Reason[$RebootReason]"
+
+	    if [ -e "/usr/bin/onboarding_log" ]; then
+		/usr/bin/onboarding_log "RDKB_SELFHEAL_BOOTUP : Device is going to reboot Reason[$RebootReason]"
+	    fi
+
+	    t2ValNotify "RDKB_SELFHEAL:WAN_Link_Heal" "$timestamp"
+	    echo_t "RDKB_SELFHEAL:WAN_Link_Heal"
+	    echo_t "IsNeedtoRebootDevice = $IsNeedtoRebootDevice"
+
 	    RfcRebootDebug
-	    /rdklogger/backupLogs.sh true
+	    rebootNeeded RM "" $RebootReason "1"
+	else
+	    echo_t "RDKB_SELFHEAL_BOOTUP : Device is healthy. No reboot required."
+            exit 0
 	fi
 }
 
-CheckandStoreCurrentHealth()
+CheckandRebootBasedOnCurrentHealth()
 {
-#	echo_t "RDKB_SELFHEAL : gw_health inside CheckandStoreCurrentHealth"
+    CheckandSetCMStatus
 
-	stored_gw_health=`syscfg get gw_health`
-	echo_t "gw_health stored = $stored_gw_health"
+    current_CMstatus=$((bitmask & CMStatus_mask))
 
+    while [ "$current_CMstatus" -eq 0 ]; do
+        echo "CM not operational. Retrying in 3 minutes..."
+        sleep 180
 	CheckandSetCMStatus
-	CheckandSetCMIPStatus
-if [ "x$MAPT_CONFIG" != "xset" ]; then
-	CheckandSetIPv4PingStatus
-fi
-	CheckandSetWANIPStatus
 
-	#Update current gw health status
-	syscfg set gw_health "$bitmask" 
-        syscfg commit
+        current_CMstatus=$((bitmask & CMStatus_mask))
 
-	echo_t "gw_health current = $bitmask"
+	if [ "$current_CMstatus" -eq 0 ]; then
+	    echo "CM still not operational. Checking other status..."
+            CheckAndRebootIfNeeded "skip_cm_ip_check"
+        fi
+    done
+
+    echo "CM is operational. Waiting 10 minutes for WAN manager to lock WAN type..."
+    sleep 600
+    CheckAndRebootIfNeeded ""
+
 }
+
 
 echo_t "check_gw_health.sh called with $1"
 
-MAPT_CONFIG=`sysevent get mapt_config_flag`
 
 case "$1" in
 
@@ -325,20 +451,16 @@ case "$1" in
                 echo_t "gw_wan_status : Exiting Wan Link Heal bootup-check due to WFO"
                 exit 0
         fi 
-	LastrebootReason=`syscfg get X_RDKCENTRAL-COM_LastRebootReason`
-	echo_t "LastrebootReason = $LastrebootReason"
-	if [ "Software_upgrade" == "$LastrebootReason" ] || [ "forced_software_upgrade" == "$LastrebootReason" ] || [ "PROVISIONING_Image_Upgrade" == "$LastrebootReason" ] || [ "rfc_reboot" == "$LastrebootReason" ]; then
-		echo_t "Wan Link Heal for bootup-check invoked"
-		CheckandRebootBasedOnCurrentHealth
-	fi
+
+	echo_t "Wan Link Heal for bootup-check invoked"
+	CheckandRebootBasedOnCurrentHealth
 
    ;;
 
    store-health)
 
-	echo_t "Wan Link Heal for store-health invoked"
-	CheckandStoreCurrentHealth
+	echo_t "Wan Link Heal for store-health Deprecated"
+        exit 0
    ;;
 
 esac
-
