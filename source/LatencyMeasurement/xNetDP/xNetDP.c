@@ -118,8 +118,8 @@ typedef struct TCP_SNIFFER_ {
     u_short th_dport;
 }TcpSniffer;
 typedef struct {
-	long long Samples[SIZE];
-	long long Samples_age[SIZE];
+	long long Samples[MAX_SAMPLE];
+	long long Samples_age[MAX_SAMPLE];
 	long long Number_of_Samples;
 	double Percentile;
 }Calt_Percentile_info;
@@ -236,9 +236,9 @@ typedef struct LatencyTable
     bool   bHasLatencyEntry;
     int port[MAX_PORTS];
     int num_of_ports;
-    long long wanSamples[BUF_SIZE];
-    long long lanSamples[BUF_SIZE];
-    long long SamplesAges[BUF_SIZE];
+    long long wanSamples[MAX_SAMPLE];
+    long long lanSamples[MAX_SAMPLE];
+    long long SamplesAges[MAX_SAMPLE];
     long long Num_of_Sample;
     long long SampleAge;
     long long NthMaxValue;
@@ -246,7 +246,7 @@ typedef struct LatencyTable
     Calt_Percentile_info Percentile_info[2];
 }LatencyTable;
 
-#define MAX_NUM_OF_CLIENTS 100
+#define MAX_NUM_OF_CLIENTS 50
 
 LatencyTable Ipv4HashLatencyTable[MAX_NUM_OF_CLIENTS];
 LatencyTable Ipv6HashLatencyTable[MAX_NUM_OF_CLIENTS];
