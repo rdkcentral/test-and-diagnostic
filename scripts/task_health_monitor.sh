@@ -4937,7 +4937,7 @@ self_heal_rfc_sync() {
     if [ -f /tmp/.rfcSyncDone ]; then
         echo_t "RDKB_SELFHEAL : RFC sync is completed"
     else
-        if [ ! -f /tmp/rfc_selfhealLock ]; then
+        if [ ! -f /tmp/rfcSelfhealLock ]; then
             echo_t "RDKB_SELFHEAL : Triggering RFC sync"
             if [ -f /usr/ccsp/tad/selfheal_rfc_sync.sh ]; then
                 sh /usr/ccsp/tad/selfheal_rfc_sync.sh &
