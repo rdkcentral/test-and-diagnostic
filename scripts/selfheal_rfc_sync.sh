@@ -19,24 +19,40 @@
 #######################################################################################
 TAD_PATH="/usr/ccsp/tad"
 RFC_SYNC_DONE="/tmp/.rfcSyncDone"
-LOCKFILE="/tmp/rfcselfhealLock"
+LOCKFILE="/tmp/rfcSelfhealLock"
 MAX_RETRIES=3
 RETRY_COUNT=0
 
-#Create lock file to prevent multiple instances of this script
+# Define 'echo_t'
+if [ -f /etc/log_timestamp.sh ]; then
+    source /etc/log_timestamp.sh
+fi
+if ! type echo_t >/dev/null 2>&1; then
+    echo_t() { echo "$@"; }
+fi
+
+# Always remove lockfile on exit (normal or error)
+cleanup() {
+    rm -f "$LOCKFILE"
+}
+trap cleanup EXIT
+
+# Create lock file to prevent multiple instances of this script
 touch "$LOCKFILE"
+
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     if [ -f "$RFC_SYNC_DONE" ]; then
-        echo_t "File $FILE exists. Exiting script."
-		rm -f "$LOCKFILE"
+        echo_t "File $RFC_SYNC_DONE exists. Exiting script."
         exit 0
     else
-        echo_t "File $FILE not found. Restarting RFC service ..."
-        systemctl stop rfc.service
-        systemctl start rfc.service
-        sleep 180
+        echo_t "File $RFC_SYNC_DONE not found. Restarting RFC service ..."
+        if [ -f /lib/rdk/rfc.service ]; then
+            systemctl stop rfc.service
+            systemctl start rfc.service
+            sleep 180
+        else
+            echo_t "rfc.service not found. Unable to Restart it."
+        fi
     fi
     RETRY_COUNT=$((RETRY_COUNT + 1))
 done
-
-rm -f "$LOCKFILE"
