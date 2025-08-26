@@ -1683,6 +1683,11 @@ do
     if [ -f /tmp/started_ssad ]; then
          self_heal_sedaemon
     fi
+
+    if [ -f /etc/SelfHeal_Driver_Sanity_Check.sh ]; then
+         /etc/SelfHeal_Driver_Sanity_Check.sh &
+    fi
+
     STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
     echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec"
