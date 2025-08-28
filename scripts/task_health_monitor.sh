@@ -4856,7 +4856,7 @@ hcm_handle_recovery() {
 self_heal_rfc()
 {
     if [ -f /tmp/.rfcSyncDone ]; then
-        echo_t "[RDKB_SELFHEAL] : RFC sync is completed"
+        echo_t "[RFC_SELFHEAL] : RFC sync is completed"
     else
         if [ ! -f /tmp/rfcSelfhealLock ]; then
             echo_t "[RFC_SELFHEAL] : RFC sync not done.Triggering RFC Self healing"
