@@ -34,7 +34,7 @@ fi
 cleanup() {
     rm -f "$LOCKFILE"
 }
-trap cleanup EXIT
+trap cleanup INT TERM EXIT
 
 # Create lock file to prevent multiple instances of this script
 touch "$LOCKFILE"
@@ -47,8 +47,8 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         if [ -f /lib/rdk/rfc.service ]; then
             echo_t "[RFC_SELFHEAL] : File $RFC_SYNC_DONE not found. Restarting RFC service"
             systemctl restart rfc.service
-            # sleep for 3 minutes
-            sleep 180
+            # 300 seconds in pre + 3 minutes for the sync to take place.
+            sleep 480
         else
             echo_t "[RFC_SELFHEAL] : rfc.service not found. Unable to Restart it."
             exit 0
