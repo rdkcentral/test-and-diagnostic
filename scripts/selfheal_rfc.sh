@@ -25,8 +25,7 @@ RETRY_COUNT=0
 # Define 'echo_t'
 if [ -f /etc/log_timestamp.sh ]; then
     source /etc/log_timestamp.sh
-fi
-if ! type echo_t >/dev/null 2>&1; then
+else
     echo_t() { echo "$@"; }
 fi
 
