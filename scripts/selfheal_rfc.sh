@@ -17,10 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #######################################################################################
-RFC_SYNC_DONE="/tmp/.rfcSyncDone"
-LOCKFILE="/tmp/rfcSelfhealLock"
-MAX_RETRIES=3
-RETRY_COUNT=0
+#!/bin/sh
 
 # Define 'echo_t'
 if [ -f /etc/log_timestamp.sh ]; then
@@ -29,30 +26,9 @@ else
     echo_t() { echo "$@"; }
 fi
 
-# Always remove lockfile on exit
-cleanup() {
-    rm -f "$LOCKFILE"
-}
-trap cleanup INT TERM EXIT
-
-# Create lock file to prevent multiple instances of this script
-touch "$LOCKFILE"
-
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if [ -f "$RFC_SYNC_DONE" ]; then
-        echo_t "[RFC_SELFHEAL] : File $RFC_SYNC_DONE exists. Exiting."
-        exit 0
-    else
-        if [ -f /lib/rdk/rfc.service ]; then
-            echo_t "[RFC_SELFHEAL] : File $RFC_SYNC_DONE not found. Restarting RFC service"
-            systemctl restart rfc.service
-            # 300 seconds in pre + 3 minutes for the sync to take place.
-            sleep 480
-        else
-            echo_t "[RFC_SELFHEAL] : rfc.service not found. Unable to Restart it."
-            exit 0
-        fi
-    fi
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-done
-echo_t "[RFC_SELFHEAL] : Max retries ($MAX_RETRIES) reached. Exiting."
+if [ -f /lib/rdk/rfc.service ]; then
+    echo_t "[RFC_SELFHEAL] : Restarting RFC service"
+    systemctl restart rfc.service            
+else
+    echo_t "[RFC_SELFHEAL] : rfc.service not found. Unable to Restart it."
+fi

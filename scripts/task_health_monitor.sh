@@ -4855,20 +4855,14 @@ hcm_handle_recovery() {
 #Restart RFC service, if the RFC sync not happened
 self_heal_rfc()
 {
-    if [ -f /tmp/.rfcSyncDone ]; then
-        echo_t "[RFC_SELFHEAL] : RFC sync is completed"
-    else
-        if [ ! -f /tmp/rfcSelfhealLock ]; then
-            echo_t "[RFC_SELFHEAL] : RFC sync not done.Triggering RFC Self healing"
-            if [ -f /usr/ccsp/tad/selfheal_rfc.sh ]; then
-                sh /usr/ccsp/tad/selfheal_rfc.sh &
-            else
-                echo_t "[RFC_SELFHEAL] : selfheal_rfc.sh script not present"
-            fi
+    if [ ! -f /tmp/.rfcSyncDone ]; then
+        echo_t "[RFC_SELFHEAL] : RFC sync not done.Triggering RFC Self healing"
+        if [ -f /usr/ccsp/tad/selfheal_rfc.sh ]; then
+            sh /usr/ccsp/tad/selfheal_rfc.sh &
         else
-            echo_t "[RFC_SELFHEAL] : RFC Self healing is already in progress"
+            echo_t "[RFC_SELFHEAL] : RFC selfheal script not found"   
         fi
-     fi
+    fi
 }
 
 self_heal_ethwan_mode_recover()
