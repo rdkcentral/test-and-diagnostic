@@ -4860,7 +4860,7 @@ self_heal_rfc()
         if [ -f /usr/ccsp/tad/selfheal_rfc.sh ]; then
             sh /usr/ccsp/tad/selfheal_rfc.sh &
         else
-            echo_t "[RFC_SELFHEAL] : RFC selfheal script not found"   
+            echo_t "[RFC_SELFHEAL] : RFC selfheal script not found"
         fi
     fi
 }
