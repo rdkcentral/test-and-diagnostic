@@ -4855,7 +4855,8 @@ hcm_handle_recovery() {
 #Restart RFC service, if the RFC sync not happened
 self_heal_rfc()
 {
-    if [ ! -f /tmp/.rfcSyncDone ]; then
+    if [ ! -f /tmp/.rfcSyncDone ] && [ ! -f /tmp/.rfcServiceLock ]
+	then
         echo_t "[RFC_SELFHEAL] : RFC sync not done.Triggering RFC Self healing"
         if [ -f /usr/ccsp/tad/selfheal_rfc.sh ]; then
             sh /usr/ccsp/tad/selfheal_rfc.sh &
