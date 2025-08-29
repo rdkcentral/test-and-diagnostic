@@ -17,7 +17,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #######################################################################################
-#!/bin/sh
 
 # Define 'echo_t'
 if [ -f /etc/log_timestamp.sh ]; then
@@ -28,7 +27,7 @@ fi
 
 if [ -f /lib/rdk/rfc.service ]; then
     echo_t "[RFC_SELFHEAL] : Restarting RFC service"
-    systemctl restart rfc.service            
+    systemctl restart rfc.service
 else
     echo_t "[RFC_SELFHEAL] : rfc.service not found. Unable to Restart it."
 fi
