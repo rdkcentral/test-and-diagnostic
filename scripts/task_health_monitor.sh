@@ -5056,7 +5056,9 @@ case $SELFHEAL_TYPE in
       ;;
 esac
 
-self_heal_rfc
+if [ "$BOX_TYPE" = "WNXL11BWL" ]; then
+    self_heal_rfc
+fi
 self_heal_dual_cron
 self_heal_meshAgent
 self_heal_meshAgent_hung
