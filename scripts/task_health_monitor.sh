@@ -4852,6 +4852,20 @@ hcm_handle_recovery() {
     fi
 }
 
+#Restart RFC service, if the RFC sync not happened
+self_heal_rfc()
+{
+    if [ ! -f /tmp/.rfcSyncDone ] && [ ! -f /tmp/.rfcServiceLock ]
+	then
+        echo_t "[RFC_SELFHEAL] : RFC sync not done.Triggering RFC Self healing"
+        if [ -f /usr/ccsp/tad/selfheal_rfc.sh ]; then
+            sh /usr/ccsp/tad/selfheal_rfc.sh &
+        else
+            echo_t "[RFC_SELFHEAL] : RFC selfheal script not found"
+        fi
+    fi
+}
+
 self_heal_ethwan_mode_recover()
 {
 
@@ -5042,6 +5056,9 @@ case $SELFHEAL_TYPE in
       ;;
 esac
 
+if [ "$BOX_TYPE" = "WNXL11BWL" ]; then
+    self_heal_rfc
+fi
 self_heal_dual_cron
 self_heal_meshAgent
 self_heal_meshAgent_hung
