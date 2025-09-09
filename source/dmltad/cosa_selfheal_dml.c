@@ -2224,3 +2224,247 @@ CPUProcAnalyzer_SetParamStringValue
     }
     return TRUE;
 }
+
+/**********************************************************************
+    caller:     owner of this object
+    prototype
+        BOOL
+        MemoryIncreaseDetection_GetParamBoolValue
+            (
+                ANSC_HANDLE                 hInsContext,
+                char*                       ParamName,
+                BOOL*                       bValue
+            );
+    description:
+        This function is called to retrieve BOOL parameter value;
+    argument:   ANSC_HANDLE                 hInsContext,
+                The instance handle;
+                char*                       ParamName,
+                The parameter name;
+                BOOL*                       bValue
+                The buffer of returned BOOL value;
+    return:     TRUE if succeeded.
+**********************************************************************/
+BOOL MemoryIncreaseDetection_GetParamBoolValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        BOOL*                       bValue
+    )
+{
+    char res[BUF_64] = {0};
+    if ( strcmp(ParamName, "Enable") == 0 )
+    {
+    // check the uptime of device should be 30 mins
+    if (CosaGetDeviceUptime() < 30 * 60)
+    {
+        CcspTraceWarning(("%s: Device uptime is less than 30 minutes!\n", __FUNCTION__));
+        *bValue = FALSE;
+        return TRUE;
+    }
+	if( CosaIsProcAnalRunning() )
+    {
+        CosaReadProcAnalConfig(ParamName, res);
+        if (res[0] == '1')
+            *bValue = TRUE;
+        else
+            *bValue = FALSE;
+    }
+	else
+		*bValue = FALSE;
+        return TRUE;
+    }
+    return TRUE;
+}
+
+/**********************************************************************
+    caller:     owner of this object
+    prototype
+        BOOL
+        MemoryIncreaseDetection_SetParamBoolValue
+            (
+                ANSC_HANDLE                 hInsContext,
+                char*                       ParamName,
+                BOOL                        bValue
+            );
+    description:
+        This function is called to set BOOL parameter value;
+    argument:   ANSC_HANDLE                 hInsContext,
+                The instance handle;
+                char*                       ParamName,
+                The parameter name;
+                BOOL                        bValue
+                The buffer of returned BOOL value;
+    return:     TRUE if succeeded.
+**********************************************************************/
+BOOL MemoryIncreaseDetection_SetParamBoolValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        BOOL                        bValue
+    )
+{
+    int ret = 0;
+    if ( strcmp(ParamName, "Enable") == 0 )
+    {
+        if ( bValue )
+        {
+            // check the uptime of device should be 30 mins
+            if (CosaGetDeviceUptime() < 30 * 60)
+            {
+                CcspTraceWarning(("%s: Device uptime is less than 30 minutes!\n", __FUNCTION__));
+                return FALSE;
+            }
+            if (CosaIsProcAnalRunning())
+            {
+                CcspTraceWarning(("%s: MemoryIncreaseDetection is already running!\n", __FUNCTION__));
+            }
+            else
+            {
+                CcspTraceInfo(("%s: Triggering RunMemoryIncreaseDetection script\n", __FUNCTION__));
+                ret = v_secure_system("/lib/rdk/RunMemoryIncreaseDetection.sh start &");
+                if(ret != 0)
+                {
+                      CcspTraceWarning(("%s - System Command failure\n",__FUNCTION__ ));
+                }
+            }
+        }
+    }
+    return TRUE;
+}
+
+/**********************************************************************
+    caller:     owner of this object
+    prototype
+        BOOL
+        MemoryIncreaseDetection_GetParamUlongValue
+            (
+                ANSC_HANDLE                 hInsContext,
+                char*                       ParamName,
+                ULONG*                      puLong
+            );
+    description:
+        This function is called to retrieve ULONG parameter value;
+    argument:   ANSC_HANDLE                 hInsContext,
+                The instance handle;
+                char*                       ParamName,
+                The parameter name;
+                ULONG*                      puLong
+                The buffer of returned ULONG value;
+    return:     TRUE if succeeded.
+**********************************************************************/
+BOOL
+MemoryIncreaseDetection_GetParamUlongValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        ULONG*                      puLong
+    )
+{
+    char res[BUF_64] = {0};
+    char *ptr = NULL;
+    if( (strcmp(ParamName, "Intervals") == 0) || (strcmp(ParamName, "RSSThreshold") == 0) )
+    {
+        CosaReadProcAnalConfig(ParamName, res);
+        *puLong = strtoul(res,&ptr,10);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/**********************************************************************
+    caller:     owner of this object
+    prototype:
+        BOOL
+        MemoryIncreaseDetection_SetParamUlongValue
+            (
+                ANSC_HANDLE                 hInsContext,
+                char*                       ParamName,
+                ULONG                       uValue
+            );
+    description:
+        This function is called to set ULONG parameter value;
+    argument:   ANSC_HANDLE                 hInsContext,
+                The instance handle;
+                char*                       ParamName,
+                The parameter name;
+                ULONG                       uValue
+                The updated ULONG value;
+    return:     TRUE if succeeded.
+**********************************************************************/
+BOOL
+MemoryIncreaseDetection_SetParamUlongValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        ULONG                       uValue
+    )
+{
+    if( (strcmp(ParamName, "Intervals") == 0) || (strcmp(ParamName, "RSSThreshold") == 0) )
+    {
+        char res[24];
+        snprintf(res, sizeof(res), "%lu", uValue);
+        CosaWriteProcAnalConfig(ParamName, res);
+        CcspTraceWarning(("%s - ProcAnalyzer setting Interval of %s for MemmoryIncreaseDectection \n", res, __FUNCTION__));
+    }
+    else
+    {
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/**********************************************************************
+    caller:     owner of this object
+    prototype:
+        BOOL
+        MemoryIncreaseDetection_GetParamStringValue
+            (
+                ANSC_HANDLE                 hInsContext,
+                char*                       ParamName,
+                char*                       pValue,
+                ULONG*                      pUlSize
+            );
+    description:
+        This function is called to get string value;
+    argument:   ANSC_HANDLE                 hInsContext,
+                The instance handle;
+                char*                       ParamName,
+                The parameter name;
+                char*                       pValue,
+                The parameter value;
+                ULONG                       pUlSize
+                The string length;
+    return:     ULONG Size of the returned string.
+**********************************************************************/
+ULONG
+MemoryIncreaseDetection_GetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pValue,
+        ULONG*                      pUlSize
+    )
+{
+    if (strcmp(ParamName, "ProcessesInCodeYellow") == 0) {
+        if (ReadProcessListFromBucketStatus("YELLOW", pValue, *pUlSize)) {
+            *pUlSize = strlen(pValue);
+            return *pUlSize;
+        }
+    } else if (strcmp(ParamName, "ProcessesMovedtoGreen") == 0) {
+        if (ReadProcessListFromBucketStatus("GREEN", pValue, *pUlSize)) {
+            *pUlSize = strlen(pValue);
+            return *pUlSize;
+        }
+    } else if (strcmp(ParamName, "ProcessesInCodeRed") == 0) {
+        if (ReadProcessListFromBucketStatus("RED", pValue, *pUlSize)) {
+            *pUlSize = strlen(pValue);
+            return *pUlSize;
+        }
+    } else {
+        CcspTraceWarning(("%s - MemmoryIncreaseDectection has no bucket list\n", __FUNCTION__));
+        return 0;
+    }
+    return 0;
+}
+
