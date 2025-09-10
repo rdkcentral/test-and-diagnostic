@@ -78,6 +78,7 @@ pthread_mutex_t latency_report_lock = PTHREAD_MUTEX_INITIALIZER;
 #define MQTT_LOCAL_MQTT_BROKER_IP_ADDR   "192.168.245.254"
 #define MQTT_LOCAL_MQTT_BROKER_PORT_VAL  1883
 #define TCP_LAN_latency_TOPIC   "device/TCP_LAN_latency"
+#define MQTT_KEEPALIVE_TIME 60
 
 enum ip_family
 {
@@ -1059,6 +1060,7 @@ void* LatencyReportThread(void* arg)
 int send_latency_message(const char *mac, long long lan_latency_usec) {
     struct mosquitto *mosq;
     char payload[256];
+    int rc =0;
 
     // JSON payload: you can format however you need
     snprintf(payload, sizeof(payload),
@@ -1078,9 +1080,6 @@ int send_latency_message(const char *mac, long long lan_latency_usec) {
 	    MQTT_KEEPALIVE_TIME);
 
     if (rc != MOSQ_ERR_SUCCESS) {
-	if (rc == MOSQ_ERR_ERRNO) {
-	    sys_errno_msg_log();   // log system error (e.g., ECONNREFUSED)
-	}
 	dbg_log("Failed to connect to MQTT broker: %s", mosquitto_strerror(rc));
 
 	mosquitto_destroy(mosq);
@@ -1089,7 +1088,7 @@ int send_latency_message(const char *mac, long long lan_latency_usec) {
     } 
 
     // Publish message
-    int rc = mosquitto_publish(mosq, NULL, TCP_LAN_latency_TOPIC,
+    rc = mosquitto_publish(mosq, NULL, TCP_LAN_latency_TOPIC,
 	    strlen(payload), payload,
 	    1, false);
 
