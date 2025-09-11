@@ -1057,14 +1057,14 @@ void* LatencyReportThread(void* arg)
 #if 1
 
 // Function that takes MAC + LAN latency (microseconds)
-int send_latency_message(const char *mac, long long lan_latency_usec) {
+int send_latency_message(const char *mac, long long lan_latency_sec, long long lan_latency_usec) {
     struct mosquitto *mosq;
     char payload[256];
     int rc =0;
 
     // JSON payload: you can format however you need
     snprintf(payload, sizeof(payload),
-             "{\"mac\":\"%s\", \"lan_latency_usec\":%lld}", mac, lan_latency_usec);
+             "{\"mac\":\"%s\", \"lan_latency_sec\":%lld.%06lld}", mac, lan_latency_sec, lan_latency_usec);
 
     mosquitto_lib_init();
     mosq = mosquitto_new("LatencyPublisher", true, NULL);
@@ -1138,7 +1138,7 @@ void* LatencyReportThreadPerSession(void* arg)
                     tempCount = snprintf(str1,sizeof(str1),"%s,%u,%lld.%lld,%lld.%06lld|",hashArray[i].mac,hashArray[i].TcpInfo[INDEX_SYN].th_seq,hashArray[i].latency_sec,hashArray[i].latency_usec,hashArray[i].Lan_latency_sec,hashArray[i].Lan_latency_usec);
 		    //Send LAN side Latency Notification to HCM module 
 		    int rc = send_latency_message(hashArray[i].mac,
-			    hashArray[i].Lan_latency_sec);
+			    hashArray[i].Lan_latency_sec, hashArray[i].Lan_latency_usec);
 
 		    if (rc != MOSQ_ERR_SUCCESS) {
 			dbg_log("MQTT publish failed for MAC %s: %s",
