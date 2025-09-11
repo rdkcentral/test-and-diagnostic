@@ -161,6 +161,7 @@ AC_CONFIG_FILES(
   source/LatencyMeasurement/TR-181/Makefile
   source/LatencyMeasurement/xNetSniffer/Makefile 
   source/LatencyMeasurement/xNetDP/Makefile
+  source/LatencyMeasurement/xNetTest/Makefile
   source/DevicePrioritization/Makefile
   source/DevicePrioritization/TR-181/Makefile
 	Makefile
