@@ -1,1 +1,1 @@
-SUBDIRS = TR-181 xNetSniffer xNetDP ServiceMonitor xNetTest
+SUBDIRS = TR-181 xNetSniffer xNetDP ServiceMonitor

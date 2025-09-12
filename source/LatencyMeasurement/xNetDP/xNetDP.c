@@ -1057,8 +1057,7 @@ void* LatencyReportThread(void* arg)
 #if 1
 
 // Function that takes MAC + LAN latency (microseconds)
-int send_latency_message(const char *mac, long long lan_latency_sec, long long lan_latency_usec) {
-    struct mosquitto *mosq;
+int send_latency_message(struct mosquitto *mosq, const char *mac, long long lan_latency_sec, long long lan_latency_usec) {
     char payload[256];
     int rc =0;
 
@@ -1066,26 +1065,6 @@ int send_latency_message(const char *mac, long long lan_latency_sec, long long l
     snprintf(payload, sizeof(payload),
              "{\"mac\":\"%s\", \"lan_latency_sec\":%lld.%06lld}", mac, lan_latency_sec, lan_latency_usec);
 
-    mosquitto_lib_init();
-    mosq = mosquitto_new("LatencyPublisher", true, NULL);
-    if (!mosq) {
-	dbg_log("Failed to create Mosquitto client");    
-        mosquitto_lib_cleanup();
-        return -1;
-    }
-
-    rc = mosquitto_connect(mosq,
-	    MQTT_LOCAL_MQTT_BROKER_IP_ADDR,
-	    MQTT_LOCAL_MQTT_BROKER_PORT_VAL,
-	    MQTT_KEEPALIVE_TIME);
-
-    if (rc != MOSQ_ERR_SUCCESS) {
-	dbg_log("Failed to connect to MQTT broker: %s", mosquitto_strerror(rc));
-
-	mosquitto_destroy(mosq);
-	mosquitto_lib_cleanup();
-	return 1;
-    } 
 
     // Publish message
     rc = mosquitto_publish(mosq, NULL, TCP_LAN_latency_TOPIC,
@@ -1098,9 +1077,6 @@ int send_latency_message(const char *mac, long long lan_latency_sec, long long l
 	dbg_log("Failed to publish message: %s", mosquitto_strerror(rc));
     }
 
-    mosquitto_disconnect(mosq);
-    mosquitto_destroy(mosq);
-    mosquitto_lib_cleanup();
     return rc;
 }
 
@@ -1113,6 +1089,8 @@ void* LatencyReportThreadPerSession(void* arg)
     int count = 0;
     char *str = NULL;
     char str1[1024];
+    struct mosquitto *mosq;
+    int rc =0;
     str = (char*) malloc (MAX_REPORT_SIZE);
     if (str == NULL )
         return NULL;
@@ -1123,6 +1101,26 @@ void* LatencyReportThreadPerSession(void* arg)
     FILE *fp;
     //fp = fopen("LatencyReport.txt", "w+");
 
+    mosquitto_lib_init();
+    mosq = mosquitto_new("LatencyPublisher", true, NULL);
+    if (!mosq) {
+	dbg_log("Failed to create Mosquitto client");    
+        mosquitto_lib_cleanup();
+        return NULL;
+    }
+
+    rc = mosquitto_connect(mosq,
+	    MQTT_LOCAL_MQTT_BROKER_IP_ADDR,
+	    MQTT_LOCAL_MQTT_BROKER_PORT_VAL,
+	    MQTT_KEEPALIVE_TIME);
+
+    if (rc != MOSQ_ERR_SUCCESS) {
+	dbg_log("Failed to connect to MQTT broker: %s", mosquitto_strerror(rc));
+
+	mosquitto_destroy(mosq);
+	mosquitto_lib_cleanup();
+	return NULL;
+    } 
     while(1)
     {
         sleep(5);
@@ -1137,7 +1135,7 @@ void* LatencyReportThreadPerSession(void* arg)
                 {
                     tempCount = snprintf(str1,sizeof(str1),"%s,%u,%lld.%lld,%lld.%06lld|",hashArray[i].mac,hashArray[i].TcpInfo[INDEX_SYN].th_seq,hashArray[i].latency_sec,hashArray[i].latency_usec,hashArray[i].Lan_latency_sec,hashArray[i].Lan_latency_usec);
 		    //Send LAN side Latency Notification to HCM module 
-		    int rc = send_latency_message(hashArray[i].mac,
+		    rc = send_latency_message(mosq, hashArray[i].mac,
 			    hashArray[i].Lan_latency_sec, hashArray[i].Lan_latency_usec);
 
 		    if (rc != MOSQ_ERR_SUCCESS) {
@@ -1206,6 +1204,9 @@ void* LatencyReportThreadPerSession(void* arg)
         free(str);
         str=NULL;
     }
+    mosquitto_disconnect(mosq);
+    mosquitto_destroy(mosq);
+    mosquitto_lib_cleanup();
     // exit the current thread
     //pthread_exit(NULL);
 }
