@@ -17,6 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
+TEST CHECKIN
 
 source /etc/log_timestamp.sh
 source /etc/utopia/service.d/log_env_var.sh
