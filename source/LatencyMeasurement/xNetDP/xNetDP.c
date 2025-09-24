@@ -77,7 +77,7 @@ pthread_mutex_t latency_report_lock = PTHREAD_MUTEX_INITIALIZER;
 #define BUF_SIZE 200
 #define MQTT_LOCAL_MQTT_BROKER_IP_ADDR   "192.168.245.254"
 #define MQTT_LOCAL_MQTT_BROKER_PORT_VAL  1883
-#define TCP_LAN_latency_TOPIC   "device/TCP_LAN_latency"
+#define TCP_LAN_latency_TOPIC   "local/tcplatency"
 #define MQTT_KEEPALIVE_TIME 60
 
 enum ip_family
