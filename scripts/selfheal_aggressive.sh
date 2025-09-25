@@ -261,7 +261,7 @@ self_heal_interfaces()
     case $SELFHEAL_TYPE in
         "BASE")
             # Checking whether brlan0 and l2sd0.100 are created properly , if not recreate it
-	    if [ "$MODEL_NAME" = "RPI" ]; then
+	    if [ "$MODEL_NAME" = "RPI" ] || [ "$MODEL_NAME" = "BPI" ]; then
                  device_mode=$(dmcli eRT retv Device.X_CISCO_COM_DeviceControl.LanManagementEntry.1.LanMode)
                 if [ ! -f /tmp/.router_reboot ]; then
                     if [ "$device_mode" != "" ]; then
@@ -1615,7 +1615,8 @@ if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
    [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "CVA601ZCOM" ] &&
    [ "$MODEL_NUM" != "VTER11QEL" ] &&
    [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] &&
-   [ "$MODEL_NUM" != "SCER11BEL" ] && [ "$MODEL_NAME" != "RPI" ]
+   [ "$MODEL_NUM" != "SCER11BEL" ] && [ "$MODEL_NAME" != "RPI" ] &&
+   [ "$MODEL_NAME" != "BPI" ]
 then
     exit
 fi
@@ -1683,6 +1684,11 @@ do
     if [ -f /tmp/started_ssad ]; then
          self_heal_sedaemon
     fi
+
+    if [ -f /etc/SelfHeal_Driver_Sanity_Check.sh ]; then
+         /etc/SelfHeal_Driver_Sanity_Check.sh &
+    fi
+
     STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
     echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec"
