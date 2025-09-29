@@ -343,7 +343,34 @@ X_RDK_AutomationTest_SetParamStringValue
                     dlclose(handle);
                     return FALSE;
                 }
-            } else {
+            }
+            else if (strncasecmp(pString, "WANFailover\n", 13) == 0){
+                int (*TriggerWFOTest)(char*);
+                *(void **)&TriggerWFOTest = dlsym(handle, "TriggerWFOTest");
+                if ((error == dlerror()) != NULL){
+                    fprintf(stderr, "%s\n", error);
+                    dlclose(handle);
+                    return FALSE;
+                }
+
+                AnscTraceFlow(("Input string %s\n", pString));
+
+                if (FALSE == is_test_running()) {
+                    char *input = pString + 13; //"WANFailover\nphase=BeforeWFO"
+                    int status = TriggerWFOTest(input);
+                    if (status != 0) {
+                        AnscTraceWarning(("%s : Failed to start WFO test\n", __FUNCTION__));
+                        dlclose(handle);
+                        return FALSE;
+                    }
+                }
+                else {
+                    AnscTraceWarning(("%s : Automation test is already running\n", __FUNCTION__));
+                    dlclose(handle);
+                    return FALSE;
+                }
+            }
+             else {
                 AnscTraceWarning(("%s : Invalid test name '%s'\n", __FUNCTION__, pString));
                 dlclose(handle);
                 return FALSE;
