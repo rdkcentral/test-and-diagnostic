@@ -359,7 +359,7 @@ X_RDK_AutomationTest_SetParamStringValue
                     char *input = pString + 13; //"WANFailover\nphase=BeforeWFO"
                     int status = TriggerWFOTest(input);
                     if (status != 0) {
-                        AnscTraceWarning(("%s : Failed to start Wanfailover test\n", __FUNCTION__));
+                        AnscTraceWarning(("%s : Failed to start WanFailover test\n", __FUNCTION__));
                         dlclose(handle);
                         return FALSE;
                     }
