@@ -347,7 +347,7 @@ X_RDK_AutomationTest_SetParamStringValue
             else if (strncasecmp(pString, "WANFailover|", 12) == 0){
                 int (*TriggerWFOTest)(char*);
                 *(void **)&TriggerWFOTest = dlsym(handle, "TriggerWFOTest");
-                if ((error == dlerror()) != NULL){
+                if ((error = dlerror()) != NULL){
                     fprintf(stderr, "%s\n", error);
                     dlclose(handle);
                     return FALSE;
