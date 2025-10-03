@@ -344,7 +344,7 @@ X_RDK_AutomationTest_SetParamStringValue
                     return FALSE;
                 }
             }
-            else if (strncasecmp(pString, "WANFailover\n", 13) == 0){
+            else if (strncasecmp(pString, "WANFailover|", 12) == 0){
                 int (*TriggerWFOTest)(char*);
                 *(void **)&TriggerWFOTest = dlsym(handle, "TriggerWFOTest");
                 if ((error == dlerror()) != NULL){
@@ -356,7 +356,7 @@ X_RDK_AutomationTest_SetParamStringValue
                 AnscTraceFlow(("Input string %s\n", pString));
 
                 if (FALSE == is_test_running()) {
-                    char *input = pString + 13; //"WANFailover\nphase=BeforeWFO"
+                    char *input = pString + 12; //"WANFailover|phase=BeforeWFO"
                     int status = TriggerWFOTest(input);
                     if (status != 0) {
                         AnscTraceWarning(("%s : Failed to start WanFailover test\n", __FUNCTION__));
