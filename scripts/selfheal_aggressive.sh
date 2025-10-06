@@ -622,7 +622,7 @@ self_heal_interfaces()
               if [ "$ethWan_if" != "" ]; then
                  # During Eth WAN failover simulation test, skip selfheal for bringing up Eth WAN port.
                  if [ -f /tmp/.EWanLinkDown_TestRunning.txt ]; then
-                    echo_t "[RDKB_AGG_SELFHEAL] : Eth WAN failover simulation test is going on. Hence, skipping selfheal this time."
+                    echo_t "[RDKB_AGG_SELFHEAL] : Eth WAN failover simulation test is going on. Hence, skipping selfheal this iteration."
                  else
                     echo_t "[RDKB_AGG_SELFHEAL] : $WAN_INTERFACE has no ip address, bring down and up Eth WAN port interface:$ethWan_if"
                     ip link set dev $ethWan_if down
