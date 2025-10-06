@@ -261,7 +261,7 @@ self_heal_interfaces()
     case $SELFHEAL_TYPE in
         "BASE")
             # Checking whether brlan0 and l2sd0.100 are created properly , if not recreate it
-	    if [ "$MODEL_NAME" = "RPI" ]; then
+	    if [ "$MODEL_NAME" = "RPI" ] || [ "$MODEL_NAME" = "BPI" ]; then
                  device_mode=$(dmcli eRT retv Device.X_CISCO_COM_DeviceControl.LanManagementEntry.1.LanMode)
                 if [ ! -f /tmp/.router_reboot ]; then
                     if [ "$device_mode" != "" ]; then
@@ -1617,7 +1617,8 @@ if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
    [ "$MODEL_NUM" != "VTER11QEL" ] &&
    [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] &&
    [ "$MODEL_NUM" != "CWA438TCOM" ] &&
-   [ "$MODEL_NUM" != "SCER11BEL" ] && [ "$MODEL_NAME" != "RPI" ]
+   [ "$MODEL_NUM" != "SCER11BEL" ] && [ "$MODEL_NAME" != "RPI" ] &&
+   [ "$MODEL_NAME" != "BPI" ]
 then
     exit
 fi
