@@ -86,6 +86,7 @@ case $BOX_TYPE in
     "WNXL11BWL") SELFHEAL_TYPE="SYSTEMD";;
     "SCER11BEL") SELFHEAL_TYPE="SYSTEMD";;
     "VNTXER5") SELFHEAL_TYPE="SYSTEMD";;
+    "SCXF11BFL") SELFHEAL_TYPE="SYSTEMD";;
     *)
         echo_t "RDKB_SELFHEAL : ERROR: Unknown BOX_TYPE '$BOX_TYPE', using SELFHEAL_TYPE='BASE'"
         SELFHEAL_TYPE="BASE";;
@@ -4197,7 +4198,7 @@ fi
 wan_dhcp_client_v4=1
 wan_dhcp_client_v6=1
 #dibbler-client selfheal not required on  SCER11BEL since WAN Unification use case will cover under WANManager.
-if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$WAN_STATUS" = "started" ]  && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ]; then
+if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$WAN_STATUS" = "started" ]  && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ]; then
     wan_dhcp_client_v4=1
     wan_dhcp_client_v6=1
 
@@ -4209,7 +4210,7 @@ if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "
             UDHCPC_Enable=$(syscfg get UDHCPEnable_v2)
             dibbler_client_enable=$(syscfg get dibbler_client_enable_v2)
 
-	    if ( ( [ "$MANUFACTURE" = "Technicolor" ] || [ "$MANUFACTURE" = "Sercomm" ] ) && [ "$BOX_TYPE" != "XB3" ] ) || [ "$WAN_TYPE" = "EPON" ] || [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ]; then
+	    if ( ( [ "$MANUFACTURE" = "Technicolor" ] || [ "$MANUFACTURE" = "Sercomm" ] ) && [ "$BOX_TYPE" != "XB3" ] ) || [ "$WAN_TYPE" = "EPON" ] || [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ] || [ "$BOX_TYPE" = "SCXF11BFL" ]; then
                 check_wan_dhcp_client_v4=$(ps w | grep "udhcpc" | grep "erouter")
                 check_wan_dhcp_client_v6=$(ps w | grep "dibbler-client" | grep -v "grep")
             else
@@ -4446,7 +4447,7 @@ case $SELFHEAL_TYPE in
     ;;
     "SYSTEMD")
         #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-        if [ "x$MAPT_CONFIG" != "xset" ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ $DHCPV4C_STATUS != "false" ] && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ]; then
+        if [ "x$MAPT_CONFIG" != "xset" ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ $DHCPV4C_STATUS != "false" ] && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ]; then
             if [ $wan_dhcp_client_v4 -eq 0 ]; then
                 if [ "$MANUFACTURE" = "Technicolor" ]; then
                     V4_EXEC_CMD="/sbin/udhcpc -i erouter0 -p /tmp/udhcpc.erouter0.pid -s /etc/udhcpc.script"
