@@ -343,7 +343,30 @@ X_RDK_AutomationTest_SetParamStringValue
                     dlclose(handle);
                     return FALSE;
                 }
-            } else {
+            }
+            else if (strcasecmp(pString, "WANtype") == 0 ) {
+                int (*Trigger_myNewtest)();
+                // Get the function pointer
+                *(void **) (&Trigger_myNewtest) = dlsym(handle, "Trigger_myNewtest");
+                if ((error = dlerror()) != NULL)  {
+                    fprintf(stderr, "%s\n", error);
+                    dlclose(handle);
+                    return FALSE;
+                }
+                if( FALSE == is_test_running() ) {
+                    int status = Trigger_myNewtest();
+                    if( status != 0 ) {
+                        AnscTraceWarning(("%s : Failed to start my new test\n", __FUNCTION__));
+                        dlclose(handle);
+                        return FALSE;
+                    }
+                } else {
+                    AnscTraceWarning(("%s : Automation test is already running\n", __FUNCTION__));
+                    dlclose(handle);
+                    return FALSE;
+                }
+            }
+            else {
                 AnscTraceWarning(("%s : Invalid test name '%s'\n", __FUNCTION__, pString));
                 dlclose(handle);
                 return FALSE;
