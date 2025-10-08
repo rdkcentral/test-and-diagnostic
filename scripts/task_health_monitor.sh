@@ -288,7 +288,7 @@ self_heal_meshAgent_hung() {
     dmcli eRT getv Device.DeviceInfo.X_RDKCENTRAL-COM_xOpsDeviceMgmt.Mesh.Enable > /dev/null &
     local cmd_pid=$!
     sleep 5
-     process_info=$(ps | awk -v pid="$cmd_pid" '$1 == pid')
+    process_info=$(ps | awk -v pid="$cmd_pid" '$1 == pid')
     if [ -n "$process_info" ];then
        if kill -0 $cmd_pid 2>/dev/null;then
           kill $cmd_pid
