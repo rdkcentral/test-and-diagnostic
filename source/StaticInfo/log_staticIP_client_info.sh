@@ -31,7 +31,7 @@ Online_mac="/tmp/Online_mac"
 Offline_mac="/tmp/Offline_mac"
 Traffic_count="/tmp/Traffic_count"
 
-if [ "$static_ip_status" = "1" ]; then
+if [ "$static_ip_status" = "1" ] || [ "$static_ip_status" = "TRUE" ]; then
       rm -f $Online_mac $Offline_mac $Traffic_count
       rm -f /tmp/list /tmp/dbg_log
       count=`dmcli eRT retv Device.Hosts.HostNumberOfEntries`
