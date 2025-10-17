@@ -947,7 +947,7 @@ self_heal_dhcp_clients()
                             echo_t "[RDKB_AGG_SELFHEAL] :  Killing dibbler-client with pid $dibbler_client_pid"
                             killall -9 dibbler-client
                         fi
-                        if [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ]
+                        if [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ]
                         then
                             sh $DHCPV6_HANDLER disable
                         else
@@ -1488,7 +1488,7 @@ self_heal_nas_ip()
              cut -d"/" -f4)
              hostapd_enable=$(ps | grep -i hostapd | grep -v grep)
              if [ "$wifi_process" != "OneWifi" ] && [ "$hostapd_enable" != "" ]; then #issue seen only in selfheal, also hostapd should run while checking this, hence this condition
-                 if [ "$MODEL_NUM" == "CGM4331COM" ] || [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ] ; then
+                 if [ "$MODEL_NUM" == "CGM4331COM" ] || [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "CWA438TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ] ; then
                      WAN_INTERFACE=`sysevent get current_wan_ifname`
                      if [ "$WAN_INTERFACE" = "" ]; then
                          WAN_INTERFACE="erouter0"
@@ -1606,6 +1606,7 @@ self_heal_conntrack()
 # Tech XD4  => MODEL_NUM=CVA601ZCOM
 # Vant XER5 => MODEL_NUM=VTER11QEL
 # Tech XB10    => MODEL_NUM=CGM601TCOM
+# Tech XB9    => MODEL_NUM=CWA438TCOM
 # Sercomm XB10 => MODEL_NUM=SG417DBCT
 # Sercomm XER10 => MODEL_NUM=SCER11BEL
 
@@ -1615,6 +1616,7 @@ if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
    [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "CVA601ZCOM" ] &&
    [ "$MODEL_NUM" != "VTER11QEL" ] &&
    [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] &&
+   [ "$MODEL_NUM" != "CWA438TCOM" ] &&
    [ "$MODEL_NUM" != "SCER11BEL" ] && [ "$MODEL_NAME" != "RPI" ] &&
    [ "$MODEL_NAME" != "BPI" ] && [ "$MODEL_NUM" != "SCXF11BFL" ]
 then
