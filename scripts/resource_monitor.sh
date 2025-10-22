@@ -473,12 +473,15 @@ fi
 
 	SELFHEAL_ENABLE=`syscfg get selfheal_enable`
 	COUNT=$((COUNT+1))
-    if [ "$COUNT" -eq 4 ]
+	echo_t "SHARMAN-3627 count value is $COUNT"
+    if [ "$COUNT" -eq 1 ]
     then
         ######DUMP MEMORY INFO######
         echo_t "*************************"
         echo_t "`date`"
+	echo_t "`busybox top -bn1`"
         echo_t "`busybox top -mbn1 | sort -k4 -r`"
+	echo_t "`busybox top -bn1 | sort -k4 -r`"
         echo_t "`cat /proc/meminfo`"
 	cachedMem=`awk '/^Cached:/ {print $2,$3}' /proc/meminfo`
         echo_t "CachedMemory: $cachedMem"
