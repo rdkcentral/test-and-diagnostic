@@ -569,7 +569,7 @@ if [ "$WAN_TYPE" != "EPON" ]; then
 	   	    check_if_brlan0_hasip=`ifconfig brlan0 | grep "inet addr"`
 
                     # l2sd0.100 is an interface specific to intel platform. Not applicable for other soc vendors.
-                    if [ "$BOX_TYPE" = "XB6" ] || [ "$BOX_TYPE" = "HUB4" ] || [ "$BOX_TYPE" = "SR300" ] || [ "$BOX_TYPE" = "SE501" ] || [ "$BOX_TYPE" = "SR213" ] || [ "$BOX_TYPE" = "WNXL11BWL" ] || [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ]
+                    if [ "$BOX_TYPE" = "XB6" ] || [ "$BOX_TYPE" = "HUB4" ] || [ "$BOX_TYPE" = "SR300" ] || [ "$BOX_TYPE" = "SE501" ] || [ "$BOX_TYPE" = "SR213" ] || [ "$BOX_TYPE" = "WNXL11BWL" ] || [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ] || [ "$BOX_TYPE" = "SCXF11BFL" ]
                     then
                         check_if_l2sd0_100_created="NotApplicable"
                         check_if_l2sd0_100_up="NotApplicable"

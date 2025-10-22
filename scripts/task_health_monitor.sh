@@ -78,7 +78,7 @@ case $BOX_TYPE in
     "XB6") SELFHEAL_TYPE="SYSTEMD";;
     "XF3") SELFHEAL_TYPE="SYSTEMD";;
     "TCCBR") SELFHEAL_TYPE="TCCBR";;
-    "pi"|"rpi") SELFHEAL_TYPE="BASE";;  # TBD?!
+    "pi"|"rpi"|"bpi") SELFHEAL_TYPE="BASE";;  # TBD?!
     "HUB4") SELFHEAL_TYPE="SYSTEMD";;
     "SR300") SELFHEAL_TYPE="SYSTEMD";;
     "SE501") SELFHEAL_TYPE="SYSTEMD";;
@@ -86,6 +86,7 @@ case $BOX_TYPE in
     "WNXL11BWL") SELFHEAL_TYPE="SYSTEMD";;
     "SCER11BEL") SELFHEAL_TYPE="SYSTEMD";;
     "VNTXER5") SELFHEAL_TYPE="SYSTEMD";;
+    "SCXF11BFL") SELFHEAL_TYPE="SYSTEMD";;
     *)
         echo_t "RDKB_SELFHEAL : ERROR: Unknown BOX_TYPE '$BOX_TYPE', using SELFHEAL_TYPE='BASE'"
         SELFHEAL_TYPE="BASE";;
@@ -284,15 +285,30 @@ self_heal_meshAgent()
 }
 
 self_heal_meshAgent_hung() {
-    cmd_mesh="dmcli eRT getv Device.DeviceInfo.X_RDKCENTRAL-COM_xOpsDeviceMgmt.Mesh.Enable"
-    eval "$cmd_mesh" > /dev/null &
+    dmcli eRT getv Device.DeviceInfo.X_RDKCENTRAL-COM_xOpsDeviceMgmt.Mesh.Enable > /dev/null &
     local cmd_pid=$!
     sleep 5
-    process_info=$(ps | grep $cmd_pid | grep -v grep)
-    if [ -n "$process_info" ]; then
-       kill $cmd_pid
-       echo_t "[RDKB_SELFHEAL] :meshAgent is hung, defer restart"
-       systemctl restart meshAgent
+    process_info=$(ps | awk -v pid="$cmd_pid" '$1 == pid')
+    if [ -n "$process_info" ];then
+       if kill -0 $cmd_pid 2>/dev/null;then
+          kill $cmd_pid
+          if [ -f /tmp/meshagent_restart ];then
+             echo_t "[RDKB_SELFHEAL] :meshAgent is hung, defer restart"
+             systemctl restart meshAgent
+             rm /tmp/meshagent_restart
+          else
+             echo_t "[RDKB_SELFHEAL] :meshAgent is hung, wait for one more iteration"
+             touch /tmp/meshagent_restart
+          fi
+       else
+          if [ -f /tmp/meshagent_restart ];then
+             rm /tmp/meshagent_restart
+          fi
+       fi
+    else
+        if [ -f /tmp/meshagent_restart ];then
+           rm /tmp/meshagent_restart
+        fi
     fi
 }
 
@@ -875,7 +891,7 @@ case $SELFHEAL_TYPE in
         ###########################################
     ;;
     "SYSTEMD"|"TCCBR")
-        if [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$BOX_TYPE" = "TCCBR" ]; then
+        if [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$BOX_TYPE" = "TCCBR" ]; then
             Check_If_Erouter_Exists=$(ifconfig -a | grep "$WAN_INTERFACE")
             ifconfig $WAN_INTERFACE > /dev/null
             wan_exists=$?
@@ -1164,7 +1180,7 @@ case $SELFHEAL_TYPE in
 
         # Checking XdnsSsp PID
         XDNS_PID=$(busybox pidof CcspXdnsSsp)
-        if [ "$XDNS_PID" = "" ]; then
+        if [ "$XDNS_PID" = "" ] && [ "$BOX_TYPE" != "bpi" ]; then
             echo_t "RDKB_PROCESS_CRASHED : CcspXdnsSsp_process is not running, need restart"
             resetNeeded xdns CcspXdnsSsp
 
@@ -2507,8 +2523,7 @@ esac
 # Vant XER5 => MODEL_NUM=VTER11QEL
 # This critical processes checking is handled in selfheal_aggressive.sh for above platforms
 # Ref: RDKB-25546
-if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
-       [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] && [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ] 
+if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] && [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "CWA438TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] && [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
 then
 case $SELFHEAL_TYPE in
     "BASE")
@@ -3115,7 +3130,7 @@ if ([ "$SELFHEAL_TYPE" = "BASE" ] || [ "$WiFi_Flag" = "false" ]) && [ "$MODEL_NU
                         fi
 
                             #### TCXB8-2214: 5G SSID down due to hostapd unresponsive
-                            if [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ]; then
+                            if [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "CWA438TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ]; then
                                 buf=$(grep "5G hostapd is unresponsive" /rdklogs/logs/wifi_vendor_apps.log)
                                 if [[ "$buf" != "" ]]; then
                                     echo_t "[RDKB_PLATFORM_ERROR] : 5G hostapd is unresponsive"
@@ -3177,7 +3192,7 @@ if ([ "$SELFHEAL_TYPE" = "BASE" ] || [ "$WiFi_Flag" = "false" ]) && [ "$MODEL_NU
             else
                 #### TCXB8-2214: 5G SSID down due to hostapd unresponsive
                 # 5G SSID is up, remove the hostapd restart flag
-                if [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ] || [ "$MODEL_NUM" == "CGA4332COM" ]; then
+                if [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "CWA438TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ] || [ "$MODEL_NUM" == "CGA4332COM" ]; then
                     if [ -f "$FILE_5G_HOSTAPD_RESTART_FLAG" ]; then
                         echo_t "[RDKB_SELFHEAL] : 5G Private SSID is now up, removing $FILE_5G_HOSTAPD_RESTART_FLAG"
                         rm "$FILE_5G_HOSTAPD_RESTART_FLAG"
@@ -3254,7 +3269,7 @@ if ([ "$SELFHEAL_TYPE" = "BASE" ] || [ "$WiFi_Flag" = "false" ]) && [ "$MODEL_NU
                             #### End of CMXB7-5473
 
                             #### TCXB8-2119: 2G SSID down due to hostapd unresponsive
-                            if [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ]; then
+                            if [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "CWA438TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ]; then
                                 buf=$(grep "2G hostapd is unresponsive" /rdklogs/logs/wifi_vendor_apps.log)
                                 if [[ "$buf" != "" ]]; then
                                     echo_t "[RDKB_PLATFORM_ERROR] : 2G hostapd is unresponsive"
@@ -3301,7 +3316,7 @@ if ([ "$SELFHEAL_TYPE" = "BASE" ] || [ "$WiFi_Flag" = "false" ]) && [ "$MODEL_NU
             else
                 #### TCXB8-2119: 2G SSID down due to hostapd unresponsive
                 # 2G SSID is up, remove the hostapd restart flag
-                if [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ]; then
+                if [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "CWA438TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ]; then
                     if [ -f "$FILE_2G_HOSTAPD_RESTART_FLAG" ]; then
                         echo_t "[RDKB_SELFHEAL] : 2G Private SSID is now up, removing $FILE_2G_HOSTAPD_RESTART_FLAG"
                         rm "$FILE_2G_HOSTAPD_RESTART_FLAG"
@@ -3573,7 +3588,7 @@ fi
     # This critical processes checking is handled in selfheal_aggressive.sh for above platforms
     # Ref: RDKB-25546
     if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
-	   [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] && [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
+	   [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "CWA438TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] && [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
     then
     checkIfDnsmasqIsZombie=$(ps | grep "dnsmasq" | grep "Z" | awk '{ print $1 }')
     if [ "$checkIfDnsmasqIsZombie" != "" ] ; then
@@ -3724,7 +3739,7 @@ if [ "$thisWAN_TYPE" != "EPON" ]; then
 		# This critical processes checking is handled in selfheal_aggressive.sh for above platforms
 		# Ref: RDKB-25546
 		if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
-		       [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] && [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
+		       [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "CWA438TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] && [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
 		then
                 checkIfDnsmasqIsZombie=$(ps | grep "dnsmasq" | grep "Z" | awk '{ print $1 }')
                 if [ "$checkIfDnsmasqIsZombie" != "" ] ; then
@@ -3815,7 +3830,7 @@ esac
 if [ "$xle_device_mode" -ne "1" ]; then
 # for xle no need to check dibbler client and server
     if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
-        [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] && [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
+        [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "CWA438TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] && [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
     then
     #Checking dibbler server is running or not RDKB_10683
     DIBBLER_PID=$(busybox pidof dibbler-server)
@@ -4054,7 +4069,7 @@ esac
 # This critical processes checking is handled in selfheal_aggressive.sh for above platforms
 # Ref: RDKB-25546
 if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
-       [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] || [ "$MODEL_NUM" != "SG417DBCT" ] && [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
+       [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CWA438TCOM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] || [ "$MODEL_NUM" != "SG417DBCT" ] && [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
 then
 # Checking for WAN_INTERFACE ipv6 address
 DHCPV6_ERROR_FILE="/tmp/.dhcpv6SolicitLoopError"
@@ -4131,7 +4146,7 @@ if [ "$erouter0_globalv6_test" = "" ] && [ "$WAN_STATUS" = "started" ] && [ "$BO
                     echo_t "[RDKB_AGG_SELFHEAL] :  Killing dibbler-client with pid $dibbler_client_pid"
                     killall -9 dibbler-client
                 fi
-                if [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ]
+                if [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" == "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ]
                 then
                     sh $DHCPV6_HANDLER disable
                 else
@@ -4197,7 +4212,7 @@ fi
 wan_dhcp_client_v4=1
 wan_dhcp_client_v6=1
 #dibbler-client selfheal not required on  SCER11BEL since WAN Unification use case will cover under WANManager.
-if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$WAN_STATUS" = "started" ]  && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ]; then
+if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$WAN_STATUS" = "started" ]  && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ]; then
     wan_dhcp_client_v4=1
     wan_dhcp_client_v6=1
 
@@ -4209,7 +4224,7 @@ if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "
             UDHCPC_Enable=$(syscfg get UDHCPEnable_v2)
             dibbler_client_enable=$(syscfg get dibbler_client_enable_v2)
 
-	    if ( ( [ "$MANUFACTURE" = "Technicolor" ] || [ "$MANUFACTURE" = "Sercomm" ] ) && [ "$BOX_TYPE" != "XB3" ] ) || [ "$WAN_TYPE" = "EPON" ] || [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ]; then
+	    if ( ( [ "$MANUFACTURE" = "Technicolor" ] || [ "$MANUFACTURE" = "Sercomm" ] ) && [ "$BOX_TYPE" != "XB3" ] ) || [ "$WAN_TYPE" = "EPON" ] || [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ] || [ "$BOX_TYPE" = "SCXF11BFL" ]; then
                 check_wan_dhcp_client_v4=$(ps w | grep "udhcpc" | grep "erouter")
                 check_wan_dhcp_client_v6=$(ps w | grep "dibbler-client" | grep -v "grep")
             else
@@ -4446,7 +4461,7 @@ case $SELFHEAL_TYPE in
     ;;
     "SYSTEMD")
         #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-        if [ "x$MAPT_CONFIG" != "xset" ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ $DHCPV4C_STATUS != "false" ] && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ]; then
+        if [ "x$MAPT_CONFIG" != "xset" ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ $DHCPV4C_STATUS != "false" ] && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ]; then
             if [ $wan_dhcp_client_v4 -eq 0 ]; then
                 if [ "$MANUFACTURE" = "Technicolor" ]; then
                     V4_EXEC_CMD="/sbin/udhcpc -i erouter0 -p /tmp/udhcpc.erouter0.pid -s /etc/udhcpc.script"
@@ -4552,7 +4567,7 @@ fi
 # This critical processes checking is handled in selfheal_aggressive.sh for above platforms
 # Ref: RDKB-25546
 if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
-       [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] &&  [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
+       [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && [ "$MODEL_NUM" != "CGM4981COM" ] && [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "CWA438TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] &&  [ "$MODEL_NUM" != "TG4482A" ] && [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "VTER11QEL" ]
 then
 case $SELFHEAL_TYPE in
     "BASE")
@@ -4707,7 +4722,7 @@ if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ]; then
     fi
 fi
 
-if [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$MODEL_NUM" = "CGM4331COM" ]; then
+if [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$MODEL_NUM" = "CGM4331COM" ]; then
         MESH_ENABLE=$(dmcli eRT getv Device.DeviceInfo.X_RDKCENTRAL-COM_xOpsDeviceMgmt.Mesh.Enable | grep "value" | cut -f3 -d":" | cut -f2 -d" ")
         OPENSYNC_ENABLE=$(dmcli eRT getv Device.DeviceInfo.X_RDKCENTRAL-COM_xOpsDeviceMgmt.Mesh.Opensync | grep "value" | cut -f3 -d":" | cut -f2 -d" ")
         if [ "$MESH_ENABLE" = "true" ] && [ "$OPENSYNC_ENABLE" = "true" ]; then
@@ -4869,7 +4884,7 @@ self_heal_rfc()
 self_heal_ethwan_mode_recover()
 {
 
-    if [ "$MODEL_NUM" == "CGM601TCOM" ] ||  [ "$MODEL_NUM" == "SG417DBCT" ];then
+    if [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "CWA438TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ];then
 
         echo_t "RDKB_SELFHEAL : Checking for XB10 in EthWan mode "
         CurrWanMode=$(dmcli eRT getv Device.X_RDKCENTRAL-COM_EthernetWAN.CurrentOperationalMode | grep "value" | cut -f3 -d":" | cut -f2 -d" ")
