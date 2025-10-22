@@ -242,3 +242,5 @@ char* RemoveSpaces(char *str);
 void CosaReadProcAnalConfig(const char *paramname, char *res);
 void CosaWriteProcAnalConfig(const char *paramname, char *res);
 int CosaIsProcAnalRunning();
+int ReadProcessListFromBucketStatus(const char* color, char* outBuf, size_t outBufSize);
+unsigned long CosaGetDeviceUptime(void);
