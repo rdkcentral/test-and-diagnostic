@@ -356,7 +356,7 @@ X_RDK_AutomationTest_SetParamStringValue
                 }
                 AnscTraceFlow(("Input string: %s\n", pString));
                 if( FALSE == is_test_running() ) {
-                    char *input = pString + 10; // Move past "logUpload|"
+                    char *input = pString + strlen("logUpload|"); // Move past "logUpload|"
                     int status = Trigger_logUpload(input);
                     if( status != 0 ) {
                         AnscTraceWarning(("%s : Failed to start logUpload test\n", __FUNCTION__));
