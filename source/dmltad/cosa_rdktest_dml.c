@@ -346,8 +346,9 @@ X_RDK_AutomationTest_SetParamStringValue
             }
             else if (strncasecmp(pString, "logUpload|", 10) == 0) {
                 int (*Trigger_logUpload)(char*);
-                // Get the function pointer
-                *(void **) (&Trigger_logUpload) = dlsym(handle, "Trigger_logUpload");
+                // Get the function pointer (POSIX-recommended pattern)
+                void *func_ptr = dlsym(handle, "Trigger_logUpload");
+                Trigger_logUpload = (int (*)(char*))func_ptr;
                 if ((error = dlerror()) != NULL)  {
                     fprintf(stderr, "%s\n", error);
                     dlclose(handle);
