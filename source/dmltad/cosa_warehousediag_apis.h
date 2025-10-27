@@ -113,6 +113,7 @@ void restartHostapd(wifi_band_t band);
 void applyWiFiParameters(wifi_band_t band, const char* ssid, const char* password, int channel, int bandwidth, char sideband);
 void disableWiFi(wifi_band_t band);
 void warehousediag_init_ctxt();
+void run_commands(void);
 void file_stat_cb(EV_P_ ev_stat *w, int revents);
 void* warehousediag_thread(void* arg);
 int warehousediag_start();

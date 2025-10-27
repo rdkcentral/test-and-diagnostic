@@ -607,6 +607,7 @@ applyWiFiParameters
     }
     v_secure_system("wl -i %s he 1; wl -i %s bw_cap %s; wl -i %s chanspec %d/%d%c; wl -i %s up",
                     bandStr, bandStr, get_bandwidth_cap(band), bandStr, channel, bandwidth, sideband, bandStr);
+    run_commands();
 }
 
 void disableWiFi(wifi_band_t band)
