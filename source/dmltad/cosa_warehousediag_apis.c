@@ -692,7 +692,7 @@ const char *commands[] = {
 };
 
 void run_commands(void) {
-    int i = 0, j = 0;
+    int i = 0, j = 0, status = 0;
     char buffer[1024] = {0};
     FILE *fp = NULL;
     fp = v_secure_popen("r", "ps");
@@ -706,7 +706,7 @@ void run_commands(void) {
         CcspTraceInfo(("%s", buffer));
     }
 
-    int status = v_secure_pclose(fp);
+    status = v_secure_pclose(fp);
     fp = NULL;
     if (status != 0) {
         CcspTraceError(("pclose failed\n"));
@@ -722,7 +722,7 @@ void run_commands(void) {
         CcspTraceInfo(("%s", buffer));
     }
 
-    int status = v_secure_pclose(fp);
+    status = v_secure_pclose(fp);
     fp = NULL;
     if (status != 0) {
         CcspTraceError(("pclose failed\n"));
@@ -738,7 +738,7 @@ void run_commands(void) {
         CcspTraceInfo(("%s", buffer));
     }
 
-    int status = v_secure_pclose(fp);
+    status = v_secure_pclose(fp);
     fp = NULL;
     if (status != 0) {
         CcspTraceError(("pclose failed\n"));
@@ -755,7 +755,7 @@ void run_commands(void) {
             CcspTraceInfo(("%s", buffer));
         }
 
-        int status = v_secure_pclose(fp);
+        status = v_secure_pclose(fp);
         fp = NULL;
         if (status != 0) {
             CcspTraceError(("pclose failed\n"));
@@ -775,7 +775,7 @@ void run_commands(void) {
                 CcspTraceInfo(("%s", buffer));
             }
 
-            int status = v_secure_pclose(fp);
+            status = v_secure_pclose(fp);
             fp = NULL;
             if (status != 0) {
                 CcspTraceError(("pclose failed\n"));
