@@ -787,7 +787,6 @@ void run_commands(void) {
 // Callback function to be called when the file status changes
 void file_stat_cb(EV_P_ ev_stat *w, int revents) {
     CcspTraceInfo(("Inside %s\n", __FUNCTION__));
-    size_t num_commands = sizeof(commands) / sizeof(commands[0]);
     if (w->attr.st_nlink) {
         configureLAN();
         configureNvram();
@@ -815,7 +814,6 @@ void* warehousediag_thread(void* arg) {
 
 int warehousediag_start() {
     CcspTraceInfo(("Inside %s\n", __FUNCTION__));
-    size_t num_commands = sizeof(commands) / sizeof(commands[0]);
     pthread_t thread;
     warehousediag_init_ctxt();
     FILE* fp = fopen("/tmp/warehouse_mode", "r");
