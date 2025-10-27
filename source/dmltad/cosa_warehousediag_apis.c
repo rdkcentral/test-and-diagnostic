@@ -702,20 +702,13 @@ const char *commands[] = {
     "wl -i wl0 chanspec",
     "wl -i wl1 chanspec",
     "wl -i wl2 chanspec",
-    "wl -i wl2 counter | grep -i bcn",
-    "sleep 5",
-    "wl -i wl2 counter | grep -i bcn",
-    "wl -i wl2.1 counter | grep -i bcn",
-    "sleep 5",
-    "wl -i wl2.1 counter | grep -i bcn",
     "wl -i wl2 beacon_info",
     "wl -i wl2.1 beacon_info"
 };
 
 void run_command(const char *cmd) {
     CcspTraceInfo(("\n--- Running: %s ---\n", cmd));
-
-    FILE *fp = v_secure_popen("r", cmd);
+    FILE *fp = v_secure_popen("r", "%s", cmd);
     if (fp == NULL) {
         CcspTraceError(("popen failed\n"));
         return;
