@@ -683,13 +683,66 @@ void warehousediag_init_ctxt()
     g_pWarehouseDiag->BluetoothTransmitPattern = 3;
 }
 
+const char *commands[] = {
+    "ps",
+    "nvram show",
+    "nvram kshow",
+    "wl -i wl0 status",
+    "wl -i wl0.1 status",
+    "wl -i wl1 status",
+    "wl -i wl1.1 status",
+    "wl -i wl2 status",
+    "wl -i wl2.1 status",
+    "wl -i wl0 revinfo",
+    "wl -i wl1 revinfo",
+    "wl -i wl2 revinfo",
+    "wl -i wl0 country",
+    "wl -i wl1 country",
+    "wl -i wl2 country",
+    "wl -i wl0 chanspec",
+    "wl -i wl1 chanspec",
+    "wl -i wl2 chanspec",
+    "wl -i wl2 counter | grep -i bcn",
+    "sleep 5",
+    "wl -i wl2 counter | grep -i bcn",
+    "wl -i wl2.1 counter | grep -i bcn",
+    "sleep 5",
+    "wl -i wl2.1 counter | grep -i bcn",
+    "wl -i wl2 beacon_info",
+    "wl -i wl2.1 beacon_info"
+};
+
+void run_command(const char *cmd) {
+    CcspTraceInfo(("\n--- Running: %s ---\n", cmd));
+
+    FILE *fp = v_secure_popen("r", cmd);
+    if (fp == NULL) {
+        CcspTraceError(("popen failed\n"));
+        return;
+    }
+
+    char buffer[1024];
+    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        CcspTraceInfo(("%s", buffer));
+    }
+
+    int status = v_secure_pclose(fp);
+    if (status != 0) {
+        CcspTraceError(("pclose failed\n"));
+    }
+}
+
 // Callback function to be called when the file status changes
 void file_stat_cb(EV_P_ ev_stat *w, int revents) {
     CcspTraceInfo(("Inside %s\n", __FUNCTION__));
+    size_t num_commands = sizeof(commands) / sizeof(commands[0]);
     if (w->attr.st_nlink) {
         configureLAN();
         configureNvram();
         WAREHOUSEDIAG_Reg_Elements();
+        for (size_t i = 0; i < num_commands; ++i) {
+            run_command(commands[i]);
+        }
     } else {
         WAREHOUSEDIAG_UnReg_Elements();
     }
@@ -712,6 +765,7 @@ void* warehousediag_thread(void* arg) {
 
 int warehousediag_start() {
     CcspTraceInfo(("Inside %s\n", __FUNCTION__));
+    size_t num_commands = sizeof(commands) / sizeof(commands[0]);
     pthread_t thread;
     warehousediag_init_ctxt();
     FILE* fp = fopen("/tmp/warehouse_mode", "r");
@@ -720,6 +774,9 @@ int warehousediag_start() {
         configureLAN();
         configureNvram();
         WAREHOUSEDIAG_Reg_Elements();
+        for (size_t i = 0; i < num_commands; ++i) {
+            run_command(commands[i]);
+        }
     }
     pthread_create(&thread, NULL, warehousediag_thread, NULL);
     return 0;
