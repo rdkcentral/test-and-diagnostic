@@ -1174,3 +1174,78 @@ int CosaIsProcAnalRunning()
         return 0;
     }
 }
+
+/**
+ * @brief Reads the process list for a given bucket color from /tmp/bucket_status.txt.
+ *
+ * This function opens the `/tmp/bucket_status.txt` file, searches for a line starting
+ * with the specified `color` followed by a colon (e.g., "RED:pid1,pid2,pid3"), and
+ * copies the associated process list into the provided output buffer.
+ *
+ * @param[in]  color       The color name (e.g., "RED", "GREEN", "BLUE") to search for in the status file.
+ * @param[out] outBuf      Pointer to the output buffer where the resulting process list will be stored.
+ * @param[in]  outBufSize  The size of the output buffer in bytes. The resulting string will be null-terminated.
+ *
+ * @return
+ * - `1` if the matching color is found and the process list is successfully written to `outBuf`.
+ * - `0` if the file cannot be opened or the matching color is not found.
+ *
+ * @note
+ * - The `/tmp/bucket_status.txt` file is expected to have lines in the format:
+ *   @code
+ *   RED:proc1,proc2,proc3
+ *   GREEN:proc4,proc5
+ *   @endcode
+ * - If the process list exceeds `outBufSize - 1` characters, it will be truncated.
+ * - Trailing newline characters in the file are removed from the stored process list.
+ *
+ * @warning
+ * - Ensure `outBuf` is a valid pointer and `outBufSize` is sufficient to store the expected process list.
+ * - Thread safety is not guaranteed. If multiple threads call this function, external synchronization is needed.
+ */
+
+int ReadProcessListFromBucketStatus(const char* color, char* outBuf, size_t outBufSize)
+{
+    FILE* fp = fopen("/tmp/bucket_status.txt", "r");
+    if (!fp) {
+        return 0;
+    }
+    char line[4096];
+    int found = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, color, strlen(color)) == 0 && line[strlen(color)] == ':') {
+            // Found the line for the color
+            char* processes = line + strlen(color) + 1; // Skip "COLOR:"
+            // Remove trailing newline if present
+            size_t len = strlen(processes);
+            if (len > 0 && processes[len - 1] == '\n') {
+                processes[len - 1] = '\0';
+            }
+            strncpy(outBuf, processes, outBufSize - 1);
+            outBuf[outBufSize - 1] = '\0';
+            found = 1;
+            break;
+        }
+    }
+    fclose(fp);
+    return found;
+}
+
+/*
+ * CosaGetDeviceUptime
+ * Reads /proc/uptime and returns uptime in seconds (as unsigned long).
+ */
+unsigned long CosaGetDeviceUptime(void)
+{
+    FILE *fp = fopen("/proc/uptime", "r");
+    if (!fp) {
+        return 0;
+    }
+    double uptime = 0.0;
+    if (fscanf(fp, "%lf", &uptime) != 1) {
+        fclose(fp);
+        return 0;
+    }
+    fclose(fp);
+    return (unsigned long)uptime;
+}
