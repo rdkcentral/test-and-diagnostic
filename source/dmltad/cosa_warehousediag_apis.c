@@ -695,6 +695,7 @@ void run_commands(void) {
     int i = 0, j = 0, status = 0;
     char buffer[1024] = {0};
     FILE *fp = NULL;
+    CcspTraceInfo(("\n--- Running cmd: ps ---\n"));
     fp = v_secure_popen("r", "ps");
     if (fp == NULL) {
         CcspTraceError(("popen failed\n"));
@@ -711,6 +712,7 @@ void run_commands(void) {
     if (status != 0) {
         CcspTraceError(("pclose failed\n"));
     }
+    CcspTraceInfo(("\n--- Running cmd: nvram show ---\n"));
     fp = v_secure_popen("r", "nvram show");
     if (fp == NULL) {
         CcspTraceError(("popen failed\n"));
@@ -727,6 +729,7 @@ void run_commands(void) {
     if (status != 0) {
         CcspTraceError(("pclose failed\n"));
     }
+    CcspTraceInfo(("\n--- Running cmd: nvram kshow ---\n"));
     fp = v_secure_popen("r", "nvram kshow");
     if (fp == NULL) {
         CcspTraceError(("popen failed\n"));
@@ -744,6 +747,7 @@ void run_commands(void) {
         CcspTraceError(("pclose failed\n"));
     }
     for (i = 0; i < 6; i++) {
+        CcspTraceInfo(("\n--- Running cmd: wl -i %s %s ---\n", interfaces[i], commands[0]));
         fp = v_secure_popen("r", "wl -i %s %s", interfaces[i], commands[0]);
         if (fp == NULL) {
             CcspTraceError(("popen failed\n"));
@@ -764,6 +768,7 @@ void run_commands(void) {
 
     for (j = 1; j < 4; j++) {
         for (i = 0; i < 3; i++) {
+            CcspTraceInfo(("\n--- Running cmd: wl -i %s %s ---\n", interfaces[i], commands[j]));
             fp = v_secure_popen("r", "wl -i %s %s", interfaces[i], commands[j]);
             if (fp == NULL) {
                 CcspTraceError(("popen failed\n"));
