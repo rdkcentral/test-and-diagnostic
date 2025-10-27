@@ -683,45 +683,104 @@ void warehousediag_init_ctxt()
     g_pWarehouseDiag->BluetoothTransmitPattern = 3;
 }
 
-const char *commands[] = {
-    "ps",
-    "nvram show",
-    "nvram kshow",
-    "wl -i wl0 status",
-    "wl -i wl0.1 status",
-    "wl -i wl1 status",
-    "wl -i wl1.1 status",
-    "wl -i wl2 status",
-    "wl -i wl2.1 status",
-    "wl -i wl0 revinfo",
-    "wl -i wl1 revinfo",
-    "wl -i wl2 revinfo",
-    "wl -i wl0 country",
-    "wl -i wl1 country",
-    "wl -i wl2 country",
-    "wl -i wl0 chanspec",
-    "wl -i wl1 chanspec",
-    "wl -i wl2 chanspec",
-    "wl -i wl2 beacon_info",
-    "wl -i wl2.1 beacon_info"
+const char *interfaces[] = {
+    "wl0", "wl1", "wl2", "wl0.1", "wl1.1", "wl2.1"
 };
 
-void run_command(const char *cmd) {
-    CcspTraceInfo(("\n--- Running: %s ---\n", cmd));
-    FILE *fp = v_secure_popen("r", "%s", cmd);
+const char *commands[] = {
+    "status", "revinfo", "country", "chanspec"
+};
+
+void run_commands(void) {
+    int i = 0, j = 0;
+    char buffer[1024] = {0};
+    FILE *fp = NULL;
+    fp = v_secure_popen("r", "ps");
     if (fp == NULL) {
         CcspTraceError(("popen failed\n"));
         return;
     }
 
-    char buffer[1024];
+    memset(buffer, 0, sizeof(buffer));
     while (fgets(buffer, sizeof(buffer), fp) != NULL) {
         CcspTraceInfo(("%s", buffer));
     }
 
     int status = v_secure_pclose(fp);
+    fp = NULL;
     if (status != 0) {
         CcspTraceError(("pclose failed\n"));
+    }
+    fp = v_secure_popen("r", "nvram show");
+    if (fp == NULL) {
+        CcspTraceError(("popen failed\n"));
+        return;
+    }
+
+    memset(buffer, 0, sizeof(buffer));
+    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        CcspTraceInfo(("%s", buffer));
+    }
+
+    int status = v_secure_pclose(fp);
+    fp = NULL;
+    if (status != 0) {
+        CcspTraceError(("pclose failed\n"));
+    }
+    fp = v_secure_popen("r", "nvram kshow");
+    if (fp == NULL) {
+        CcspTraceError(("popen failed\n"));
+        return;
+    }
+
+    memset(buffer, 0, sizeof(buffer));
+    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        CcspTraceInfo(("%s", buffer));
+    }
+
+    int status = v_secure_pclose(fp);
+    fp = NULL;
+    if (status != 0) {
+        CcspTraceError(("pclose failed\n"));
+    }
+    for (i = 0; i < 6; i++) {
+        fp = v_secure_popen("r", "wl -i %s %s", interfaces[i], commands[0]);
+        if (fp == NULL) {
+            CcspTraceError(("popen failed\n"));
+            return;
+        }
+
+        memset(buffer, 0, sizeof(buffer));
+        while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+            CcspTraceInfo(("%s", buffer));
+        }
+
+        int status = v_secure_pclose(fp);
+        fp = NULL;
+        if (status != 0) {
+            CcspTraceError(("pclose failed\n"));
+        }
+    }
+
+    for (j = 1; j < 4; j++) {
+        for (i = 0; i < 3; i++) {
+            fp = v_secure_popen("r", "wl -i %s %s", interfaces[i], commands[j]);
+            if (fp == NULL) {
+                CcspTraceError(("popen failed\n"));
+                return;
+            }
+
+            memset(buffer, 0, sizeof(buffer));
+            while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+                CcspTraceInfo(("%s", buffer));
+            }
+
+            int status = v_secure_pclose(fp);
+            fp = NULL;
+            if (status != 0) {
+                CcspTraceError(("pclose failed\n"));
+            }
+        }
     }
 }
 
@@ -733,9 +792,7 @@ void file_stat_cb(EV_P_ ev_stat *w, int revents) {
         configureLAN();
         configureNvram();
         WAREHOUSEDIAG_Reg_Elements();
-        for (size_t i = 0; i < num_commands; ++i) {
-            run_command(commands[i]);
-        }
+        run_commands();
     } else {
         WAREHOUSEDIAG_UnReg_Elements();
     }
@@ -767,9 +824,7 @@ int warehousediag_start() {
         configureLAN();
         configureNvram();
         WAREHOUSEDIAG_Reg_Elements();
-        for (size_t i = 0; i < num_commands; ++i) {
-            run_command(commands[i]);
-        }
+        run_commands();
     }
     pthread_create(&thread, NULL, warehousediag_thread, NULL);
     return 0;
