@@ -564,6 +564,9 @@ static void cleanup_passivemonitor(void *arg)
         pcap_freecode(&pPassive->bpf_fp);
         pcap_close(pPassive->pcap);
     }
+    //test code
+    WANCHK_LOG_INFO("Waiting for 10 seconds before stopping passive monitor loop\n");
+    sleep(10);
     WANCHK_LOG_INFO("stopping passive monitor loop\n");
     if (pPassive->bgtimer.data == pPassive)
     {
@@ -804,6 +807,8 @@ void *wancnctvty_chk_passive_thread( void *arg )
     ev_init (&pPassive->bgtimer, wanchk_bgtimeout_cb);
     pPassive->bgtimer.data = (void *)pPassive;
     pPassive->bgtimer.repeat = (pIPInterface->PassiveMonitorTimeout / 1000);
+    WANCHK_LOG_INFO("%s: Starting passive monitor background timer with timeout %f seconds\n", __FUNCTION__,
+                                                        pPassive->bgtimer.repeat);
     ev_timer_start (pPassive->loop, &pPassive->bgtimer);
 
     pthread_cleanup_push(cleanup_passivemonitor, pPassive);
@@ -2217,6 +2222,7 @@ static void dns_response_callback(
         v_secure_system("touch /tmp/actv_mon_pause_%s", pPassive->InterfaceName);
         WANCHK_LOG_DBG("we have to restart the timer\n");
         ev_timer_start (pPassive->loop,&pPassive->bgtimer);
+        WANCHK_LOG_INFO("%s: ev_timer_start called to restart the timer for interface %s\n",__FUNCTION__, pPassive->InterfaceName);
         pcap_breakloop(pPassive->pcap);
     }
     if(pPassive->doInfoLogOnce)
