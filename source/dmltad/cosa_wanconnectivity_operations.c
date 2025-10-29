@@ -564,6 +564,9 @@ static void cleanup_passivemonitor(void *arg)
         pcap_freecode(&pPassive->bpf_fp);
         pcap_close(pPassive->pcap);
     }
+    //test code
+    WANCHK_LOG_INFO("Waiting for 10 seconds before stopping passive monitor loop\n");
+    sleep(10);
     WANCHK_LOG_INFO("stopping passive monitor loop\n");
     if (pPassive->bgtimer.data == pPassive)
     {
