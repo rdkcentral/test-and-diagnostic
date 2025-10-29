@@ -1270,7 +1270,7 @@ BbhmDiagnsClose
     {
         return  ANSC_STATUS_SUCCESS;
     }
-
+    AnscAcquireLock(&pMyObject->EchoTableLock);
     if ( pXsink )
     {
         pXsink->Detach((ANSC_HANDLE)pXsink);
@@ -1294,8 +1294,6 @@ BbhmDiagnsClose
         AnscFreeMemory(pDiagInfo);
         pDiagInfo = NULL;
     }
-
-    AnscAcquireLock(&pMyObject->EchoTableLock);
 
     pSLinkEntry = AnscSListPopEntry(&pMyObject->EchoTable);
 
@@ -1375,12 +1373,14 @@ BbhmDiagnsCalculateResult
     ULONG                           i            = 0;
 
     if ( pDiagnsInfo )
-    {
+    { 
+        AnscAcquireLock(&pMyObject->EchoTableLock);
         for(i = 0; i < pDslhDiagInfo->ResultNumberOfEntries; i++)
         {
             AnscFreeMemory(pDiagnsInfo[i].HostNameReturned);
             AnscFreeMemory(pDiagnsInfo[i].IPAddresses);
         }
+        AnscReleaseLock(&pMyObject->EchoTableLock);
         AnscFreeMemory(pDiagnsInfo);
         pDiagnsInfo = NULL;
     }
@@ -1397,7 +1397,6 @@ BbhmDiagnsCalculateResult
     }
 
     pMyObject->DelAllPqueries(pMyObject);
-
     AnscAcquireLock(&pMyObject->EchoTableLock);
     pSLinkEntry = AnscSListPopEntry(&pMyObject->EchoTable);
 

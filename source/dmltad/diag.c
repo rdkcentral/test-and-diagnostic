@@ -199,8 +199,9 @@ static int inet_is_onlink(const struct in_addr *addr)
 
             if (inet_pton(AF_INET, entry, &net) <= 0)
                 continue;
-            if (atoi(pref) != 0){
-                mask = htonl(0xffffffff << (32 - atoi(pref)));
+            int prefix_len = atoi(pref);
+            if (prefix_len > 0 && prefix_len <= 32) {
+                mask = htonl(0xFFFFFFFF << (32 - prefix_len));
 
                 if (inet_is_same_net(*(uint32_t *)(addr), *(uint32_t *)&net, mask)) {
                     pclose(tbl_fp);
@@ -259,13 +260,15 @@ static int inet_is_local(const struct in_addr *addr)
                 return 1;
             }
         } else if (strcmp(tok, "local") == 0 && preflen) {
-            if (atoi(preflen) != 0){
-                if (inet_is_same_net(*(uint32_t *)addr, *(uint32_t *)&inaddr, 
-                            htonl(0xFFFFFFFF << (32 - atoi(preflen))))) {
+            int prefix = atoi(preflen);
+            if (prefix > 0 && prefix <= 32) {
+                uint32_t mask = (prefix == 32) ? 0xFFFFFFFF : htonl(0xFFFFFFFF << (32 - prefix));
+                if (inet_is_same_net(*(uint32_t *)addr, *(uint32_t *)&inaddr, mask)) {
                     pclose(fp);
                     return 1;
                 }
             }
+
         } else {
             continue; // never got here actually
         }

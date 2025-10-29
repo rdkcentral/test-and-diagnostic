@@ -209,7 +209,7 @@ int process_schedule_info_doc( schedule_info_t *s, msgpack_object_map *map )
         errno = HELPERS_OK;
     }
    
-    return (0 == size) ? 0 : ret_val;
+    return ret_val;
 }
 
 static int decode_schedule_table(msgpack_object *key, msgpack_object *val, input_t **t, size_t* input_size)

@@ -38,6 +38,8 @@
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 #include <ctype.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /*core net lib*/
 #ifdef CORE_NET_LIB
@@ -1350,6 +1352,32 @@ int send_query_create_udp_skt(struct query *query_info)
     } 
     return fd;
 }
+unsigned int get_secure_random_port(void)
+{
+    unsigned int val = 0;
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd >= 0) {
+        ssize_t bytes = read(fd, &val, sizeof(val));
+        if (bytes != sizeof(val)) {
+            // fallback if /dev/urandom fails
+            int fd_fallback = open("/dev/random", O_RDONLY);
+            if (fd_fallback >= 0) {
+                bytes = read(fd_fallback, &val, sizeof(val));
+                close(fd_fallback);
+                if (bytes != sizeof(val))
+                    val = (unsigned int)getpid() ^ (unsigned int)time(NULL);
+            } else {
+                val = (unsigned int)getpid() ^ (unsigned int)time(NULL);
+            }
+        }
+        close(fd);
+    } else {
+        // fallback if /dev/urandom unavailable
+        val = (unsigned int)getpid() ^ (unsigned int)time(NULL);
+    }
+
+    return 40000 + (val % 10000);
+}
 
 /* only use for secondary, since no other way*/
 unsigned int send_query_frame_raw_pkt(struct query *query_info,struct mk_query *query,unsigned char *packet)
@@ -1368,10 +1396,16 @@ unsigned int send_query_frame_raw_pkt(struct query *query_info,struct mk_query *
 
     char gw_addr[BUFLEN_64] = {0};
     memset(gw_addr, 0, sizeof(gw_addr));
+    errno_t rc;
     if (query_info->skt_family == AF_INET) {
-        strcpy_s(gw_addr, sizeof(gw_addr), query_info->IPv4Gateway);
+        rc = strcpy_s(gw_addr, sizeof(gw_addr), query_info->IPv4Gateway);
     } else {
-        strcpy_s(gw_addr, sizeof(gw_addr), query_info->IPv6Gateway);
+        rc = strcpy_s(gw_addr, sizeof(gw_addr), query_info->IPv6Gateway);
+    }
+    if (rc != 0) {
+    WANCHK_LOG_ERROR("strcpy_s failed with error code %d\n", rc);
+    // handle error, e.g., return, exit, or set gw_addr to safe default
+    gw_addr[0] = '\0';  // optional safe fallback
     }
     WANCHK_LOG_DBG("%s: GW IP Address:%s\n",__FUNCTION__,gw_addr);
 
@@ -1489,13 +1523,8 @@ unsigned int send_query_frame_raw_pkt(struct query *query_info,struct mk_query *
         }
         WANCHK_LOG_DBG("got ipv6 address %s for interface:%s\n",ipv6_src,query_info->ifname);
     }
-
-        /* slecting some random port*/
-    source_port = 40000+rand()%10000;
-    if (source_port <= 1024)
-    {
-        source_port = 40000+rand()%10000;
-    }
+    /* slecting some random port*/
+    source_port = get_secure_random_port();
     WANCHK_LOG_DBG("Random port for UDP DNS Query %d\n",source_port);
     WanCnctvtyChk_CreateUdpHeader(query_info->skt_family, source_port, 53 ,
                                                         query->qlen,&udp_header);
