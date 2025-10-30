@@ -420,12 +420,14 @@ BbhmDiagnsInitialize
      */
     pMyObject->ResetProperty((ANSC_HANDLE)pMyObject);
 
+    AnscInitializeLock       (&pMyObject->EchoTableLock);
+    AnscInitializeLock       (&pMyObject->PqueryTableLock);
+    
+    AnscAcquireLock(&pMyObject->EchoTableLock);
     AnscSListInitializeHeader(&pMyObject->EchoTable);
     AnscSListInitializeHeader(&pMyObject->PqueryTable);
 
-    AnscInitializeLock       (&pMyObject->EchoTableLock);
-    AnscInitializeLock       (&pMyObject->PqueryTableLock);
-
+    AnscReleaseLock(&pMyObject->EchoTableLock);
     return  ANSC_STATUS_SUCCESS;
 }
 

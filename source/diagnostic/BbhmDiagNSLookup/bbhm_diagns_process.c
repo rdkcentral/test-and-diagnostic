@@ -311,7 +311,7 @@ BbhmDiagnsRecv
 
     StopTime = AnscGetTickInMilliSeconds();
 
-
+    AnscAcquireLock(&pMyObject->EchoTableLock);
     if ( pProperty->Status != BBHM_NS_LOOKUP_STATUS_RUNNING )
     {
         return  ANSC_STATUS_UNAPPLICABLE;
@@ -403,7 +403,7 @@ BbhmDiagnsRecv
 
         return  returnStatus;
     }
-
+    AnscReleaseLock(&pMyObject->EchoTableLock);
     return  ANSC_STATUS_SUCCESS;
 }
 

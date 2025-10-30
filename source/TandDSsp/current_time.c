@@ -37,6 +37,8 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <time.h>
 #include <string.h>
 #include <sys/time.h>
@@ -182,26 +184,25 @@ bool setSystemTime(time_t desired_epoch_time)
 }
 
 //create /tmp/clock-event when device time is updated
+
 void setClockEventFile() 
 {    
-    // Check if file already exists
-    if (access(CLOCK_EVENT_PATH, F_OK) != -1) 
+    int fileDescriptor = open(CLOCK_EVENT_PATH, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (fileDescriptor == -1) 
     {
-    	CcspTraceInfo(("File /tmp/clock-event already exists\n"));
-    }
-    else
+        if (errno == EEXIST) 
+        {
+            CcspTraceInfo(("File /tmp/clock-event already exists\n"));
+        } 
+        else 
+        {
+            CcspTraceError(("Failed to create /tmp/clock-event file: %s\n", strerror(errno)));
+        }
+    } 
+    else 
     {
-    	// Create the file
-    	int fileDescriptor = creat(CLOCK_EVENT_PATH, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    	if (fileDescriptor != -1) 
-    	{
-       	close(fileDescriptor);
-        	CcspTraceInfo(("File /tmp/clock-event created successfully\n"));
-    	} 
-    	else 
-    	{
-        	CcspTraceError(("Failed to create /tmp/clock-event file\n"));
-    	}
+        close(fileDescriptor);
+        CcspTraceInfo(("File /tmp/clock-event created successfully\n"));
     }
 }
 //create /tmp/systimeset when system time is set

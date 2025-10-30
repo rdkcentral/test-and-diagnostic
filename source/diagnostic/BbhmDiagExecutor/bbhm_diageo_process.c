@@ -288,6 +288,7 @@ BbhmDiageoResultQueryTask
     PDSLH_DIAG_INFO_BASE            pDiagInfo           = NULL;
     BOOLEAN                         bQueryDone          = FALSE;
 
+    AnscAcquireLock(&pMyObject->AccessLock);
     AnscTraceFlow(("BbhmDiageoResultQueryTask ...\n"));
 
     do
@@ -327,8 +328,6 @@ BbhmDiageoResultQueryTask
             AnscTraceWarning(("Failed to send event for diagnostics completion.\n"));
         }
     }
-
-    AnscAcquireLock(&pMyObject->AccessLock);
 
     AnscTraceFlow(("BbhmDiageoResultQueryTask -- quiting...\n"));
 

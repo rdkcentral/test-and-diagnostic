@@ -23,6 +23,7 @@
 #include "device_prio_scheduler_apis.h"
 #include "device_prio_webconfig_apis.h"
 #include "device_prio_apis.h"
+#include "webconfig_scheduler_doc.h"
 
 extern int sysevent_fd;
 extern token_t sysevent_token;

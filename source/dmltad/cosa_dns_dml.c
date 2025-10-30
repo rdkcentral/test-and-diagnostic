@@ -1504,6 +1504,7 @@ Result_GetParamUlongValue
     )
 {
     PBBHM_NS_LOOKUP_ECHO_ENTRY      pEchoInfo          = (PBBHM_NS_LOOKUP_ECHO_ENTRY)hInsContext;
+    PBBHM_DIAG_NS_LOOKUP_OBJECT     pMyObject          = (PBBHM_DIAG_NS_LOOKUP_OBJECT  )hInsContext;
 
     if ( !pEchoInfo )
     {
@@ -1511,7 +1512,7 @@ Result_GetParamUlongValue
 
         return FALSE;
     }
-
+    AnscAcquireLock(&pMyObject->EchoTableLock);
     /* check the parameter name and return the corresponding value */
     if (strcmp(ParamName, "Status") == 0)
     {
@@ -1534,7 +1535,7 @@ Result_GetParamUlongValue
         return TRUE;
     }
 
-
+    AnscReleaseLock(&pMyObject->EchoTableLock);
     /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
     return FALSE;
 }
@@ -1587,6 +1588,7 @@ Result_GetParamStringValue
     )
 {
     PBBHM_NS_LOOKUP_ECHO_ENTRY      pEchoInfo          = (PBBHM_NS_LOOKUP_ECHO_ENTRY)hInsContext;
+    PBBHM_DIAG_NS_LOOKUP_OBJECT     pMyObject          = (PBBHM_DIAG_NS_LOOKUP_OBJECT  )hInsContext;
     errno_t rc = -1;
 
     if ( !pEchoInfo )
@@ -1595,7 +1597,7 @@ Result_GetParamStringValue
 
         return -1;
     }
-
+    AnscAcquireLock(&pMyObject->EchoTableLock);
     /* check the parameter name and return the corresponding value */
     if (strcmp(ParamName, "HostNameReturned") == 0)
     {
@@ -1648,7 +1650,7 @@ Result_GetParamStringValue
 
         return 0;
     }
-
+    AnscReleaseLock(&pMyObject->EchoTableLock);
     /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
     return -1;
 }

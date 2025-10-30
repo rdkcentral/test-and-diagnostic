@@ -51,8 +51,6 @@
 
 #define SYNC_CPA_CONF_FILE()                               \
     {                                                      \
-        if(access(CPA_CONFIG_FILE, F_OK))                  \
-        {                                                  \
             char buf[BUF_128] = {0};                       \
             FILE *fp1 = fopen(CPA_DEFAULT_CONF_FILE, "r"); \
             if(fp1)                                        \
@@ -69,7 +67,6 @@
                 }                                          \
                 fclose(fp1);                               \
             }                                              \
-        }                                                  \
     }
 
 

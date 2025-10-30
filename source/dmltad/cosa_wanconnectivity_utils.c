@@ -145,8 +145,17 @@ void WanCnctvtyChk_CreateIPHeader (int family, char *srcIp, char *dstIp, unsigne
         ipv6Hdr->ip6_plen = htons(sizeof(struct udphdr) +  dataSize);
         ipv6Hdr->ip6_nxt = IPPROTO_UDP;
         ipv6Hdr->ip6_hops = 60;
-        inet_pton(AF_INET6, srcIp, &(ipv6Hdr->ip6_src));
-        inet_pton(AF_INET6, dstIp, &(ipv6Hdr->ip6_dst));
+        if (inet_pton(AF_INET6, srcIp, &(ipv6Hdr->ip6_src)) != 1) {
+           WANCHK_LOG_ERROR("Error: invalid source IPv6 address: %s\n", srcIp);
+           // Handle error (return, set default, etc.)
+           return;
+        }
+
+        if (inet_pton(AF_INET6, dstIp, &(ipv6Hdr->ip6_dst)) != 1) {
+           WANCHK_LOG_ERROR("Error: invalid destination IPv6 address: %s\n", dstIp);
+           // Handle error
+           return;
+        }
         return;
     }else{
         
