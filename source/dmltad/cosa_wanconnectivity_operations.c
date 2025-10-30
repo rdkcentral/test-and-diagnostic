@@ -1523,7 +1523,7 @@ unsigned int send_query_frame_raw_pkt(struct query *query_info,struct mk_query *
         }
         WANCHK_LOG_DBG("got ipv6 address %s for interface:%s\n",ipv6_src,query_info->ifname);
     }
-    /* slecting some random port*/
+    /* selecting some random port*/
     source_port = get_secure_random_port();
     WANCHK_LOG_DBG("Random port for UDP DNS Query %d\n",source_port);
     WanCnctvtyChk_CreateUdpHeader(query_info->skt_family, source_port, 53 ,
