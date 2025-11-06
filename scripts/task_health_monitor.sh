@@ -4905,7 +4905,7 @@ self_heal_ethwan_mode_recover()
     fi
 }
 
-if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "TG3482G" ]; then
+if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$MODEL_NUM" = "SCER11BEL" ] || [ "$MODEL_NUM" = "SR203" ] || [ "$MODEL_NUM" = "SR213" ]; then
     mesh_optimization_mode=$(deviceinfo.sh -optimization)
     mesh_enable=$(syscfg get mesh_enable)
     if [[ "$mesh_optimization_mode" == "monitor" || "$mesh_optimization_mode" == "enable" ]] && ! [[ "$mesh_enable" == "true" && "$mesh_optimization_mode" == "enable" ]] && ! [[ "$mesh_enable" == "false" && "$mesh_optimization_mode" == "monitor" ]]
