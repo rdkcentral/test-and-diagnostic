@@ -45,15 +45,15 @@
 /*----------------------------------------------------------------------------*/
 int process_scheduler_doc( scheduler_doc_t *sd, int num, ...); 
 
-static int decode_schedule_table(msgpack_object *key, msgpack_object *val, input_t **t, size_t* input_size);
+static int decode_schedule_table(msgpack_object *key, msgpack_object *val, input_t_32 **t, size_t* input_size);
 static int decode_actions_table(msgpack_object *key, msgpack_object *val, schedule_info_t **t);
-static int process_map(msgpack_object_map *, input_t **t);
+static int process_map(msgpack_object_map *, input_t_32 **t);
 static int create_info_actions_table(schedule_info_t *s, size_t count);
 /* Return true on match of key->via.str.ptr of size key->via.str.size */
 static bool name_match(msgpack_object *key, const char *name);
 int process_schedule_info_doc( schedule_info_t *s, msgpack_object_map *map );
 
-input_t* create_schedule_input( size_t action_exec_count );
+input_t_32* create_schedule_input( size_t action_exec_count );
 
 /*----------------------------------------------------------------------------*/
 /*                             External Functions                             */
@@ -212,7 +212,7 @@ int process_schedule_info_doc( schedule_info_t *s, msgpack_object_map *map )
     return (0 == size) ? 0 : ret_val;
 }
 
-static int decode_schedule_table(msgpack_object *key, msgpack_object *val, input_t **t, size_t* input_size)
+static int decode_schedule_table(msgpack_object *key, msgpack_object *val, input_t_32 **t, size_t* input_size)
 {
     (void)key;
     if (val->type == MSGPACK_OBJECT_ARRAY)
@@ -220,7 +220,7 @@ static int decode_schedule_table(msgpack_object *key, msgpack_object *val, input
         msgpack_object *ptr = val->via.array.ptr;
         int count = val->via.array.size;
         int i;
-        input_t *temp = NULL;
+        input_t_32 *temp = NULL;
 
         /* An empty list is ok, but an invalid size is an error. */
         if (count == 0)
@@ -236,7 +236,7 @@ static int decode_schedule_table(msgpack_object *key, msgpack_object *val, input
         {
             *input_size = count;
 
-            *t = (input_t*) malloc(sizeof(input_t) * count);
+            *t = (input_t_32*) malloc(sizeof(input_t) * count);
             if (*t == NULL) {
                 CcspTraceError(("%s: Memory allocation failed.\n", __FUNCTION__));
                 return -1;
@@ -293,7 +293,7 @@ static int decode_actions_table(msgpack_object *key, msgpack_object *val, schedu
     return 0;
 }
 
-static int process_map(msgpack_object_map *map, input_t **t)
+static int process_map(msgpack_object_map *map, input_t_32 **t)
 {
     uint32_t size = map->size;
     msgpack_object *key = &map->ptr->key;
@@ -357,9 +357,9 @@ static int process_map(msgpack_object_map *map, input_t **t)
     return ret_val;
 }
 
-input_t* create_schedule_input( size_t action_exec_count )
+input_t_32* create_schedule_input( size_t action_exec_count )
 {
-    input_t *s = NULL;
+    input_t_32 *s = NULL;
     size_t size;
     //size_t max_actions = get_max_actions_limit(); //TODO
     size_t max_actions = 255;
@@ -370,9 +370,9 @@ input_t* create_schedule_input( size_t action_exec_count )
         return s;
     }
 
-    size = sizeof(input_t) + action_exec_count * sizeof(uint32_t);
+    size = sizeof(input_t_32) + action_exec_count * sizeof(uint32_t);
 
-    s = (input_t*) malloc( size );
+    s = (input_t_32*) malloc( size );
     if( NULL != s ) {
         memset( s, 0, size );
         s->action_count = action_exec_count;
