@@ -561,6 +561,8 @@ static void cleanup_passivemonitor(void *arg)
     WANCHK_LOG_INFO("passive monitor pcap cleanup\n");
     if (pPassive->pcap)
     {
+        pcap_breakloop(pPassive->pcap);
+        WANCHK_LOG_DBG("broken passive monitor pcap loop\n");
         pcap_freecode(&pPassive->bpf_fp);
         pcap_close(pPassive->pcap);
     }
