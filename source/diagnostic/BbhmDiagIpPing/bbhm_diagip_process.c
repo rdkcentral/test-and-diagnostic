@@ -143,6 +143,7 @@ BbhmDiagipStartDiag
 
             if ( !pMyObject->hSendBuffer )
             {
+                AnscReleaseLock(&pMyObject->AccessLock);
                 return  ANSC_STATUS_RESOURCES;
             }
 
@@ -159,6 +160,7 @@ BbhmDiagipStartDiag
             }
             else
             {
+                AnscReleaseLock(&pMyObject->AccessLock);
                 return returnStatus;
             }
         }
@@ -166,7 +168,6 @@ BbhmDiagipStartDiag
         {
             pDiagInfo->DiagnosticState = DSLH_DIAG_STATE_TYPE_PING_Error_HostName;
         }
-        AnscReleaseLock(&pMyObject->AccessLock);
         return ANSC_STATUS_SUCCESS;
     }
     else
