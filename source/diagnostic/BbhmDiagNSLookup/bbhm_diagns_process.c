@@ -314,6 +314,7 @@ BbhmDiagnsRecv
     AnscAcquireLock(&pMyObject->EchoTableLock);
     if ( pProperty->Status != BBHM_NS_LOOKUP_STATUS_RUNNING )
     {
+        AnscReleaseLock(&pMyObject->EchoTableLock);
         return  ANSC_STATUS_UNAPPLICABLE;
     }
 
@@ -347,6 +348,7 @@ BbhmDiagnsRecv
                         *(p - 1) = '.';
                         pMyObject->SetControl   ((ANSC_HANDLE)pMyObject, BBHM_NS_LOOKUP_CONTROL_START);
                         BbhmDiageoStartDiag     ((ANSC_HANDLE)pMyObject);
+                        AnscReleaseLock(&pMyObject->EchoTableLock);
                         return  ANSC_STATUS_SUCCESS;
                     }
                 }
@@ -400,7 +402,7 @@ BbhmDiagnsRecv
             pMyObject->SetStatus((ANSC_HANDLE)pMyObject, BBHM_NS_LOOKUP_STATUS_COMPLETE);
             pMyObject->Stop((ANSC_HANDLE)pMyObject);
         }
-
+        AnscReleaseLock(&pMyObject->EchoTableLock);
         return  returnStatus;
     }
     AnscReleaseLock(&pMyObject->EchoTableLock);
