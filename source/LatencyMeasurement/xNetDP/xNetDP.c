@@ -1817,8 +1817,7 @@ int main(int argc,char **argv)
     // msgrcv to receive message
     //msgrcv(msgid, &message, sizeof(message), 1, 0);
     ssize_t n;
-    while ((n = msgrcv(msgid, &message, sizeof(msg) - sizeof(long), 1, 0)) > 0)
-    //while(msgrcv(msgid, &message, sizeof(message), 1, 0))
+    while ((n = msgrcv(msgid, &message, sizeof(message) - sizeof(long), 1, 0)) > 0)
     {
   //perror( "server: Failed to create message queue:" );
     // display the message
