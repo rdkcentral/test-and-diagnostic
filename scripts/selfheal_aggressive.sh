@@ -620,10 +620,15 @@ self_heal_interfaces()
               fi
 
               if [ "$ethWan_if" != "" ]; then
-                 echo_t "[RDKB_AGG_SELFHEAL] : $WAN_INTERFACE has no ip address, bring down and up Eth WAN port interface:$ethWan_if"
-                 ip link set dev $ethWan_if down
-                 sleep 5
-                 ip link set dev $ethWan_if up
+                 # During Eth WAN failover simulation test, skip selfheal for bringing up Eth WAN port.
+                 if [ -f /tmp/.EWanLinkDown_TestRunning.txt ]; then
+                    echo_t "[RDKB_AGG_SELFHEAL] : Eth WAN failover simulation test is going on. Hence, skipping selfheal this iteration."
+                 else
+                    echo_t "[RDKB_AGG_SELFHEAL] : $WAN_INTERFACE has no ip address, bring down and up Eth WAN port interface:$ethWan_if"
+                    ip link set dev $ethWan_if down
+                    sleep 5
+                    ip link set dev $ethWan_if up
+                 fi
               else
                  echo_t "[RDKB_AGG_SELFHEAL] : Eth Wan Interface returned empty skipping recovery."
               fi
@@ -633,7 +638,7 @@ self_heal_interfaces()
 
     # Recovery in case erouter0 doesn't have LinkLocal Address (XER10). 
     # Force the physical wan interface to re-generate its IPv6 link-local address.
-    if [ "$MODEL_NUM" == "SCER11BEL" ]; then
+    if [ "$MODEL_NUM" == "SCER11BEL" ] || [ "$BOX_TYPE" == "SCXF11BFL" ] ; then
         LL_ADDR=$(ip -6 addr show dev "$WAN_INTERFACE" | awk '/inet6 fe80::/ { print $2 }' | cut -d/ -f1)
         if [ -z "$LL_ADDR" ]; then
             echo_t "[RDKB_AGG_SELFHEAL] :No link-local address assigned on $WAN_INTERFACE. Restarting wan physical interface port to recover"
@@ -718,7 +723,7 @@ self_heal_dibbler_server()
                                     t2CountNotify "SYS_ERROR_DibblerServer_emptyconf"
                                 fi
                                 #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-                            elif [ "$DHCPv6_ServerType" -eq 2 ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SR213" ] &&  [ "$BOX_TYPE" != "SCER11BEL" ];then
+                            elif [ "$DHCPv6_ServerType" -eq 2 ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SR213" ] &&  [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ];then
                                 #if servertype is stateless(1-stateful,2-stateless),the ip assignment will be done through zebra process.Hence dibbler-server won't required.
                                 echo_t "DHCPv6 servertype is stateless,dibbler-server restart not required"
                             else
@@ -813,7 +818,7 @@ self_heal_dibbler_server()
                                     t2CountNotify "SYS_ERROR_DibblerServer_emptyconf"
                                 fi
                                 #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-                            elif [ "$DHCPv6_ServerType" -eq 2 ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] &&  [ "$BOX_TYPE" != "SCER11BEL" ];then
+                            elif [ "$DHCPv6_ServerType" -eq 2 ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] &&  [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ];then
                                 #if servertype is stateless(1-stateful,2-stateless),the ip assignment will be done through zebra process.Hence dibbler-server won't required.
                                 echo_t "DHCPv6 servertype is stateless,dibbler-server restart not required"
                             else
@@ -879,7 +884,7 @@ self_heal_dhcp_clients()
             ;;
     esac
     #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ -f "$DHCPV6_ERROR_FILE" ] && [ "$WAN_STATUS" = "started" ] && [ "$WAN_IPv6_Addr" != "" ] && [ "$BOX_TYPE" != "SCER11BEL" ]; then
+    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ -f "$DHCPV6_ERROR_FILE" ] && [ "$WAN_STATUS" = "started" ] && [ "$WAN_IPv6_Addr" != "" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ]; then
         isIPv6=$(ifconfig $WAN_INTERFACE | grep "inet6" | grep "Scope:Global")
         echo_t "isIPv6 = $isIPv6"
         if [ "$isIPv6" = "" ] && [ "$Unit_Activated" != "0" ]; then
@@ -947,7 +952,7 @@ self_heal_dhcp_clients()
                             echo_t "[RDKB_AGG_SELFHEAL] :  Killing dibbler-client with pid $dibbler_client_pid"
                             killall -9 dibbler-client
                         fi
-                        if [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ]
+                        if [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ]
                         then
                             sh $DHCPV6_HANDLER disable
                         else
@@ -1024,7 +1029,7 @@ self_heal_dhcp_clients()
         fi
     #Logic ends here for RDKB-25714
     #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$WAN_STATUS" = "started" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" = "SCER11BEL" ]; then
+    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$WAN_STATUS" = "started" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" = "SCER11BEL" ] && [ "$BOX_TYPE" = "SCXF11BFL" ]; then
         wan_dhcp_client_v4=1
         wan_dhcp_client_v6=1
         case $SELFHEAL_TYPE in
@@ -1032,7 +1037,7 @@ self_heal_dhcp_clients()
                 UDHCPC_Enable=$(syscfg get UDHCPEnable_v2)
                 dibbler_client_enable=$(syscfg get dibbler_client_enable_v2)
 
-		if ( ( [ "$MANUFACTURE" = "Sercomm" ] || [ "$MANUFACTURE" = "Technicolor" ] ) && [ "$BOX_TYPE" != "XB3" ] ) || [ "$WAN_TYPE" = "EPON" ] || [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ]; then
+		if ( ( [ "$MANUFACTURE" = "Sercomm" ] || [ "$MANUFACTURE" = "Technicolor" ] ) && [ "$BOX_TYPE" != "XB3" ] ) || [ "$WAN_TYPE" = "EPON" ] || [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ] || [ "$BOX_TYPE" = "SCXF11BFL" ]; then
                     check_wan_dhcp_client_v4=$(ps ww | grep "udhcpc" | grep "erouter")
                     check_wan_dhcp_client_v6=$(ps w | grep "dibbler-client" | grep -v "grep")
                 else
@@ -1241,7 +1246,7 @@ self_heal_dhcp_clients()
 	;;
 	"SYSTEMD")
         if [ "$WAN_STATUS" = "started" ]; then
-            if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SCER11BEL" ]; then
+            if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ]; then
                 if [ $wan_dhcp_client_v4 -eq 0 ] && [ "x$MAPT_CONFIG" != "xset" ] && [ $DHCPV4C_STATUS != "false" ]; then
                     if [ "$MANUFACTURE" = "Technicolor" ] || [ "$MANUFACTURE" = "Sercomm" ]; then
                         V4_EXEC_CMD="sysevent set dhcp_client-start"
@@ -1342,7 +1347,7 @@ self_heal_dropbear()
              fi
          ;;
          "SYSTEMD")
-             if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SCER11BEL" ]; then
+             if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SCER11BEL" ] &&  [ "$BOX_TYPE" != "SCXF11BFL" ]; then
                  #Checking dropbear PID
                  DROPBEAR_PID=$(busybox pidof dropbear)
                  if [ "$DROPBEAR_PID" = "" ]; then
@@ -1488,7 +1493,7 @@ self_heal_nas_ip()
              cut -d"/" -f4)
              hostapd_enable=$(ps | grep -i hostapd | grep -v grep)
              if [ "$wifi_process" != "OneWifi" ] && [ "$hostapd_enable" != "" ]; then #issue seen only in selfheal, also hostapd should run while checking this, hence this condition
-                 if [ "$MODEL_NUM" == "CGM4331COM" ] || [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ] ; then
+                 if [ "$MODEL_NUM" == "CGM4331COM" ] || [ "$MODEL_NUM" == "CGM4981COM" ] || [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "CWA438TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ] ; then
                      WAN_INTERFACE=`sysevent get current_wan_ifname`
                      if [ "$WAN_INTERFACE" = "" ]; then
                          WAN_INTERFACE="erouter0"
@@ -1606,6 +1611,7 @@ self_heal_conntrack()
 # Tech XD4  => MODEL_NUM=CVA601ZCOM
 # Vant XER5 => MODEL_NUM=VTER11QEL
 # Tech XB10    => MODEL_NUM=CGM601TCOM
+# Tech XB9    => MODEL_NUM=CWA438TCOM
 # Sercomm XB10 => MODEL_NUM=SG417DBCT
 # Sercomm XER10 => MODEL_NUM=SCER11BEL
 
@@ -1615,8 +1621,9 @@ if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
    [ "$MODEL_NUM" != "CGA4332COM" ] && [ "$MODEL_NUM" != "CVA601ZCOM" ] &&
    [ "$MODEL_NUM" != "VTER11QEL" ] &&
    [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] &&
+   [ "$MODEL_NUM" != "CWA438TCOM" ] &&
    [ "$MODEL_NUM" != "SCER11BEL" ] && [ "$MODEL_NAME" != "RPI" ] &&
-   [ "$MODEL_NAME" != "BPI" ]
+   [ "$MODEL_NAME" != "BPI" ] && [ "$MODEL_NUM" != "SCXF11BFL" ]
 then
     exit
 fi
