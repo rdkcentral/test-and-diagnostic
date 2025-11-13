@@ -371,9 +371,10 @@ X_RDK_AutomationTest_SetParamStringValue
             }
             else if (strncasecmp(pString, "logUpload|", 10) == 0) {
                 int (*Trigger_logUpload)(char*);
+                // Get the function pointer (POSIX-recommended pattern)
                 void *func_ptr = dlsym(handle, "Trigger_logUpload");
                 Trigger_logUpload = (int (*)(char*))func_ptr;
-                if ((error = dlerror()) != NULL) {
+                if ((error = dlerror()) != NULL)  {
                     fprintf(stderr, "%s\n", error);
                     dlclose(handle);
                     return FALSE;
@@ -381,10 +382,10 @@ X_RDK_AutomationTest_SetParamStringValue
 
                 AnscTraceFlow(("Input string: %s\n", pString));
 
-                if (FALSE == is_test_running()) {
+                if(FALSE == is_test_running() ) {
                     char *input = pString + strlen("logUpload|"); // Move past "logUpload|"
                     int status = Trigger_logUpload(input);
-                    if (status != 0) {
+                    if(status != 0 ) {
                         AnscTraceWarning(("%s : Failed to start logUpload test\n", __FUNCTION__));
                         dlclose(handle);
                         return FALSE;
@@ -394,8 +395,7 @@ X_RDK_AutomationTest_SetParamStringValue
                     dlclose(handle);
                     return FALSE;
                 }
-            }
-            else {
+            } else {
                 AnscTraceWarning(("%s : Invalid test name '%s'\n", __FUNCTION__, pString));
                 dlclose(handle);
                 return FALSE;
@@ -420,6 +420,7 @@ X_RDK_AutomationTest_SetParamStringValue
             dlclose(handle);
             return FALSE;
         }
-        /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
-        return FALSE;
     }
+    /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
+    return FALSE;
+}
