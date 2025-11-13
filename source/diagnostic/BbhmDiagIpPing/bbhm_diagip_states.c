@@ -150,14 +150,13 @@ BbhmDiagipCopyDiagParams
         ANSC_HANDLE                 hDslhDiagInfo
     )
 {
-    PBBHM_DIAG_IP_PING_OBJECT pMyObject = (PBBHM_DIAG_IP_PING_OBJECT)hThisObject;
-    DSLH_PING_INFO* pSrcDiagInfo = (DSLH_PING_INFO*)hDslhDiagInfo;
-    DSLH_PING_INFO* pDstDiagInfo = (DSLH_PING_INFO*)pMyObject->hDslhDiagInfo;
+    PBBHM_DIAG_IP_PING_OBJECT       pMyObject    = (PBBHM_DIAG_IP_PING_OBJECT)hThisObject;
 
-    errno_t rc = memcpy_s(pDstDiagInfo, sizeof(DSLH_PING_INFO), pSrcDiagInfo, sizeof(DSLH_PING_INFO));
+    errno_t rc = -1;
+    rc = memcpy_s(pMyObject->hDslhDiagInfo, sizeof(DSLH_PING_INFO) , hDslhDiagInfo, sizeof(DSLH_PING_INFO));
     ERR_CHK(rc);
 
-    return ANSC_STATUS_SUCCESS;
+    return  ANSC_STATUS_SUCCESS;
 }
 
 

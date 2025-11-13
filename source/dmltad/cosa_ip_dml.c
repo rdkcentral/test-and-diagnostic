@@ -7143,14 +7143,14 @@ eMMCFlashDiag_GetParamBoolValue
     if (strcmp(ParamName, "Operational") == 0)
     {
         *pBool = pHealthInfo->m_isOperational;
-         free(pHealthInfo);
-         return TRUE;
+        free(pHealthInfo);
+        return TRUE;
     }
     else if (strcmp(ParamName, "Healthy") == 0)
     {
-               *pBool = pHealthInfo->m_isHealthy;
-                free(pHealthInfo);
-                 return TRUE;
+        *pBool = pHealthInfo->m_isHealthy;
+        free(pHealthInfo);
+        return TRUE;
     }
     free(pHealthInfo);
     return FALSE;

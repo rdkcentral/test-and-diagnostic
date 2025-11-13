@@ -1270,7 +1270,7 @@ BbhmDiagnsClose
     {
         return  ANSC_STATUS_SUCCESS;
     }
-    AnscAcquireLock(&pMyObject->EchoTableLock);
+
     if ( pXsink )
     {
         pXsink->Detach((ANSC_HANDLE)pXsink);
@@ -1294,6 +1294,8 @@ BbhmDiagnsClose
         AnscFreeMemory(pDiagInfo);
         pDiagInfo = NULL;
     }
+
+    AnscAcquireLock(&pMyObject->EchoTableLock);
 
     pSLinkEntry = AnscSListPopEntry(&pMyObject->EchoTable);
 

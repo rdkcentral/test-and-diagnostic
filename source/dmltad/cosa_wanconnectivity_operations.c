@@ -40,6 +40,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
 
 /*core net lib*/
 #ifdef CORE_NET_LIB
@@ -1395,17 +1396,14 @@ unsigned int send_query_frame_raw_pkt(struct query *query_info,struct mk_query *
     int ip_offset = 0;
 
     char gw_addr[BUFLEN_64] = {0};
+    errno_t safec_rc = -1;
     memset(gw_addr, 0, sizeof(gw_addr));
-    errno_t rc;
     if (query_info->skt_family == AF_INET) {
-        rc = strcpy_s(gw_addr, sizeof(gw_addr), query_info->IPv4Gateway);
+        safec_rc = strcpy_s(gw_addr, sizeof(gw_addr), query_info->IPv4Gateway);
+        ERR_CHK(safec_rc);
     } else {
-        rc = strcpy_s(gw_addr, sizeof(gw_addr), query_info->IPv6Gateway);
-    }
-    if (rc != 0) {
-    WANCHK_LOG_ERROR("strcpy_s failed with error code %d\n", rc);
-    // handle error, e.g., return, exit, or set gw_addr to safe default
-    gw_addr[0] = '\0';  // optional safe fallback
+        safec_rc = strcpy_s(gw_addr, sizeof(gw_addr), query_info->IPv6Gateway);
+        ERR_CHK(safec_rc);
     }
     WANCHK_LOG_DBG("%s: GW IP Address:%s\n",__FUNCTION__,gw_addr);
 

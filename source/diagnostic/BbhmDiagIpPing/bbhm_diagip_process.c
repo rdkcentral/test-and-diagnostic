@@ -163,6 +163,7 @@ BbhmDiagipStartDiag
                 AnscReleaseLock(&pMyObject->AccessLock);
                 return returnStatus;
             }
+            AnscReleaseLock(&pMyObject->AccessLock);
         }
         else
         {
