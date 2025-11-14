@@ -188,7 +188,7 @@ void PopulateParameters()
                                 &bus_handle,
                                 (CCSP_MESSAGE_BUS_MALLOC)Ansc_AllocateMemory_Callback,
                                 Ansc_FreeMemory_Callback);
-    if (ret == -1) {
+    if (ret != CCSP_SUCCESS) {
     xle_log("CCSP_Message_Bus_Init failed for component %s: %d\n", component_id, ret);
     return;  // or handle error appropriately
     }
