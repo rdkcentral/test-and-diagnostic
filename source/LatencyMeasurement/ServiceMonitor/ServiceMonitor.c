@@ -760,7 +760,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
 	curr_wan_mode=atoi(strValue);
 	if(Get_Status_of_bridge_mode()==ROUTER_MODE)
 	{
-		MonitorLatencyMeasurementServices();	
+		MonitorLatencyMeasurementServices();
 	}
 	pthread_mutex_unlock(&lock);
 	if(IsTR181_triger_at_PthreadisBusy==true)

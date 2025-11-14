@@ -93,27 +93,28 @@ void check_lte_provisioned(char* lte_wan,char* lte_backup_enable, char* lte_inte
         4,
         &nval,
         &retVal);
-    if (CCSP_SUCCESS == ret && retVal != NULL)
+    if (CCSP_SUCCESS == ret)
     {
-        if (retVal[0] && retVal[0]->parameterValue)
+    if (retVal)
         {
-           strncpy(lte_wan, retVal[0]->parameterValue, strlen(retVal[0]->parameterValue) + 1);
-        }
-        if (retVal[1] && retVal[1]->parameterValue)
+        if (NULL != retVal[0]->parameterValue)
         {
-           strncpy(lte_backup_enable, retVal[1]->parameterValue, strlen(retVal[1]->parameterValue) + 1);
+            strncpy(lte_wan, retVal[0]->parameterValue, strlen(retVal[0]->parameterValue) + 1);
         }
-        if (retVal[2] && retVal[2]->parameterValue)
+        if (NULL != retVal[1]->parameterValue)
         {
-           strncpy(lte_interface_enable, retVal[2]->parameterValue, strlen(retVal[2]->parameterValue) + 1);
+            strncpy(lte_backup_enable, retVal[1]->parameterValue, strlen(retVal[1]->parameterValue) + 1);
         }
-        if (retVal[3] && retVal[3]->parameterValue)
+        if (NULL != retVal[2]->parameterValue)
+        {
+            strncpy(lte_interface_enable, retVal[2]->parameterValue, strlen(retVal[2]->parameterValue) + 1);
+        }
+        if (NULL != retVal[3]->parameterValue)
         {
             strncpy(ipaddr_family, retVal[3]->parameterValue, strlen(retVal[3]->parameterValue) + 1);
         }
-
-        // Now safe to free
         free_parameterValStruct_t(bus_handle, nval, retVal);
+    }
     }
 }
 void GetInterfaceStatus( char* InterfaceStatus, char* comp_status_cmd, int size )
@@ -181,13 +182,14 @@ void PopulateParameters()
     sysevent_get(sysevent_fd, sysevent_token, "cellular_restart_count", countBuffer, sizeof(countBuffer));
     char *paramValue = NULL;
     char*  component_id = "ccsp.xle_self";
-    int rc = CCSP_Message_Bus_Init(component_id,
+    int ret = 0;
+    ret = CCSP_Message_Bus_Init(component_id,
                                 CCSP_MSG_BUS_CFG,
                                 &bus_handle,
                                 (CCSP_MESSAGE_BUS_MALLOC)Ansc_AllocateMemory_Callback,
                                 Ansc_FreeMemory_Callback);
-    if (rc != CCSP_SUCCESS) {
-    xle_log("CCSP_Message_Bus_Init failed for component %s: %d\n", component_id, rc);
+    if (ret == -1) {
+    xle_log("CCSP_Message_Bus_Init failed for component %s: %d\n", component_id, ret);
     return;  // or handle error appropriately
     }
     int retPsmGet = PSM_Get_Record_Value2(bus_handle,g_Subsystem, "dmsb.Mesh.WAN.Interface.Name", NULL, &paramValue);

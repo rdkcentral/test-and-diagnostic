@@ -1511,6 +1511,7 @@ Result_GetParamUlongValue
 
         return FALSE;
     }
+
     /* check the parameter name and return the corresponding value */
     if (strcmp(ParamName, "Status") == 0)
     {
@@ -1533,6 +1534,7 @@ Result_GetParamUlongValue
         return TRUE;
     }
 	
+
     /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
     return FALSE;
 }
@@ -1593,6 +1595,7 @@ Result_GetParamStringValue
 
         return -1;
     }
+
     /* check the parameter name and return the corresponding value */
     if (strcmp(ParamName, "HostNameReturned") == 0)
     {
@@ -1645,6 +1648,7 @@ Result_GetParamStringValue
 
         return 0;
     }
+
     /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
     return -1;
 }

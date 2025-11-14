@@ -201,7 +201,11 @@ static int inet_is_onlink(const struct in_addr *addr)
                 continue;
             int prefix_len = atoi(pref);
             if (prefix_len > 0 && prefix_len <= 32) {
+               if (prefix_len == 32) {
+                  mask = 0xFFFFFFFF;
+                } else {
                 mask = htonl(0xFFFFFFFF << (32 - prefix_len));
+            }
 
                 if (inet_is_same_net(*(uint32_t *)(addr), *(uint32_t *)&net, mask)) {
                     pclose(tbl_fp);
