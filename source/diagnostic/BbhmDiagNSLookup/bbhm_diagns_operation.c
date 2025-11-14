@@ -1398,6 +1398,7 @@ BbhmDiagnsCalculateResult
         pDslhDiagInfo->hDiaginfo = pDiagnsInfo;
     }
 
+
     pMyObject->DelAllPqueries(pMyObject);
     AnscAcquireLock(&pMyObject->EchoTableLock);
     pSLinkEntry = AnscSListPopEntry(&pMyObject->EchoTable);

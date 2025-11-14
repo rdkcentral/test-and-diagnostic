@@ -425,7 +425,7 @@ BbhmDiagnsInitialize
 
     AnscInitializeLock       (&pMyObject->EchoTableLock);
     AnscInitializeLock       (&pMyObject->PqueryTableLock);
-   
+
     return  ANSC_STATUS_SUCCESS;
 }
 

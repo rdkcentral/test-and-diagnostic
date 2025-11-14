@@ -402,9 +402,11 @@ BbhmDiagnsRecv
             pMyObject->SetStatus((ANSC_HANDLE)pMyObject, BBHM_NS_LOOKUP_STATUS_COMPLETE);
             pMyObject->Stop((ANSC_HANDLE)pMyObject);
         }
+
         AnscReleaseLock(&pMyObject->EchoTableLock);
         return  returnStatus;
     }
+
     AnscReleaseLock(&pMyObject->EchoTableLock);
     return  ANSC_STATUS_SUCCESS;
 }
