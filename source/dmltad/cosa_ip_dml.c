@@ -7109,6 +7109,7 @@ eMMCFlashDiag_GetParamStringValue
     else
     {
         CcspTraceError(("Requested parameter not available as part of emmc diag\n"));
+        free(pHealthInfo);
         return -1;
     }
     free(pHealthInfo);
