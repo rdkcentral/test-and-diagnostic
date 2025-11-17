@@ -925,13 +925,11 @@ BbhmDiagnsSetDiagParams
 
         if ( pDiagnsEntry )
         {
-            AnscAcquireLock(&pMyObject->EchoTableLock);
             for(i = 0; i < pDiagInfo->ResultNumberOfEntries; i++)
             {
                 AnscFreeMemory(pDiagnsEntry[i].HostNameReturned);
                 AnscFreeMemory(pDiagnsEntry[i].IPAddresses);
             }
-            AnscReleaseLock(&pMyObject->EchoTableLock);
         }
         AnscFreeMemory(pDiagnsEntry);
         pDiagnsEntry    = NULL;

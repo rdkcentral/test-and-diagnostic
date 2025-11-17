@@ -288,7 +288,6 @@ BbhmDiageoResultQueryTask
     PDSLH_DIAG_INFO_BASE            pDiagInfo           = NULL;
     BOOLEAN                         bQueryDone          = FALSE;
 
-    AnscAcquireLock(&pMyObject->AccessLock);
     AnscTraceFlow(("BbhmDiageoResultQueryTask ...\n"));
 
     do
@@ -299,13 +298,15 @@ BbhmDiageoResultQueryTask
         {
             pDiagInfo  = (PDSLH_DIAG_INFO_BASE)pMyObject->hDslhDiagInfo;
             bQueryDone = TRUE;
-
+            AnscAcquireLock(&pMyObject->AccessLock);
             if ( (pDiagInfo->DiagnosticState != DSLH_DIAG_STATE_TYPE_Inprogress)
                   && (pDiagInfo->DiagnosticState != DSLH_DIAG_STATE_TYPE_Requested) )
             {
                 pMyObject->ResultTimestamp = AnscGetTickInSeconds();
+                AnscReleaseLock(&pMyObject->AccessLock);
                 break;
             }
+            AnscReleaseLock(&pMyObject->AccessLock);
         }
         else
         {
@@ -328,6 +329,8 @@ BbhmDiageoResultQueryTask
             AnscTraceWarning(("Failed to send event for diagnostics completion.\n"));
         }
     }
+
+    AnscAcquireLock(&pMyObject->AccessLock);
 
     AnscTraceFlow(("BbhmDiageoResultQueryTask -- quiting...\n"));
 
