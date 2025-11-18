@@ -853,7 +853,7 @@ resetNeeded()
                 $BINPATH/$ProcessName -subsys $Subsys
                 cd -
 
-            elif [ "$SELFHEAL_TYPE" = "BASE" -o "$SELFHEAL_TYPE" = "TCCBR" ] && [ "$ProcessName" = "CcspMtaAgentSsp" ]; then
+            elif [ "$SELFHEAL_TYPE" = "BASE" -o "$SELFHEAL_TYPE" = "TCCBR" ] && [ "$ProcessName" = "CcspMtaAgentSsp" ] && [ "$VOICE_SUPPORTED" != "false" ]; then
                 echo_t "RDKB_SELFHEAL : Resetting process $ProcessName"
                 cd /usr/ccsp/mta
                 $BINPATH/CcspMtaAgentSsp -subsys $Subsys
