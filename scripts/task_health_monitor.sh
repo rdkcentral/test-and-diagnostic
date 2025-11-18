@@ -274,6 +274,32 @@ check_xle_dns_route()
 
 }
 
+self_heal_meshwifi()
+{
+    STATUS=$(ovsh s Manager -c status | awk -F'"' '/state/' | grep -o 'state","[^"]*' | cut -d'"' -f3)
+    if [ -s /tmp/pass_failed ]; then
+        if [ "$STATUS" = "ACTIVE" ]; then
+            echo_t "[RDKB_SELFHEAL] :Manager state is ACTIVE : So connection is sucess"
+            rm /tmp/pass_failed
+            rm /tmp/opensync_restart
+        else
+            echo_t "[RDKB_SELFHEAL] :Manager state is NOT ACTIVE and rdkconfig_get failed:"
+            cat /tmp/pass_failed
+            if [ -f /tmp/opensync_restart ]; then
+                echo_t "[RDKB_SELFHEAL] :Restart meshwifi"
+                systemctl restart meshwifi
+                rm /tmp/opensync_restart
+                rm /tmp/pass_failed
+            else
+                echo_t "[RDKB_SELFHEAL] : Defer meshwifi restart"
+                touch /tmp/opensync_restart
+            fi
+        fi
+    else
+        echo_t "[RDKB_SELFHEAL] : Manager state: $STATUS"
+    fi
+}
+
 self_heal_meshAgent()
 {
     cpu_max=20
@@ -5121,6 +5147,7 @@ fi
 self_heal_dual_cron
 self_heal_meshAgent
 self_heal_meshAgent_hung
+self_heal_meshwifi
 self_heal_sedaemon
 if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ]; then
     check_br403_is_created
