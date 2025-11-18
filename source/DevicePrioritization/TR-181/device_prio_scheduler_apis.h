@@ -29,8 +29,13 @@
 #include "scheduler_interface.h"
 
 #define TDM_RDK_LOG_MODULE  "LOG.RDK.TDM"
+#ifdef SKY
+#define PRIOMAC_DATAFILE    "/data/pcs-now-priomac.dat"
+#define PRIOMAC_MD5FILE    "/data/pcs-now-priomac.dat.md5"
+#else
 #define PRIOMAC_DATAFILE    "/nvram/pcs-now-priomac.dat"
 #define PRIOMAC_MD5FILE    "/nvram/pcs-now-priomac.dat.md5"
+#endif
 #define PRIO_MAC_DELIM ", "
 
 #define SYSCFG_PRIO_CLIENT_COUNT            "DCPC_PrioClients_Count"
