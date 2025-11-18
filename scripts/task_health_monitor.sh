@@ -1094,7 +1094,7 @@ case $SELFHEAL_TYPE in
         fi
 
         # Checking MTA's PID
-        if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ]; then
+        if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ] || [ "$VOICE_SUPPORTED" != "false" ]; then
             echo_t "BWG doesn't support voice"
         else
             MTA_PID=$(busybox pidof CcspMtaAgentSsp)
@@ -1505,6 +1505,7 @@ case $SELFHEAL_TYPE in
             t2CountNotify "SYS_SH_PAM_CRASH_RESTART"
         fi
 
+	if [ "$VOICE_SUPPORTED" != "false" ]; then
         # Checking MTA's PID
         MTA_PID=$(busybox pidof CcspMtaAgentSsp)
         if [ "$MTA_PID" = "" ]; then
@@ -1512,6 +1513,7 @@ case $SELFHEAL_TYPE in
             resetNeeded mta CcspMtaAgentSsp
             t2CountNotify "SYS_SH_MTA_restart"
         fi
+	fi
 
         WiFi_Flag=false
         # Checking Wifi's PID
