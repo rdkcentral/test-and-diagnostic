@@ -654,7 +654,10 @@ int main(int argc,char *argv[])
                 count+=1;
                 snprintf(count1, sizeof(count1), "%d", count);
                 sysevent_set(sysevent_fd, sysevent_token, "cellular_restart_count", count1, 0);
-                system("systemctl restart RdkCellularManager.service &");
+                int ret = system("systemctl restart RdkCellularManager.service &");
+                if (ret == -1) {
+                    xle_log("system() call failed\n");
+                }
                 xle_log("[xle_self_heal] Cellular manager restarted. Number of times restarted=%d \n", count);
             }
             else

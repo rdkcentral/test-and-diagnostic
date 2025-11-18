@@ -50,24 +50,31 @@
 #define BUF_128    128
 
 #define SYNC_CPA_CONF_FILE()                               \
+{                                                          \
+    FILE *fp1_check = fopen(CPA_CONFIG_FILE, "r");              \
+    if (fp1_check)                                              \
     {                                                      \
-            char buf[BUF_128] = {0};                       \
-            FILE *fp1 = fopen(CPA_DEFAULT_CONF_FILE, "r"); \
-            if(fp1)                                        \
+        /* File exists → enter the block */               \
+        fclose(fp1_check);                                      \
+                                                           \
+        char buf[BUF_128] = {0};                           \
+        FILE *fp1 = fopen(CPA_DEFAULT_CONF_FILE, "r");\
+        if (fp1)                                      \
+        {                                                  \
+            FILE *fp2 = fopen(CPA_CONFIG_FILE, "w");      \
+            if (fp2)                                      \
             {                                              \
-                FILE *fp2 = fopen(CPA_CONFIG_FILE, "w");   \
-                if(fp2)                                    \
+                while(fscanf(fp1, "%[^\n] ", buf) != EOF)\
                 {                                          \
-                    while(fscanf(fp1,"%[^\n] ",buf) != EOF)     \
-                    {                                      \
-                        fprintf(fp2, "%s\n", buf);         \
-                        memset(buf, 0, BUF_128);           \
-                    }                                      \
-                    fclose(fp2);                           \
+                    fprintf(fp2, "%s\n", buf);            \
+                    memset(buf, 0, BUF_128);              \
                 }                                          \
-                fclose(fp1);                               \
+                fclose(fp2);                               \
             }                                              \
-    }
+            fclose(fp1);                               \
+        }                                                  \
+    }                                                      \
+}
 
 
 #define GET_CPA_CONF_FILE(f)                              \

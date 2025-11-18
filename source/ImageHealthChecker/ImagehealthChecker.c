@@ -732,6 +732,11 @@ void get_Clients_Count(char * arg_type,char * ret_buf,int size)   //Need to run 
        rc = strcpy_s(ret_buf,size,sys_cfg_store);
        ERR_CHK(rc);
    }
+   if (ret_val == 0 && output_struct != NULL)
+   {
+        free(output_struct);
+        output_struct = NULL;
+   }
 }
 void Check_ConnCli_Count(char * arg)
 {

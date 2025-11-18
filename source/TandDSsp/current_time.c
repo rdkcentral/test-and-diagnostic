@@ -188,18 +188,18 @@ bool setSystemTime(time_t desired_epoch_time)
 void setClockEventFile() 
 {    
     int fileDescriptor = open(CLOCK_EVENT_PATH, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (fileDescriptor == -1) 
+    if (fileDescriptor == -1)
     {
-        if (errno == EEXIST) 
+        if (errno == EEXIST)
         {
             CcspTraceInfo(("File /tmp/clock-event already exists\n"));
-        } 
-        else 
+        }
+        else
         {
             CcspTraceError(("Failed to create /tmp/clock-event file: %s\n", strerror(errno)));
         }
-    } 
-    else 
+    }
+    else
     {
         close(fileDescriptor);
         CcspTraceInfo(("File /tmp/clock-event created successfully\n"));
