@@ -126,6 +126,7 @@ X_RDK_AutomationTest_GetParamStringValue
         /* collect value */
         const char* run = get_test_run();
         if (run == NULL) {
+            dlclose(handle);
             return -1;
         }
         rc = strcpy_s(pValue, *pUlSize, run);
@@ -149,6 +150,7 @@ X_RDK_AutomationTest_GetParamStringValue
         /* collect value */
         const char* result = get_test_status();
         if (result == NULL) {
+            dlclose(handle);
             return -1;
         }
         rc = strcpy_s(pValue, *pUlSize, result);

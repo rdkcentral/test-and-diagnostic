@@ -1382,9 +1382,9 @@ BbhmDiagnsCalculateResult
             AnscFreeMemory(pDiagnsInfo[i].HostNameReturned);
             AnscFreeMemory(pDiagnsInfo[i].IPAddresses);
         }
-        AnscReleaseLock(&pMyObject->EchoTableLock);
         AnscFreeMemory(pDiagnsInfo);
         pDiagnsInfo = NULL;
+        AnscReleaseLock(&pMyObject->EchoTableLock);
     }
 
     pDiagnsInfo = AnscAllocateMemory(sizeof(BBHM_NS_LOOKUP_ECHO_ENTRY) * Num);
