@@ -185,6 +185,7 @@ X_RDK_AutomationTest_GetParamStringValue
         return 0;
     }
     /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
+    dlclose(handle);
     return -1;
  }
 

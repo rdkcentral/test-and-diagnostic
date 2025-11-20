@@ -1709,6 +1709,10 @@ int send_query (PCOSA_DML_WANCNCTVTY_CHK_QUERYNOW_CTXT_INFO pQuerynowCtxt, struc
             }
 #endif
     
+            if (pkt_len > sizeof(packet)) {
+                pkt_len = sizeof(packet);   // clamp, avoids Coverity overrun
+            }
+
             // Write packet to socket
             if (write(pfd[idx].fd, packet, pkt_len) < 0) {
                 // Error writing to socket

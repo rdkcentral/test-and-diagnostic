@@ -209,23 +209,24 @@ void setClockEventFile()
 void activateSystimeTarget() 
 {
     // Check if file already exists
-    if (access(SYSTIME_SET_PATH, F_OK) != -1) 
+    int fileDescriptor = open(SYSTIME_SET_PATH,
+                          O_CREAT | O_EXCL | O_WRONLY,
+                          S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+    if (fileDescriptor == -1)
     {
-    	CcspTraceInfo(("File system time set file already exists\n"));
+        if (errno == EEXIST)
+        {
+            CcspTraceInfo(("File system time set file already exists\n"));
+        } else
+        {
+            CcspTraceError(("Error creating systime set file: %s\n", strerror(errno)));
+        }
     }
     else
     {
-    	// Create the file
-    	int fileDescriptor = creat(SYSTIME_SET_PATH, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    	if (fileDescriptor != -1) 
-    	{
-       		close(fileDescriptor);
-        	CcspTraceInfo(("File system  time set file created successfully\n"));
-    	} 
-    	else 
-    	{
-        	CcspTraceError(("Failed to create system time set file\n"));
-    	}
+        close(fileDescriptor);
+        CcspTraceInfo(("File system time set file created successfully\n"));
     }
 }
 bool updateStoredTime(long long new_time) {
