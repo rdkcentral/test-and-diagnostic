@@ -7013,6 +7013,7 @@ eMMCFlashDiag_GetParamStringValue
     if (ret != 0)
     {
         CcspTraceError(("CcspHalEmmcGetDeviceInfo returned with error %d\n", ret));
+        free(pHealthInfo);
         return 1;
     }
 
