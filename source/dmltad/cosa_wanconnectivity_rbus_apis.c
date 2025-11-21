@@ -458,8 +458,11 @@ ANSC_STATUS CosaWanCnctvtyChk_URL_delDBEntry (unsigned int InstanceNumber)
     }
     pthread_mutex_unlock(&gUrlAccessMutex);
 
-    syscfg_unset(NULL, paramName);
-
+    int ret = syscfg_unset(NULL, paramName);
+    if (ret != 0)
+    {
+       WANCHK_LOG_WARN("syscfg_unset failed for param %s, ret=%d\n", paramName, ret);
+    }
     /* reset the url max instance number*/
     if (syscfg_set_u_commit(NULL, "wanconnectivity_chk_maxurl_inst", (unsigned) url_max_inst) != 0)
     {

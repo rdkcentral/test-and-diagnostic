@@ -166,6 +166,7 @@ int process_schedule_info_doc( schedule_info_t *s, msgpack_object_map *map )
             {
                 CcspTraceError(("%s:weekly schedule error\n", __func__));
                 ret_val = SCHEDULER_INFO_WEEKLY_ERR;
+				break;
             }
         }
         else if (0 == strncmp(key->via.str.ptr, ABSOLUTE_SCHEDULE, key->via.str.size))
@@ -175,6 +176,7 @@ int process_schedule_info_doc( schedule_info_t *s, msgpack_object_map *map )
             {
                 CcspTraceError(("%s:absolute schedule error\n", __func__));
                 ret_val = SCHEDULER_INFO_ABSOLUTE_ERR;
+				break;
             }
         }
         else if (0 == strncmp(key->via.str.ptr, QOS_CLIENT_RULES_ALIAS, key->via.str.size))
@@ -189,6 +191,7 @@ int process_schedule_info_doc( schedule_info_t *s, msgpack_object_map *map )
                     s->actions = NULL;
                 }
                 ret_val = SCHEDULER_INFO_ACTIONS_ERR;
+				break;
             }
         } else if (0 == strncmp(key->via.str.ptr, TIME_ZONE, key->via.str.size)) {
             char time_zone[64] = {0};

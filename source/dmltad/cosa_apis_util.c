@@ -526,7 +526,7 @@ CosaUtilGetFullPathNameByKeyword
 
     while ((pTableStringToken = AnscTcUnlinkToken(pTableListTokenChain)))
     {
-        if ( pTableStringToken->Name )
+        if (pTableStringToken->Name[0] != '\0')
         {
             /* Get the string XXXNumberOfEntries */
             pString2 = &pTableStringToken->Name[0];

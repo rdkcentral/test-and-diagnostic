@@ -22,6 +22,7 @@
 #include "safec_lib_common.h"
 #include "device_prio_webconfig_apis.h"
 #include "device_prio_scheduler_apis.h"
+#include "webconfig_scheduler_doc.h"
 
 int get_base64_decodedbuffer(char *pString, char **buffer, int *size)
 {

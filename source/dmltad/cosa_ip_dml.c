@@ -6992,14 +6992,20 @@ eMMCFlashDiag_GetParamStringValue
 {
     int ret = 0;
     eSTMGRDeviceInfo DeviceInfo ;
-    eSTMGRHealthInfo HealthInfo ;
-    memset(&DeviceInfo, 0, sizeof(DeviceInfo));
-    memset(&HealthInfo, 0, sizeof(HealthInfo));
+    eSTMGRHealthInfo* pHealthInfo = (eSTMGRHealthInfo*)malloc(sizeof(eSTMGRHealthInfo));
+    if (!pHealthInfo) {
+        CcspTraceError(("Memory allocation failed for HealthInfo\n"));
+        return 1;
+    }
 
-    ret = CcspHalEmmcGetHealthInfo (&HealthInfo);
+    memset(&DeviceInfo, 0, sizeof(DeviceInfo));
+    memset(pHealthInfo, 0, sizeof(eSTMGRHealthInfo));
+
+    ret = CcspHalEmmcGetHealthInfo (pHealthInfo);
     if (ret != 0)
     {
         CcspTraceError(("CcspHalEmmcGetHealthInfo returned with error %d\n", ret));
+        free(pHealthInfo);
         return 1;
     }
 
@@ -7007,6 +7013,7 @@ eMMCFlashDiag_GetParamStringValue
     if (ret != 0)
     {
         CcspTraceError(("CcspHalEmmcGetDeviceInfo returned with error %d\n", ret));
+        free(pHealthInfo);
         return 1;
     }
 
@@ -7060,52 +7067,53 @@ eMMCFlashDiag_GetParamStringValue
 
     else if (strcmp(ParamName, "LifeElapsedA") == 0)
     {
-        AnscCopyString( pValue, HealthInfo.m_lifetimesList.m_diagnostics[0].m_value );
-        *pUlSize = AnscSizeOfString( HealthInfo.m_lifetimesList.m_diagnostics[0].m_value );
+        AnscCopyString( pValue, pHealthInfo->m_lifetimesList.m_diagnostics[0].m_value );
+        *pUlSize = AnscSizeOfString( pHealthInfo->m_lifetimesList.m_diagnostics[0].m_value );
     }
 
     else if (strcmp(ParamName, "LifeElapsedB") == 0)
     {
-        AnscCopyString( pValue, HealthInfo.m_lifetimesList.m_diagnostics[1].m_value );
-        *pUlSize = AnscSizeOfString( HealthInfo.m_lifetimesList.m_diagnostics[1].m_value );
+        AnscCopyString( pValue, pHealthInfo->m_lifetimesList.m_diagnostics[1].m_value );
+        *pUlSize = AnscSizeOfString( pHealthInfo->m_lifetimesList.m_diagnostics[1].m_value );
     }
 
     else if (strcmp(ParamName, "PreEOLStateEUDA") == 0)
     {
-        AnscCopyString( pValue, HealthInfo.m_healthStatesList.m_diagnostics[1].m_value );
-        *pUlSize = AnscSizeOfString( HealthInfo.m_healthStatesList.m_diagnostics[1].m_value );
+        AnscCopyString( pValue, pHealthInfo->m_healthStatesList.m_diagnostics[1].m_value );
+        *pUlSize = AnscSizeOfString( pHealthInfo->m_healthStatesList.m_diagnostics[1].m_value );
     }
 
     else if (strcmp(ParamName, "PreEOLStateSystem") == 0)
     {
-        AnscCopyString( pValue, HealthInfo.m_healthStatesList.m_diagnostics[0].m_value );
-        *pUlSize = AnscSizeOfString( HealthInfo.m_healthStatesList.m_diagnostics[0].m_value );
+        AnscCopyString( pValue, pHealthInfo->m_healthStatesList.m_diagnostics[0].m_value );
+        *pUlSize = AnscSizeOfString( pHealthInfo->m_healthStatesList.m_diagnostics[0].m_value );
     }
 
     else if (strcmp(ParamName, "PreEOLStateMLC") == 0)
     {
-        AnscCopyString( pValue, HealthInfo.m_healthStatesList.m_diagnostics[2].m_value );
-        *pUlSize = AnscSizeOfString( HealthInfo.m_healthStatesList.m_diagnostics[2].m_value );
+        AnscCopyString( pValue, pHealthInfo->m_healthStatesList.m_diagnostics[2].m_value );
+        *pUlSize = AnscSizeOfString( pHealthInfo->m_healthStatesList.m_diagnostics[2].m_value );
     }
 
     else if (strcmp(ParamName, "DeviceTemperature") == 0)
     {
-        AnscCopyString( pValue, HealthInfo.m_healthStatesList.m_diagnostics[3].m_value );
-        *pUlSize = AnscSizeOfString( HealthInfo.m_healthStatesList.m_diagnostics[3].m_value );
+        AnscCopyString( pValue, pHealthInfo->m_healthStatesList.m_diagnostics[3].m_value );
+        *pUlSize = AnscSizeOfString( pHealthInfo->m_healthStatesList.m_diagnostics[3].m_value );
     }
 
     else if (strcmp(ParamName, "UncorrectableECC") == 0)
     {
-        AnscCopyString( pValue, HealthInfo.m_healthStatesList.m_diagnostics[4].m_value );
-        *pUlSize = AnscSizeOfString( HealthInfo.m_healthStatesList.m_diagnostics[4].m_value );
+        AnscCopyString( pValue, pHealthInfo->m_healthStatesList.m_diagnostics[4].m_value );
+        *pUlSize = AnscSizeOfString( pHealthInfo->m_healthStatesList.m_diagnostics[4].m_value );
     }
 
     else
     {
         CcspTraceError(("Requested parameter not available as part of emmc diag\n"));
+        free(pHealthInfo);
         return -1;
     }
-
+    free(pHealthInfo);
     return 0;
 }
 
@@ -7119,30 +7127,34 @@ eMMCFlashDiag_GetParamBoolValue
 {
     int ret = 0;
 
-    eSTMGRHealthInfo HealthInfo ;
-    memset(&HealthInfo, 0, sizeof(HealthInfo));
+    eSTMGRHealthInfo* pHealthInfo = (eSTMGRHealthInfo*)malloc(sizeof(eSTMGRHealthInfo));
+    if (!pHealthInfo) {
+        CcspTraceError(("Memory allocation failed\n"));
+        return FALSE;
+    }
+    memset(pHealthInfo, 0, sizeof(eSTMGRHealthInfo));
 
-    ret = CcspHalEmmcGetHealthInfo(&HealthInfo);
+    
+    ret = CcspHalEmmcGetHealthInfo(pHealthInfo);
     if (ret != 0)
     {
         CcspTraceError(("CcspHalEmmcGetHealthInfo returned with error %d\n", ret));
+        free(pHealthInfo);
         return FALSE;
     }
-
     if (strcmp(ParamName, "Operational") == 0)
     {
-        *pBool    =  HealthInfo.m_isOperational;
-
+        *pBool = pHealthInfo->m_isOperational;
+        free(pHealthInfo);
         return TRUE;
     }
-
     else if (strcmp(ParamName, "Healthy") == 0)
     {
-        *pBool    =  HealthInfo.m_isHealthy;
-
+        *pBool = pHealthInfo->m_isHealthy;
+        free(pHealthInfo);
         return TRUE;
     }
-
+    free(pHealthInfo);
     return FALSE;
 }
 #endif

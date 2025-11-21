@@ -125,9 +125,11 @@ BbhmDiagipStartDiag
 
         if ( pMyObject->SetDstIp((ANSC_HANDLE)pMyObject, pDiagInfo->Host) == ANSC_STATUS_SUCCESS)
         {
+            AnscAcquireLock(&pMyObject->AccessLock); 
+
             pMyObject->SetNumPkts((ANSC_HANDLE)pMyObject, pDiagInfo->NumberOfRepetitions);
             pMyObject->SetPktSize((ANSC_HANDLE)pMyObject, pDiagInfo->DataBlockSize);
-            pMyObject->SetTimeOut((ANSC_HANDLE)pMyObject, pDiagInfo->Timeout);
+            pMyObject->SetTimeOut((ANSC_HANDLE)pMyObject, pDiagInfo->Timeout); 
 
             pMyObject->Open(pMyObject);
 
@@ -141,6 +143,7 @@ BbhmDiagipStartDiag
 
             if ( !pMyObject->hSendBuffer )
             {
+                AnscReleaseLock(&pMyObject->AccessLock);
                 return  ANSC_STATUS_RESOURCES;
             }
 
@@ -157,14 +160,15 @@ BbhmDiagipStartDiag
             }
             else
             {
+                AnscReleaseLock(&pMyObject->AccessLock);
                 return returnStatus;
             }
+            AnscReleaseLock(&pMyObject->AccessLock);
         }
         else
         {
             pDiagInfo->DiagnosticState = DSLH_DIAG_STATE_TYPE_PING_Error_HostName;
         }
-
         return ANSC_STATUS_SUCCESS;
     }
     else
