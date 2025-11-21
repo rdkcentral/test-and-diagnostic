@@ -87,6 +87,7 @@ case $BOX_TYPE in
     "SCER11BEL") SELFHEAL_TYPE="SYSTEMD";;
     "VNTXER5") SELFHEAL_TYPE="SYSTEMD";;
     "SCXF11BFL") SELFHEAL_TYPE="SYSTEMD";;
+    "ipq") SELFHEAL_TYPE="SYSTEMD";;
     *)
         echo_t "RDKB_SELFHEAL : ERROR: Unknown BOX_TYPE '$BOX_TYPE', using SELFHEAL_TYPE='BASE'"
         SELFHEAL_TYPE="BASE";;
@@ -271,6 +272,32 @@ check_xle_dns_route()
         sysevent set correct_dns_route
     fi
 
+}
+
+self_heal_meshwifi()
+{
+    STATUS=$(ovsh s Manager -c status | awk -F'"' '/state/' | grep -o 'state","[^"]*' | cut -d'"' -f3)
+    if [ -s /tmp/pass_failed ]; then
+        if [ "$STATUS" = "ACTIVE" ]; then
+            echo_t "[RDKB_SELFHEAL] :Manager state is ACTIVE : So connection is sucess"
+            rm /tmp/pass_failed
+            rm /tmp/opensync_restart
+        else
+            echo_t "[RDKB_SELFHEAL] :Manager state is NOT ACTIVE and rdkconfig_get failed:"
+            cat /tmp/pass_failed
+            if [ -f /tmp/opensync_restart ]; then
+                echo_t "[RDKB_SELFHEAL] :Restart meshwifi"
+                systemctl restart meshwifi
+                rm /tmp/opensync_restart
+                rm /tmp/pass_failed
+            else
+                echo_t "[RDKB_SELFHEAL] : Defer meshwifi restart"
+                touch /tmp/opensync_restart
+            fi
+        fi
+    else
+        echo_t "[RDKB_SELFHEAL] : Manager state: $STATUS"
+    fi
 }
 
 self_heal_meshAgent()
@@ -1093,7 +1120,7 @@ case $SELFHEAL_TYPE in
         fi
 
         # Checking MTA's PID
-        if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ]; then
+        if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ] || [ "$VOICE_SUPPORTED" != "false" ]; then
             echo_t "BWG doesn't support voice"
         else
             MTA_PID=$(busybox pidof CcspMtaAgentSsp)
@@ -1504,6 +1531,7 @@ case $SELFHEAL_TYPE in
             t2CountNotify "SYS_SH_PAM_CRASH_RESTART"
         fi
 
+	if [ "$VOICE_SUPPORTED" != "false" ]; then
         # Checking MTA's PID
         MTA_PID=$(busybox pidof CcspMtaAgentSsp)
         if [ "$MTA_PID" = "" ]; then
@@ -1511,6 +1539,7 @@ case $SELFHEAL_TYPE in
             resetNeeded mta CcspMtaAgentSsp
             t2CountNotify "SYS_SH_MTA_restart"
         fi
+	fi
 
         WiFi_Flag=false
         # Checking Wifi's PID
@@ -5077,6 +5106,7 @@ fi
 self_heal_dual_cron
 self_heal_meshAgent
 self_heal_meshAgent_hung
+self_heal_meshwifi
 self_heal_sedaemon
 self_heal_ethwan_mode_recover
 if [ "$T2_ENABLE" = "true" ]; then
