@@ -49,6 +49,7 @@
 #include "tad_rbus_apis.h"
 #include "lowlatency_apis.h"
 #include "current_time.h"
+#include "webcfg_selfheal.h"
 #include <telemetry_busmessage_sender.h>
 
 #ifdef DEVICE_PRIORITIZATION_ENABLED
@@ -367,6 +368,14 @@ int main(int argc, char* argv[])
 
     // Init LatencyMeasurent
     LatencyMeasurementInit();
+	
+    // SelfHeal Subdoc Version Mismatch
+    initWebcfgProperties(WEBCFG_PROPERTIES_FILE);
+    int webcfg_ret = webcfg_subdoc_mismatch_boot_check();
+	if (webcfg_ret != 0)
+	{
+	    fprintf(stderr, "Error: webcfg_subdoc_mismatch_boot_check failed during initialization (ret=%d)\n", webcfg_ret);
+	}
 
     //crate a thread to update time thread for ethwan enable mode
     BOOL ethwanEnabled = FALSE;
