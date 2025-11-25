@@ -41,3 +41,7 @@ endif
 libdmltad_la_DEPENDENCIES = $(EXTRA_DEPENDENCIES)
 libdmltad_la_LIBADD = $(libdmltad_la_DEPENDENCIES)
 libdmltad_la_LDFLAGS = -lccsp_common -lsyscfg -lsysevent -lsecure_wrapper -lrbus -lresolv -lev -lpcap
+
+if CORE_NET_LIB_FEATURE_SUPPORT
+libdmltad_la_LDFLAGS += -lnet
+endif

@@ -17,97 +17,21 @@
  * limitations under the License.
 */
 
-/***********************************************************************
-
-APIs for Object:
-
-    X_RDK_Test.DHCPClientv4Test.
-
-    *  DHCPClientv4Test_GetParamBoolValue
-    *  DHCPClientv4Test_SetParamBoolValue
-    *  DHCPClientv4Test_GetParamStringValue
-
-***********************************************************************/
-
 #define filePath "/nvram/rats_enabled"
-#define DHCP_CLIENT_LIB "libdhcpclient.so"
-#define FLOW_MANAGER_LIB "libflowManager.so"
-
-BOOL
-DHCPClientv4Test_GetParamBoolValue
-	(
-	    ANSC_HANDLE                 hInsContext,
-	    char*                       ParamName,
-	    BOOL*                       pBool
-	);
-
-BOOL
-DHCPClientv4Test_SetParamBoolValue
-    (
-        ANSC_HANDLE                 hInsContext,
-        char*                       ParamName,
-        BOOL                        bValue
-    );
-
-ULONG
-DHCPClientv4Test_GetParamStringValue
-    (
-        ANSC_HANDLE                 hInsContext,
-        char*                       ParamName,
-        char*                       pValue,
-        ULONG*                      pUlSize
-    );
-
-/***********************************************************************
-
-    APIs for Object:
-
-    X_RDK_Test.DHCPClientv6Test.
-
-    *  DHCPClientv6Test_GetParamBoolValue
-    *  DHCPClientv6Test_SetParamBoolValue
-    *  DHCPClientv6Test_GetParamStringValue
-
-***********************************************************************/
-
-BOOL
-DHCPClientv6Test_GetParamBoolValue
-	(
-	    ANSC_HANDLE                 hInsContext,
-	    char*                       ParamName,
-	    BOOL*                       pBool
-	);
-
-BOOL
-DHCPClientv6Test_SetParamBoolValue
-    (
-        ANSC_HANDLE                 hInsContext,
-        char*                       ParamName,
-        BOOL                        bValue
-    );
-
-ULONG
-DHCPClientv6Test_GetParamStringValue
-    (
-        ANSC_HANDLE                 hInsContext,
-        char*                       ParamName,
-        char*                       pValue,
-        ULONG*                      pUlSize
-    );
-
+#define AUTOMATION_TEST_LIB "/usr/lib/libRATS_test.so"
 /***********************************************************************
 
 APIs for Object:
 
-    X_RDK_Test.FlowManagerTest.
+    Device.X_RDK_AutomationTest.
 
-    *  FlowManagerTest_GetParamStringValue
-    *  DHCPClientv4Test_SetParamBoolValue
+    *  X_RDK_AutomationTest_GetParamStringValue
+    *  X_RDK_AutomationTest_SetParamStringValue
 
 ***********************************************************************/
 
 ULONG
-FlowManagerTest_GetParamStringValue
+X_RDK_AutomationTest_GetParamStringValue
     (
         ANSC_HANDLE                 hInsContext,
         char*                       ParamName,
@@ -116,7 +40,7 @@ FlowManagerTest_GetParamStringValue
     );
 
 BOOL
-FlowManagerTest_SetParamStringValue
+X_RDK_AutomationTest_SetParamStringValue
     (
         ANSC_HANDLE                 hInsContext,
         char*                       ParamName,

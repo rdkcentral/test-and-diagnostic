@@ -486,13 +486,7 @@ int xle_reliability_monitoring()
         return 0;
     }
     if (strncmp(MeshBackHaulIfname, RDKConnectionInterface, sizeof(MeshBackHaulIfname)-1) != 0) {
-        xle_log("[xle_self_heal] Device.X_RDK_Connection.Interfacee is not same with Device.X_RDK_MeshAgent.MeshBackHaul.Ifname in Ext mode \n");
-        if(rbus_setStringValue(MeshBackHaulIfname, "Device.X_RDK_Connection.Interface") == 0) {
-            xle_log("[xle_self_heal] Device.X_RDK_Connection.Interfacee Set to %s and restarting IDM service ...\n", MeshBackHaulIfname);
-            system("systemctl restart RdkInterDeviceManager.service &");
-	 } else {
-            xle_log("[xle_self_heal] Device.X_RDK_Connection.Interfacee Set RBUS ERROR \n");
-	 }
+        xle_log("[xle_self_heal] Device.X_RDK_Connection.Interfacee=%s not same with Device.X_RDK_MeshAgent.MeshBackHaul.Ifname=%s in Ext mode \n", RDKConnectionInterface, MeshBackHaulIfname);
      }
 
      return 0;
