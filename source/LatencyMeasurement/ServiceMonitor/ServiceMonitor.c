@@ -61,7 +61,7 @@ root@xer10:~#
 root@xer10:~# sysevent get ipv6_prefix
 2601:9c0:280:4cb0::/64
 */
-#if defined(_HUB4_PRODUCT_REQ_) || defined(_SR213_PRODUCT_REQ_) || defined(_SCER11BEL_PRODUCT_REQ_) || defined(_SCXF11BFL_PRODUCT_REQ_)
+#if defined(_HUB4_PRODUCT_REQ_) || defined(_SR213_PRODUCT_REQ_) || defined(_SCER11BEL_PRODUCT_REQ_)
 #define LAN_PREFIX_SYSEVENT "ipv6_prefix"
 #else
 #define LAN_PREFIX_SYSEVENT "lan_prefix"
