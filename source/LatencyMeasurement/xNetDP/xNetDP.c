@@ -52,8 +52,6 @@
 #define MAX_RETRY_TIME 600
 #define MAX_MAC_ADDRESSES 3
 #define MAC_ADDRESS_LEN 18
-#define PRIORITY_MACS_LOG_FILE "/rdklogs/logs/LatencyLog.txt"
-FILE *priorityMacsLogFp = NULL;
 char g_cMacAddresses[MAX_MAC_ADDRESSES][MAC_ADDRESS_LEN];
 int g_iPriorityMacCount = 0;
 
@@ -63,13 +61,6 @@ typedef struct
     bool  bIsPriorityMacsReplaced;
 }priorityMacUpdateStatus;
 priorityMacUpdateStatus sPriorityMacUpdateStatus = {false,false};
-
-typedef struct
-{
-   bool loggedOnceIPv4;
-   bool loggedOnceIPv6;
-}loggedOnceStatus;
-loggedOnceStatus sLoggedOnceStatus = {false,false};
 
 #define swap(T, x, y) \
     {                 \
@@ -199,7 +190,6 @@ struct option longopts[] =
 
 FILE *logFp = NULL;
 char log_buff[MAX_LOG_BUFF_SIZE], time_buff[64];
-char cPriorityLogBuff[MAX_LOG_BUFF_SIZE];
 #define VALIDATION_SUCCESS 0
 #define VALIDATION_FAILED  -1
 
@@ -217,19 +207,7 @@ char cPriorityLogBuff[MAX_LOG_BUFF_SIZE];
                                     printf("TIME : %s  DBG_LOG : %s",time_buff, log_buff);\
                             }\
                          }
-#define priorityMacs_log(fmt ...)    {\
-    if (priorityMacsLogFp != NULL){\
-        struct timeval tv; \
-        struct tm *tm_info; \
-        char cTimeBuff[32]; \
-        gettimeofday(&tv, NULL); \
-        tm_info = localtime(&tv.tv_sec); \
-        strftime(cTimeBuff, sizeof(cTimeBuff), "%y%m%d-%H:%M:%S", tm_info); \
-        snprintf(cPriorityLogBuff, MAX_LOG_BUFF_SIZE-1,fmt);\
-        fprintf(priorityMacsLogFp, "%s.%06ld PRIORITY_MACS_LOG : %s", cTimeBuff, (long)tv.tv_usec, cPriorityLogBuff);\
-        fflush(priorityMacsLogFp);\
-    }\
-}
+
 enum rep_type
 {
     REP_TYPE_FILE=0,
@@ -604,8 +582,6 @@ long long latency_in_microsecond(long long latency_sec,long long latency_usec)
 
 void replacePriorityMacs(LatencyTable *hashLatencyTable,int iMaxClients, int iIpType)
 {
-    bool *pLoggedOnce = (iIpType == IPV4) ? &sLoggedOnceStatus.loggedOnceIPv4 : &sLoggedOnceStatus.loggedOnceIPv6;
-
     for (int iPriMacIndex = 0; iPriMacIndex < g_iPriorityMacCount; iPriMacIndex++)
     {
         int iFoundIndex = -1;
@@ -614,27 +590,17 @@ void replacePriorityMacs(LatencyTable *hashLatencyTable,int iMaxClients, int iIp
         for (int iIpv4LatTabIndex = iPriMacIndex; iIpv4LatTabIndex < iMaxClients; iIpv4LatTabIndex++)
         {
             dbg_log("Comparing hash MAC %s with priority MAC %s \n", hashLatencyTable[iIpv4LatTabIndex].mac, g_cMacAddresses[iPriMacIndex]);
-            if (strcasecmp(hashLatencyTable[iIpv4LatTabIndex].mac, g_cMacAddresses[iPriMacIndex]) == 0)
+            if (strcmp(hashLatencyTable[iIpv4LatTabIndex].mac, g_cMacAddresses[iPriMacIndex]) == 0)
             {
                 iFoundIndex = iIpv4LatTabIndex;
                 dbg_log(" Found MAC entry at index %d \n", iFoundIndex);
-                if (false == *pLoggedOnce)
-                    priorityMacs_log("%s:%d Found priority MAC entry %s at index %d in %s Latency Table\n", __FUNCTION__, __LINE__, g_cMacAddresses[iPriMacIndex], iFoundIndex, (IPV4 == iIpType) ? "IPv4" : "IPv6");
                 break;
             }
         }
 
         if (-1 == iFoundIndex)
         {
-            dbg_log(" Add missing MAC entry, %s and len : %d\n",hashLatencyTable[iPriMacIndex].mac, strlen(hashLatencyTable[iPriMacIndex].mac));
-            if (false == *pLoggedOnce)
-            {
-                priorityMacs_log("%s:%d Adding missing priority MAC entry %s at index %d in %s Latency Table\n", __FUNCTION__, __LINE__, g_cMacAddresses[iPriMacIndex], iPriMacIndex, (IPV4 == iIpType) ? "IPv4" : "IPv6");
-                if (g_iPriorityMacCount == (iPriMacIndex + 1))
-                {
-                    *pLoggedOnce = true;
-                }
-            }
+            dbg_log(" Add missing MAC entry \n");
            //if the Latency table is not full, increment the counter after adding it
            if (0 == strlen (hashLatencyTable[iPriMacIndex].mac))
            {
@@ -653,14 +619,6 @@ void replacePriorityMacs(LatencyTable *hashLatencyTable,int iMaxClients, int iIp
         {
             //Swap the entries
             dbg_log("swap the MAC entries \n");
-            if (false == *pLoggedOnce)
-            {
-                priorityMacs_log("%s:%d Swapping priority MAC entry %s and %s in %s Latency Table\n", __FUNCTION__, __LINE__, g_cMacAddresses[iPriMacIndex], g_cMacAddresses[iFoundIndex], (IPV4 == iIpType) ? "IPv4" : "IPv6");
-                if (g_iPriorityMacCount == (iPriMacIndex + 1))
-                {
-                    *pLoggedOnce = true;
-                }
-            }
             LatencyTable temp = hashLatencyTable[iPriMacIndex];
             hashLatencyTable[iPriMacIndex] = hashLatencyTable[iFoundIndex];
             hashLatencyTable[iFoundIndex] = temp;
@@ -669,14 +627,6 @@ void replacePriorityMacs(LatencyTable *hashLatencyTable,int iMaxClients, int iIp
         else if (iFoundIndex == iPriMacIndex)
         {
             sPriorityMacUpdateStatus.bIsPriorityMacsReplaced = true;
-            if (false == *pLoggedOnce)
-            {
-                priorityMacs_log("%s:%d Priority MAC %s already at correct index %d in %s Latency Table\n", __FUNCTION__, __LINE__, g_cMacAddresses[iPriMacIndex], iPriMacIndex, (IPV4 == iIpType) ? "IPv4" : "IPv6");
-                if (g_iPriorityMacCount == (iPriMacIndex + 1))
-                {
-                    *pLoggedOnce = true;
-                }
-            }
         }
     }
 }
@@ -886,7 +836,7 @@ void UpdateReportingTable(int hashIndex)
             int iProbe = (iOriginalIndex + iVar) % MAX_NUM_OF_CLIENTS;
             if (hashLatencyTable[iProbe].mac[0] != '\0')
             {
-                if (strcasecmp(hashLatencyTable[iProbe].mac, hashArray[hashIndex].mac) == 0)
+                if (strcmp(hashLatencyTable[iProbe].mac, hashArray[hashIndex].mac) == 0)
                 {
                     dbg_log("existing MAC found %s at index %d\n", hashArray[hashIndex].mac, iProbe);
                     iFoundIndex = iProbe; // existing MAC found
@@ -1548,7 +1498,7 @@ void parseActiveRules(char* pRuleString)
                 dbg_log("pMac: %s\n", pMac);
                 for (int iIndex = 0; iIndex < g_iPriorityMacCount; iIndex++)
                 {
-                    if (strcasecmp(g_cMacAddresses[iIndex], pMac) == 0)
+                    if (strcmp(g_cMacAddresses[iIndex], pMac) == 0)
                     {
                         bIsDuplicate = 1;
                         break;
@@ -1575,13 +1525,13 @@ void parseActiveRules(char* pRuleString)
         }
         pToken = strtok_r(NULL, cRule, &pRule_saveptr);
     }
-
-    dbg_log("Extracted %d unique MAC addresses: \n", g_iPriorityMacCount);
-    priorityMacs_log("%s:%d, Extracted %d unique MAC addresses\n", __FUNCTION__, __LINE__, g_iPriorityMacCount);
-    for (int iIndex = 0; iIndex < g_iPriorityMacCount; iIndex++)
+    if(args.dbg_mode == true)
     {
-        dbg_log("MAC %d: %s\n", iIndex + 1, g_cMacAddresses[iIndex]);
-        priorityMacs_log("%s:%d, MAC %d: %s\n", __FUNCTION__, __LINE__, iIndex + 1, g_cMacAddresses[iIndex]);
+        dbg_log("Extracted %d unique MAC addresses: \n", g_iPriorityMacCount);
+        for (int iIndex = 0; iIndex < g_iPriorityMacCount; iIndex++)
+        {
+            dbg_log("MAC %d: %s\n", iIndex + 1, g_cMacAddresses[iIndex]);
+        }
     }
 }
 
@@ -1593,8 +1543,6 @@ void PrioritizeEventHandler(rbusHandle_t handle, rbusEvent_t const* event, rbusE
     rbusValue_t rbusValue = NULL;
 
     sPriorityMacUpdateStatus.bIsPriorityMacsUpdated = FALSE;
-    sLoggedOnceStatus.loggedOnceIPv4 = false;
-    sLoggedOnceStatus.loggedOnceIPv6 = false;
     // Try to get initialValue first
     rbusValue = rbusObject_GetValue(event->data, "initialValue");
     if (!rbusValue)
@@ -1605,23 +1553,19 @@ void PrioritizeEventHandler(rbusHandle_t handle, rbusEvent_t const* event, rbusE
     if (!rbusValue || rbusValue_GetType(rbusValue) != RBUS_STRING)
     {
         dbg_log("Invalid event rbusValue for %s\n", pEventName);
-        priorityMacs_log("%s:%d, Invalid event rbusValue for %s\n", __FUNCTION__, __LINE__, pEventName);
         return;
     }
     const char* pRuleString = rbusValue_GetString(rbusValue, NULL);
     if (!pRuleString)
     {
         dbg_log("Failed to get string rbusValue for %s\n", pEventName);
-        priorityMacs_log("%s:%d, Failed to get string rbusValue for %s\n", __FUNCTION__, __LINE__, pEventName);
         return;
     }
     // Log the received string
     dbg_log("Received event %s: %s\n", pEventName, pRuleString);
-    priorityMacs_log("%s:%d, Received event %s: %s\n", __FUNCTION__, __LINE__, pEventName, pRuleString);
     if (strlen(pRuleString) == 0)
     {
         dbg_log("Priority MAC list is empty. Clearing priority MACs.\n");
-        priorityMacs_log("%s:%d, Priority MAC list is empty. Clearing priority MACs.\n", __FUNCTION__, __LINE__);
         g_iPriorityMacCount = 0;
         memset(g_cMacAddresses, 0, sizeof(g_cMacAddresses));
         return;
@@ -1671,7 +1615,6 @@ void* retry_subscription_thread(void *arg)
         if(handle_rbusSubscribe() == true)
         {
             dbg_log("Subscription thread : Subscription success for %s\n", ACTIVE_RULES_PARAM);
-            priorityMacs_log("%s:%d, priority MACs subscription successful for %s\n", __FUNCTION__, __LINE__, ACTIVE_RULES_PARAM);
             break;
         }
         dbg_log("Subscription thread: Subscription failed for %s, retrying in %d seconds\n", ACTIVE_RULES_PARAM, RETRY_INTERVAL_SECONDS);
@@ -1683,7 +1626,6 @@ void* retry_subscription_thread(void *arg)
     if(uiRetryTime > MAX_RETRY_TIME)
     {
         dbg_log(" Gave up retrying till 10mins \n");
-        priorityMacs_log("%s:%d, Gave up priority MACs subscription retries after %d seconds\n", __FUNCTION__, __LINE__, MAX_RETRY_TIME);
     }
 
     return NULL;
@@ -1775,21 +1717,13 @@ int main(int argc,char **argv)
     pthread_t ptid1;
 
     // Creating subscription retry thread
-    priorityMacsLogFp = fopen(PRIORITY_MACS_LOG_FILE,"w+");
-    if(priorityMacsLogFp == NULL)
-    {
-        dbg_log("Failed to open priority MACs log file %s\n", PRIORITY_MACS_LOG_FILE);
-    }
     dbg_log(" retry subscription thread creation \n");
-    priorityMacs_log("%s:%d, creating priority MACs subscription retry thread\n", __FUNCTION__, __LINE__);
     pthread_t subscription_thread;
     if (pthread_create(&subscription_thread, NULL, &retry_subscription_thread, NULL) != 0) {
         dbg_log("Failed to create subscription retry thread");
-        priorityMacs_log("%s:%d, Failed to create priority MACs subscription retry thread\n", __FUNCTION__, __LINE__);
     }
     else {
         dbg_log("Subscription retry thread created successfully");
-        priorityMacs_log("%s:%d, Priority MACs subscription retry thread created successfully\n", __FUNCTION__, __LINE__);
     }
 
     // Creating a new thread
