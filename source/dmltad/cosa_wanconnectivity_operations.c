@@ -2094,7 +2094,6 @@ static void dns_response_callback(
     USHORT txn_id;
     uint8_t rcode;
     int ret_parse = 0;
-    errno_t rc = -1;
     int ind = -1;
     char *payload = NULL;
     int len = 0;
