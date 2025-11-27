@@ -217,6 +217,8 @@ ANSC_STATUS wancnctvty_chk_stop_threads(ULONG InstanceNumber,service_type_t type
             WANCHK_LOG_INFO("Stop PassiveMonitor Monitor thread id:%lu\n",
                                             gIntfInfo->wancnctvychkpassivethread_tid);
             pthread_cancel(gIntfInfo->wancnctvychkpassivethread_tid);
+            v_secure_system("touch /tmp/passive_mon_stop_%s", gIntfInfo->IPInterface.InterfaceName);
+            WANCHK_LOG_INFO("[DEBUG] pthread_cancel for Passive Monitor Created /tmp/passive_mon_stop_%s\n", gIntfInfo->IPInterface.InterfaceName);
             gIntfInfo->wancnctvychkpassivethread_tid = 0;
             gIntfInfo->PassiveMonitor_Running = FALSE;
         }
@@ -2069,6 +2071,23 @@ static void dns_response_callback(
 )
 {
     PWAN_CNCTVTY_CHK_PASSIVE_MONITOR pPassive = (PWAN_CNCTVTY_CHK_PASSIVE_MONITOR) arg;
+
+    WANCHK_LOG_INFO("[DEBUG] evio.active: %d\n", pPassive->evio.active); 
+    char filename[BUFLEN_128] = {0};
+    errno_t rc = -1;
+    rc = sprintf_s(filename,BUFLEN_128-1, "/tmp/passive_mon_stop_%s", pPassive->InterfaceName);
+    if (rc < EOK) {
+        ERR_CHK(rc);
+    }
+
+    if (access(filename, F_OK) == 0)
+    {
+        WANCHK_LOG_INFO("[DEBUG] File %s exists, breaking pcap loop\n", filename);
+        // ev_break(pPassive->loop, EVBREAK_ALL);
+        // ev_loop_destroy(pPassive->loop);
+        return;
+    }
+
     char dns_payload[BUFLEN_4096] = {0};
     unsigned int dns_payload_len = 0;
     USHORT txn_id;
