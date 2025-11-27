@@ -150,6 +150,7 @@ ANSC_STATUS wancnctvty_chk_start_threads(ULONG InstanceNumber,service_type_t typ
             {
                 WANCHK_LOG_INFO("%s Start PassiveMonitor for interface :%s\n",__FUNCTION__,
                                                         gIntfInfo->IPInterface.InterfaceName);
+                v_secure_system("rm -rf /tmp/passive_mon_stop_%s", gIntfInfo->IPInterface.InterfaceName);
                 wancnctvty_chk_start_passive(gIntfInfo);
             }
             if ( ((type== PASSIVE_ACTIVE_MONITOR_THREADS)  || (type== ACTIVE_MONITOR_THREAD) ||
