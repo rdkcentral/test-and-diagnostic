@@ -2073,7 +2073,11 @@ static void dns_response_callback(
 {
     PWAN_CNCTVTY_CHK_PASSIVE_MONITOR pPassive = (PWAN_CNCTVTY_CHK_PASSIVE_MONITOR) arg;
 
-    WANCHK_LOG_INFO("[DEBUG] evio.active: %d\n", pPassive->evio.active); 
+    WANCHK_LOG_INFO("[DEBUG] evio.active: %d\n", pPassive->evio.active);
+    if (pPassive->evio.active < 0) {
+        WANCHK_LOG_ERROR("[DEBUG] evio.active is negative, ISSUE OCCURRED\n");
+        v_secure_system("touch /tmp/evio.active_negative_%s", gIntfInfo->IPInterface.InterfaceName);
+    }
     char filename[BUFLEN_128] = {0};
     errno_t rc = -1;
     rc = sprintf_s(filename,BUFLEN_128-1, "/tmp/passive_mon_stop_%s", pPassive->InterfaceName);
