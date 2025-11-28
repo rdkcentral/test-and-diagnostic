@@ -2076,7 +2076,7 @@ static void dns_response_callback(
     WANCHK_LOG_INFO("[DEBUG] evio.active: %d\n", pPassive->evio.active);
     if (pPassive->evio.active < 0) {
         WANCHK_LOG_ERROR("[DEBUG] evio.active is negative, ISSUE OCCURRED\n");
-        v_secure_system("touch /tmp/evio.active_negative_%s", gIntfInfo->IPInterface.InterfaceName);
+        v_secure_system("touch /tmp/evio.active_negative_%s", pPassive->InterfaceName);
     }
     char filename[BUFLEN_128] = {0};
     errno_t rc = -1;
