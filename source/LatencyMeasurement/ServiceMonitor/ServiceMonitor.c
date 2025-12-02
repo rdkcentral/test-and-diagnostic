@@ -564,9 +564,9 @@ void Get_IPv4_addr( )
 ******************************************************************************/
 void SendConditional_pthread_cond_signal()
 {
+	CcspTraceInfo(("%s Send conditional signal to monitoring thread\n",__func__));
 	pthread_mutex_lock(&lock);
 	pthread_cond_signal(&Monitor_cond);
-	CcspTraceInfo(("%s Send conditional signal to monitoring thread\n",__func__));
 	pthread_mutex_unlock(&lock);
 }
 
@@ -734,15 +734,13 @@ void* LatencyMeasurement_MonitorService(void *arg)
 	int Error=0;
 	struct sysinfo s_info;
 	sysinfo(&s_info);
-	pthread_mutex_lock(&lock);
 	while(s_info.uptime < 900)// 900 this wait for device boot up then only monitor services will run
 	{
 		sysinfo(&s_info);
-		pthread_mutex_unlock(&lock);
 		sleep(60);//60sec
-		pthread_mutex_lock(&lock);
 	}
 	CcspTraceInfo(("%s : Device uptime is more than 15 mins \n",__func__));
+	pthread_mutex_lock(&lock);
 	Error=pthread_create(&tid[SYSEVENT_PTHREAD_ID],NULL,SysEventHandlerThrd_for_Monitorservice,NULL);
 	if (Error)
 	{
