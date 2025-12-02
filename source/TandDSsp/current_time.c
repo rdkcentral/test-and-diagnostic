@@ -168,7 +168,7 @@ bool setSystemTime(time_t desired_epoch_time)
     if (settimeofday(&new_timeval, NULL) != 0) 
     {
         CcspTraceError(("Error setting system time\n"));
-		t2_event_d("SYST_ERROR_SYSTIME_FAIL",1);
+		t2_event_d("SYS_ERROR_SYSTIME_FAIL",1);
         return false;
     }
 
@@ -178,7 +178,7 @@ bool setSystemTime(time_t desired_epoch_time)
     }
     CcspTraceInfo(("System time set successfully.\n"));
 	snprintf(uptime_str, sizeof(uptime_str), "%lld", uptime_ms);
-    t2_event_s("SYST_INFO_SETSYSTIME_split", uptime_str); 
+    t2_event_s("SYS_INFO_SETSYSTIME_split", uptime_str); 
 
     return true;
 }
@@ -271,7 +271,7 @@ void UpdatedeviceTimeorbuildTime(long long currentEpochTime, long long build_epo
             setSystemTime(stored_time);
             CcspTraceInfo(("System time set to build time: %lld\n", stored_time));
 			snprintf(time_str, sizeof(time_str), "%lld", stored_time);
-			t2_event_s("SYST_INFO_SYSBUILD_split",time_str);
+			t2_event_d("SYS_INFO_SYSBUILD",1);
         }
     } 
 }
@@ -331,7 +331,7 @@ void* updateTimeThread(void* arg)
                                 {
           				CcspTraceInfo(("System time set as stored time: %lld after reboot as it is greater\n",stored_time));
 									snprintf(time_str, sizeof(time_str), "%lld", stored_time);
-									t2_event_s("SYST_INFO_SYSLKG_split",time_str);
+									t2_event_s("SYS_INFO_SYSLKG_split",time_str);
                                 }
           		}
           		else
@@ -428,7 +428,7 @@ void* updateTimeThread(void* arg)
         	else
         	{
         		CcspTraceError(("System time update failed\n"));	
-				t2_event_d("SYST_ERROR_SYSTIME_FAIL",1);
+				t2_event_d("SYS_ERROR_SYSTIME_FAIL",1);
         	}
         }
     }
