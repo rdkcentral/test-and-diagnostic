@@ -99,18 +99,18 @@ void check_lte_provisioned(char* lte_wan,char* lte_backup_enable, char* lte_inte
         {
             if (NULL != retVal[0]->parameterValue)
             {
-                strncpy(lte_wan, retVal[0]->parameterValue, sizeof(lte_wan_status)-1);
-                lte_wan[sizeof(lte_wan_status)-1] = '\0';
+                strncpy(lte_wan, retVal[0]->parameterValue, BUFLEN_128 - 1);
+                lte_wan[BUFLEN_128 - 1] = '\0';
             }
             if (NULL != retVal[1]->parameterValue)
             {
-                strncpy(lte_backup_enable, retVal[1]->parameterValue, sizeof(lte_backup_enable)-1);
-                lte_backup_enable[sizeof(lte_backup_enable)-1] = '\0';
+                strncpy(lte_backup_enable, retVal[1]->parameterValue, BUFLEN_128 - 1);
+                lte_backup_enable[BUFLEN_128 - 1] = '\0';
             }
             if (NULL != retVal[2]->parameterValue)
             {
-                strncpy(lte_interface_enable, retVal[2]->parameterValue, sizeof(lte_interface_enable)-1);
-                lte_interface_enable[sizeof(lte_interface_enable)-1] = '\0';
+                strncpy(lte_interface_enable, retVal[2]->parameterValue, BUFLEN_128 - 1);
+                lte_interface_enable[BUFLEN_128 - 1] = '\0';
             }
             if (NULL != retVal[3]->parameterValue)
             {
