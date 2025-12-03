@@ -56,6 +56,7 @@ struct xle_attributes
 
 #define BUFLEN_128  128
 #define BUFLEN_256  256
+#define IPADDR_FAMILY_LEN 16
 
 struct xle_attributes xle_params;
 static char default_wan_ifname[50];
@@ -114,8 +115,8 @@ void check_lte_provisioned(char* lte_wan,char* lte_backup_enable, char* lte_inte
             }
             if (NULL != retVal[3]->parameterValue)
             {
-                strncpy(ipaddr_family, retVal[3]->parameterValue, sizeof(ipaddr_family)-1);
-                ipaddr_family[sizeof(ipaddr_family)-1] = '\0';
+                strncpy(ipaddr_family, retVal[3]->parameterValue, IPADDR_FAMILY_LEN - 1);
+                ipaddr_family[IPADDR_FAMILY_LEN - 1] = '\0';
             }
             free_parameterValStruct_t(bus_handle, nval, retVal);
         }
