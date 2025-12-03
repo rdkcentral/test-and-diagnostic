@@ -99,19 +99,23 @@ void check_lte_provisioned(char* lte_wan,char* lte_backup_enable, char* lte_inte
         {
             if (NULL != retVal[0]->parameterValue)
             {
-                strncpy(lte_wan, retVal[0]->parameterValue, strlen(retVal[0]->parameterValue) + 1);
+                strncpy(lte_wan, retVal[0]->parameterValue, sizeof(lte_wan_status)-1);
+                lte_wan[sizeof(lte_wan_status)-1] = '\0';
             }
             if (NULL != retVal[1]->parameterValue)
             {
-                strncpy(lte_backup_enable, retVal[1]->parameterValue, strlen(retVal[1]->parameterValue) + 1);
+                strncpy(lte_backup_enable, retVal[1]->parameterValue, sizeof(lte_backup_enable)-1);
+                lte_backup_enable[sizeof(lte_backup_enable)-1] = '\0';
             }
             if (NULL != retVal[2]->parameterValue)
             {
-                strncpy(lte_interface_enable, retVal[2]->parameterValue, strlen(retVal[2]->parameterValue) + 1);
+                strncpy(lte_interface_enable, retVal[2]->parameterValue, sizeof(lte_interface_enable)-1);
+                lte_interface_enable[sizeof(lte_interface_enable)-1] = '\0';
             }
             if (NULL != retVal[3]->parameterValue)
             {
-                strncpy(ipaddr_family, retVal[3]->parameterValue, strlen(retVal[3]->parameterValue) + 1);
+                strncpy(ipaddr_family, retVal[3]->parameterValue, sizeof(ipaddr_family)-1);
+                ipaddr_family[sizeof(ipaddr_family)-1] = '\0';
             }
             free_parameterValStruct_t(bus_handle, nval, retVal);
         }
@@ -191,6 +195,8 @@ void PopulateParameters()
     if (ret != CCSP_SUCCESS)
     {
         xle_log("CCSP_Message_Bus_Init failed for component %s: %d\n", component_id, ret);
+        bus_handle = NULL;
+        exit(1);
     }
     int retPsmGet = PSM_Get_Record_Value2(bus_handle,g_Subsystem, "dmsb.Mesh.WAN.Interface.Name", NULL, &paramValue);
     if (retPsmGet == CCSP_SUCCESS)
