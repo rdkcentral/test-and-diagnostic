@@ -816,18 +816,39 @@ NSLookupDiagnostics_Validate
         rc = strcpy_s(pNSLookupDiagInfo->IfAddr, sizeof(pNSLookupDiagInfo->IfAddr), pNSLookupDiagInfo->Interface);
         ERR_CHK(rc);
        }
-        else if ( (AnscSizeOfString(pNSLookupDiagInfo->Interface) == 0 || strcmp(pNSLookupDiagInfo->Interface, "Device.IP.Interface.1") == 0 ) &&
-                 (isValidIPv6Address(pNSLookupDiagInfo->DNSServer) && isValidIPv6Address(CosaGetInterfaceAddrByName("Device.DeviceInfo.X_COMCAST-COM_WAN_IPv6"))))
-                 {
-                     rc = strcpy_s(pNSLookupDiagInfo->IfAddr, sizeof(pNSLookupDiagInfo->IfAddr), CosaGetInterfaceAddrByName("Device.DeviceInfo.X_COMCAST-COM_WAN_IPv6"));
-                     ERR_CHK(rc);
-                 }
-        else if( (AnscSizeOfString(pNSLookupDiagInfo->Interface) == 0 || strcmp(pNSLookupDiagInfo->Interface, "Device.IP.Interface.1") == 0 ) &&
-                 (isValidIPv4Address(CosaGetInterfaceAddrByName("Device.DeviceInfo.X_COMCAST-COM_WAN_IP"))))
-                 {
-                    rc = strcpy_s(pNSLookupDiagInfo->IfAddr, sizeof(pNSLookupDiagInfo->IfAddr), CosaGetInterfaceAddrByName("Device.DeviceInfo.X_COMCAST-COM_WAN_IP"));
+       else if ((AnscSizeOfString(pNSLookupDiagInfo->Interface) == 0 ||
+                strcmp(pNSLookupDiagInfo->Interface, "Device.IP.Interface.1") == 0))
+       {
+            char *wan_ipv6 = CosaGetInterfaceAddrByName("Device.DeviceInfo.X_COMCAST-COM_WAN_IPv6");
+            if (wan_ipv6 != NULL)
+            {
+               if (isValidIPv6Address(pNSLookupDiagInfo->DNSServer) &&
+                   isValidIPv6Address(wan_ipv6))
+                {
+                    rc = strcpy_s(pNSLookupDiagInfo->IfAddr,
+                                  sizeof(pNSLookupDiagInfo->IfAddr),
+                                  wan_ipv6);
                     ERR_CHK(rc);
-                 }
+                }
+                AnscFreeMemory(wan_ipv6);
+            }
+       }
+       else if ((AnscSizeOfString(pNSLookupDiagInfo->Interface) == 0 ||
+                strcmp(pNSLookupDiagInfo->Interface, "Device.IP.Interface.1") == 0))
+       {
+            char *wan_ip = CosaGetInterfaceAddrByName("Device.DeviceInfo.X_COMCAST-COM_WAN_IP");
+            if (wan_ip != NULL)
+            {
+                if (isValidIPv4Address(wan_ip))
+                {
+                    rc = strcpy_s(pNSLookupDiagInfo->IfAddr,
+                                  sizeof(pNSLookupDiagInfo->IfAddr),
+                                  wan_ip);
+                    ERR_CHK(rc);
+                }
+                AnscFreeMemory(wan_ip);
+            }
+       }
         else
         {
             AnscTraceError(("fun:%s Line:%d Invalid wan Interface\n", __FUNCTION__,__LINE__));

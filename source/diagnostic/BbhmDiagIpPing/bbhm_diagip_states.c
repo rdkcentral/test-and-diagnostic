@@ -153,11 +153,12 @@ BbhmDiagipCopyDiagParams
     PBBHM_DIAG_IP_PING_OBJECT       pMyObject    = (PBBHM_DIAG_IP_PING_OBJECT)hThisObject;
 
     errno_t rc = -1;
-    rc = memcpy_s(pMyObject->hDslhDiagInfo, sizeof(pMyObject->hDslhDiagInfo) , hDslhDiagInfo, sizeof(DSLH_PING_INFO));
+    rc = memcpy_s(pMyObject->hDslhDiagInfo, sizeof(DSLH_PING_INFO) , hDslhDiagInfo, sizeof(DSLH_PING_INFO));
     ERR_CHK(rc);
 
     return  ANSC_STATUS_SUCCESS;
 }
+
 
 
 /**********************************************************************
