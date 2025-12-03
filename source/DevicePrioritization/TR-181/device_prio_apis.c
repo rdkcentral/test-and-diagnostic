@@ -27,6 +27,7 @@
 #include "device_prio_rbus_handler_apis.h"
 #include "device_prio_apis.h"
 #include "device_prio_util_apis.h"
+#include "webconfig_scheduler_doc.h"
 
 #ifdef RDK_SCHEDULER_ENABLED
 #include "device_prio_webconfig_apis.h"

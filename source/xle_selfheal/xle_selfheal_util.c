@@ -56,6 +56,7 @@ struct xle_attributes
 
 #define BUFLEN_128  128
 #define BUFLEN_256  256
+#define IPADDR_FAMILY_LEN 16
 
 struct xle_attributes xle_params;
 static char default_wan_ifname[50];
@@ -95,24 +96,28 @@ void check_lte_provisioned(char* lte_wan,char* lte_backup_enable, char* lte_inte
         &retVal);
     if (CCSP_SUCCESS == ret)
     {
-        if (NULL != retVal[0]->parameterValue)
-        {
-            strncpy(lte_wan, retVal[0]->parameterValue, strlen(retVal[0]->parameterValue) + 1);
-        }
-        if (NULL != retVal[1]->parameterValue)
-        {
-            strncpy(lte_backup_enable, retVal[1]->parameterValue, strlen(retVal[1]->parameterValue) + 1);
-        }
-        if (NULL != retVal[2]->parameterValue)
-        {
-            strncpy(lte_interface_enable, retVal[2]->parameterValue, strlen(retVal[2]->parameterValue) + 1);
-        }
-        if (NULL != retVal[3]->parameterValue)
-        {
-            strncpy(ipaddr_family, retVal[3]->parameterValue, strlen(retVal[3]->parameterValue) + 1);
-        }
         if (retVal)
         {
+            if (NULL != retVal[0]->parameterValue)
+            {
+                strncpy(lte_wan, retVal[0]->parameterValue, BUFLEN_128 - 1);
+                lte_wan[BUFLEN_128 - 1] = '\0';
+            }
+            if (NULL != retVal[1]->parameterValue)
+            {
+                strncpy(lte_backup_enable, retVal[1]->parameterValue, BUFLEN_128 - 1);
+                lte_backup_enable[BUFLEN_128 - 1] = '\0';
+            }
+            if (NULL != retVal[2]->parameterValue)
+            {
+                strncpy(lte_interface_enable, retVal[2]->parameterValue, BUFLEN_128 - 1);
+                lte_interface_enable[BUFLEN_128 - 1] = '\0';
+            }
+            if (NULL != retVal[3]->parameterValue)
+            {
+                strncpy(ipaddr_family, retVal[3]->parameterValue, IPADDR_FAMILY_LEN - 1);
+                ipaddr_family[IPADDR_FAMILY_LEN - 1] = '\0';
+            }
             free_parameterValStruct_t(bus_handle, nval, retVal);
         }
     }
@@ -182,11 +187,18 @@ void PopulateParameters()
     sysevent_get(sysevent_fd, sysevent_token, "cellular_restart_count", countBuffer, sizeof(countBuffer));
     char *paramValue = NULL;
     char*  component_id = "ccsp.xle_self";
-    CCSP_Message_Bus_Init(component_id,
+    int ret = 0;
+    ret = CCSP_Message_Bus_Init(component_id,
                                 CCSP_MSG_BUS_CFG,
                                 &bus_handle,
                                 (CCSP_MESSAGE_BUS_MALLOC)Ansc_AllocateMemory_Callback,
                                 Ansc_FreeMemory_Callback);
+    if (ret != CCSP_SUCCESS)
+    {
+        xle_log("CCSP_Message_Bus_Init failed for component %s: %d\n", component_id, ret);
+        bus_handle = NULL;
+        exit(1);
+    }
     int retPsmGet = PSM_Get_Record_Value2(bus_handle,g_Subsystem, "dmsb.Mesh.WAN.Interface.Name", NULL, &paramValue);
     if (retPsmGet == CCSP_SUCCESS)
     {        strncpy(mesh_interface_name,paramValue,sizeof(mesh_interface_name)-1);
@@ -649,7 +661,11 @@ int main(int argc,char *argv[])
                 count+=1;
                 snprintf(count1, sizeof(count1), "%d", count);
                 sysevent_set(sysevent_fd, sysevent_token, "cellular_restart_count", count1, 0);
-                system("systemctl restart RdkCellularManager.service &");
+                int ret = system("systemctl restart RdkCellularManager.service &");
+                if (ret == -1) 
+                {
+                    xle_log("system() call failed\n");
+                }
                 xle_log("[xle_self_heal] Cellular manager restarted. Number of times restarted=%d \n", count);
             }
             else
