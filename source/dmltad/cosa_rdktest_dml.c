@@ -348,6 +348,31 @@ X_RDK_AutomationTest_SetParamStringValue
                     return FALSE;
                 }
             }
+            else if (strncasecmp(pString, "WFOtest_gw|", 11) == 0) {
+                int (*TriggerWFOTest)(char*);
+                *(void **)&TriggerWFOTest = dlsym(handle, "TriggerWFOTest");
+                if ((error = dlerror()) != NULL) {
+                    fprintf(stderr, "%s\n", error);
+                    dlclose(handle);
+                    return FALSE;
+                }
+
+                AnscTraceFlow(("Input string %s\n", pString));
+
+                if (FALSE == is_test_running()) {
+                    char *input = pString + 11; //"WFOtest_gw|phase=beforeWFO"
+                    int status = TriggerWFOTest(input);
+                    if (status != 0) {
+                        AnscTraceWarning(("%s : Failed to start WFO test\n", __FUNCTION__));
+                        dlclose(handle);
+                        return FALSE;
+                    }
+                } else {
+                    AnscTraceWarning(("%s : Automation test is already running\n", __FUNCTION__));
+                    dlclose(handle);
+                    return FALSE;
+                }
+            }
             else if (strncasecmp(pString, "logUpload|", 10) == 0) {
                 int (*Trigger_logUpload)(char*);
                 // Get the function pointer (POSIX-recommended pattern)
@@ -358,11 +383,13 @@ X_RDK_AutomationTest_SetParamStringValue
                     dlclose(handle);
                     return FALSE;
                 }
+
                 AnscTraceFlow(("Input string: %s\n", pString));
-                if( FALSE == is_test_running() ) {
+
+                if(FALSE == is_test_running() ) {
                     char *input = pString + strlen("logUpload|"); // Move past "logUpload|"
                     int status = Trigger_logUpload(input);
-                    if( status != 0 ) {
+                    if(status != 0 ) {
                         AnscTraceWarning(("%s : Failed to start logUpload test\n", __FUNCTION__));
                         dlclose(handle);
                         return FALSE;
@@ -376,7 +403,8 @@ X_RDK_AutomationTest_SetParamStringValue
                 AnscTraceWarning(("%s : Invalid test name '%s'\n", __FUNCTION__, pString));
                 dlclose(handle);
                 return FALSE;
-            } 
+            }
+
             // Create a detached thread to monitor the test and close the handle
             pthread_t monitorThread;
             monitorThreadArgs *threadArgs = (monitorThreadArgs *)malloc(sizeof(monitorThreadArgs));
@@ -395,7 +423,7 @@ X_RDK_AutomationTest_SetParamStringValue
             AnscTraceWarning(("%s : Invalid input string\n", __FUNCTION__));
             dlclose(handle);
             return FALSE;
-        }           
+        }
     }
     /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
     return FALSE;
