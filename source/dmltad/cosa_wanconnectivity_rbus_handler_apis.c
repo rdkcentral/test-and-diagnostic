@@ -349,12 +349,14 @@ rbusError_t WANCNCTVTYCHK_SetHandler(rbusHandle_t handle, rbusProperty_t prop,
                     WANCHK_LOG_ERROR("RbusDML Enabled UnReg failure, reason = %d", rc);
                     return RBUS_ERROR_BUS_ERROR;
                 }
+                pthread_mutex_lock(&gIntfAccessMutex);
                 while(index <= gIntfCount) {
                     CosaWanCnctvtyChk_Remove_Intf(index);
                     CosaDml_glblintfdb_delentry(index);
                     index++;
                 }
                 gIntfCount = 0;
+                pthread_mutex_unlock(&gIntfAccessMutex);
             }
             else {
                 rc = CosaWanCnctvtyChk_Reg_elements(FEATURE_ENABLED_DML);

@@ -32,7 +32,6 @@
 #include "ansc_status.h"
 #include "msgpack.h"
 #include "webconfig_framework.h"
-#include "webconfig_scheduler_doc.h"
 
 #define SUBDOC_COUNT 1
 #define PRIO_MAC_SUBDOC "prioritizedmacs"
