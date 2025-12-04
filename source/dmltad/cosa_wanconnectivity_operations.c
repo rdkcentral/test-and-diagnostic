@@ -150,7 +150,6 @@ ANSC_STATUS wancnctvty_chk_start_threads(ULONG InstanceNumber,service_type_t typ
             {
                 WANCHK_LOG_INFO("%s Start PassiveMonitor for interface :%s\n",__FUNCTION__,
                                                         gIntfInfo->IPInterface.InterfaceName);
-                v_secure_system("rm -rf /tmp/passive_mon_stop_%s", gIntfInfo->IPInterface.InterfaceName);
                 wancnctvty_chk_start_passive(gIntfInfo);
             }
             if ( ((type== PASSIVE_ACTIVE_MONITOR_THREADS)  || (type== ACTIVE_MONITOR_THREAD) ||
@@ -217,7 +216,7 @@ ANSC_STATUS wancnctvty_chk_stop_threads(ULONG InstanceNumber,service_type_t type
         {
             WANCHK_LOG_INFO("Stop PassiveMonitor Monitor thread id:%lu\n",
                                             gIntfInfo->wancnctvychkpassivethread_tid);
-            pthread_cancel(gIntfInfo->wancnctvychkpassivethread_tid);
+            // pthread_cancel(gIntfInfo->wancnctvychkpassivethread_tid);
             v_secure_system("touch /tmp/passive_mon_stop_%s", gIntfInfo->IPInterface.InterfaceName);
             WANCHK_LOG_INFO("[DEBUG] pthread_cancel for Passive Monitor Created /tmp/passive_mon_stop_%s\n", gIntfInfo->IPInterface.InterfaceName);
             gIntfInfo->wancnctvychkpassivethread_tid = 0;
@@ -536,6 +535,24 @@ void actv_mntr_pause_cb (struct ev_loop *loop, ev_stat *w, int revents)
     }
 }
 
+void stop_passive_cb (struct ev_loop *loop, ev_stat *w, int revents)
+{
+    (void)loop;
+    (void)revents;
+    PWAN_CNCTVTY_CHK_PASSIVE_MONITOR pPassive = w->data;
+    WANCHK_LOG_INFO("[DEBUG] %s: Stopping Passive monitor loop\n", __FUNCTION__);
+    if (!pPassive)
+    {
+        WANCHK_LOG_ERROR("%s:pPassive is NULL\n", __FUNCTION__);
+        return;
+    }
+    if (w->attr.st_nlink)
+    {
+        /* File is touched, stop the passive monitor for this interface */
+        WANCHK_LOG_INFO("[DEBUG] %s: Cleaning up Passive monitor for %s", pPassive->InterfaceName);
+        cleanup_passivemonitor((void *)pPassive);
+    }
+}
 static void cleanup_activemonitor_ev(void *arg)
 {
     PWAN_CNCTVTY_CHK_ACTIVE_MONITOR   pActive = (PWAN_CNCTVTY_CHK_ACTIVE_MONITOR)arg;
@@ -561,12 +578,6 @@ static void cleanup_passivemonitor(void *arg)
     PWAN_CNCTVTY_CHK_PASSIVE_MONITOR pPassive = (PWAN_CNCTVTY_CHK_PASSIVE_MONITOR)arg;
     if (!pPassive)
         return;
-    WANCHK_LOG_INFO("passive monitor pcap cleanup\n");
-    if (pPassive->pcap)
-    {
-        pcap_freecode(&pPassive->bpf_fp);
-        pcap_close(pPassive->pcap);
-    }
     WANCHK_LOG_INFO("stopping passive monitor loop\n");
     if (pPassive->bgtimer.data == pPassive)
     {
@@ -578,12 +589,19 @@ static void cleanup_passivemonitor(void *arg)
         ev_io_stop(pPassive->loop, &pPassive->evio);
         WANCHK_LOG_DBG("stopped passive monitor I/O event handler\n");
     }
+    WANCHK_LOG_INFO("passive monitor pcap cleanup\n");
+    if (pPassive->pcap)
+    {
+        pcap_freecode(&pPassive->bpf_fp);
+        pcap_close(pPassive->pcap);
+    }
     if ((pPassive->evio.data == pPassive) || (pPassive->bgtimer.data == pPassive))
     {
         ev_break(pPassive->loop, EVBREAK_ALL);
         ev_loop_destroy(pPassive->loop);
     }
     v_secure_system("rm -f /tmp/actv_mon_pause_%s", pPassive->InterfaceName);
+    v_secure_system("rm -f /tmp/passive_mon_stop_%s", pPassive->InterfaceName);
     AnscFreeMemory(pPassive);
     pPassive = NULL;
 }
@@ -719,10 +737,12 @@ void *wancnctvty_chk_passive_thread( void *arg )
         return NULL;
     }
     pPassive->doInfoLogOnce = TRUE;
+    char stop_passive_file[BUFLEN_128] = {0};
     char errbuf[PCAP_ERRBUF_SIZE];
     const char *source = pIPInterface->InterfaceName;
     errno_t rc = -1;
     int ind = -1;
+
     pPassive->InstanceNumber = pIPInterface->InstanceNumber;
     rc = strcpy_s(pPassive->InterfaceName, MAX_INTF_NAME_SIZE , pIPInterface->InterfaceName);
     ERR_CHK(rc);
@@ -803,6 +823,16 @@ void *wancnctvty_chk_passive_thread( void *arg )
     ev_io_init(&pPassive->evio, pcap_recv_cb, pPassive->pcap_fd, EV_READ);
     pPassive->evio.data = (void *)pPassive;
     ev_io_start(pPassive->loop, &pPassive->evio);
+
+    rc = sprintf_s(stop_passive_file, BUFLEN_128-1, "/tmp/passive_mon_stop_%s", pIPInterface->InterfaceName);
+    if (rc < EOK) {
+        ERR_CHK(rc);
+    }
+
+    WANCHK_LOG_INFO("[DEBUG] Monitoring Stop Passive Monitor file\n");
+    ev_stat_init (&pPassive->stop_passive, stop_passive_cb, stop_passive_file, 0.);
+    pPassive->stop_passive.data = (void *)pPassive;
+    ev_stat_start (pPassive->loop, &pPassive->stop_passive);
 
     ev_init (&pPassive->bgtimer, wanchk_bgtimeout_cb);
     pPassive->bgtimer.data = (void *)pPassive;
