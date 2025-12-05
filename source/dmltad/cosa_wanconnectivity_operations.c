@@ -2102,32 +2102,12 @@ static void dns_response_callback(
 )
 {
     PWAN_CNCTVTY_CHK_PASSIVE_MONITOR pPassive = (PWAN_CNCTVTY_CHK_PASSIVE_MONITOR) arg;
-
-    WANCHK_LOG_INFO("[DEBUG] evio.active: %d\n", pPassive->evio.active);
-    if (pPassive->evio.active < 0) {
-        WANCHK_LOG_ERROR("[DEBUG] evio.active is negative, ISSUE OCCURRED\n");
-        v_secure_system("touch /tmp/evio.active_negative_%s", pPassive->InterfaceName);
-    }
-    char filename[BUFLEN_128] = {0};
-    errno_t rc = -1;
-    rc = sprintf_s(filename,BUFLEN_128-1, "/tmp/passive_mon_stop_%s", pPassive->InterfaceName);
-    if (rc < EOK) {
-        ERR_CHK(rc);
-    }
-
-    if (access(filename, F_OK) == 0)
-    {
-        WANCHK_LOG_INFO("[DEBUG] File %s exists, breaking pcap loop\n", filename);
-        // ev_break(pPassive->loop, EVBREAK_ALL);
-        // ev_loop_destroy(pPassive->loop);
-        return;
-    }
-
     char dns_payload[BUFLEN_4096] = {0};
     unsigned int dns_payload_len = 0;
     USHORT txn_id;
     uint8_t rcode;
     int ret_parse = 0;
+    errno_t rc = -1;
     int ind = -1;
     char *payload = NULL;
     int len = 0;
