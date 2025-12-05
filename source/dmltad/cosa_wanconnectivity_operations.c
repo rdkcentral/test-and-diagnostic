@@ -578,6 +578,12 @@ static void cleanup_passivemonitor(void *arg)
     PWAN_CNCTVTY_CHK_PASSIVE_MONITOR pPassive = (PWAN_CNCTVTY_CHK_PASSIVE_MONITOR)arg;
     if (!pPassive)
         return;
+    WANCHK_LOG_INFO("passive monitor pcap cleanup\n");
+    if (pPassive->pcap)
+    {
+        pcap_freecode(&pPassive->bpf_fp);
+        pcap_close(pPassive->pcap);
+    }
     WANCHK_LOG_INFO("stopping passive monitor loop\n");
     if (pPassive->bgtimer.data == pPassive)
     {
@@ -588,12 +594,6 @@ static void cleanup_passivemonitor(void *arg)
     {
         ev_io_stop(pPassive->loop, &pPassive->evio);
         WANCHK_LOG_DBG("stopped passive monitor I/O event handler\n");
-    }
-    WANCHK_LOG_INFO("passive monitor pcap cleanup\n");
-    if (pPassive->pcap)
-    {
-        pcap_freecode(&pPassive->bpf_fp);
-        pcap_close(pPassive->pcap);
     }
     if ((pPassive->evio.data == pPassive) || (pPassive->bgtimer.data == pPassive))
     {
