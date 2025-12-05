@@ -549,7 +549,7 @@ void stop_passive_cb (struct ev_loop *loop, ev_stat *w, int revents)
     if (w->attr.st_nlink)
     {
         /* File is touched, stop the passive monitor for this interface */
-        WANCHK_LOG_INFO("[DEBUG] %s: Cleaning up Passive monitor for %s", pPassive->InterfaceName);
+        WANCHK_LOG_INFO("[DEBUG] %s: Cleaning up Passive monitor for %s", __FUNCTION__, pPassive->InterfaceName);
         cleanup_passivemonitor((void *)pPassive);
     }
 }
