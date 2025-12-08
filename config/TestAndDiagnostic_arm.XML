@@ -1530,7 +1530,7 @@
                 </parameter>
                 <parameter>
                     <name>Result</name>
-                    <type>string(160)</type>
+                    <type>string(512)</type>
                     <syntax>string</syntax>
                 </parameter>
             </parameters>
