@@ -845,6 +845,8 @@ void *wancnctvty_chk_passive_thread( void *arg )
 
     pthread_cleanup_pop(0);
 
+    return NULL;
+
 passive_mon_thrd_error:
 
     if (pPassive)
