@@ -839,11 +839,11 @@ void *wancnctvty_chk_passive_thread( void *arg )
     pPassive->bgtimer.repeat = (pIPInterface->PassiveMonitorTimeout / 1000);
     ev_timer_start (pPassive->loop, &pPassive->bgtimer);
 
-    pthread_cleanup_push(cleanup_passivemonitor, pPassive);
+    // pthread_cleanup_push(cleanup_passivemonitor, pPassive);
 
     ev_run (pPassive->loop, 0);
 
-    pthread_cleanup_pop(0);
+    // pthread_cleanup_pop(0);
 
     return NULL;
 
