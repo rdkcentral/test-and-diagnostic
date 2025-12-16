@@ -988,4 +988,18 @@ then
    echo_t "pci_enumeration_count:$radio_enum_count" >> $SELFHEALFILE
    t2ValNotify "PciEnumeration_split" "$radio_enum_count"
 fi
+
+ETHAGENT_SCRIPT="./ethagent_associated_dev.sh"
+ETHAGENT_LOG="/rdklogs/logs/EthAgentSelfHeal.log"
+if [ -x "$ETHAGENT_SCRIPT" ]; then
+  # Log to system log
+  echo_t "Running $ETHAGENT_SCRIPT"
+  # Ensure log directory exists
+  mkdir -p /rdklogs/logs
+  # Run script and redirect all stdout/stderr to EthAgentSelfHeal.log
+  sh "$ETHAGENT_SCRIPT" >> "$ETHAGENT_LOG" 2>&1
+else
+  echo_t "Script missing or not executable: $ETHAGENT_SCRIPT"
+fi
+
 touch /tmp/selfheal_bootup_completed
