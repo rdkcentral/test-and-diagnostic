@@ -990,9 +990,9 @@ then
 fi
 
 echo_t "RDKB_SELFHEAL: Starting ethagent script..."
-ETHAGENT_SCRIPT="./ethagent_associated_dev.sh"
+ETHAGENT_SCRIPT="$TAD_PATH/ethagent_associated_dev.sh"
 ETHAGENT_LOG="/rdklogs/logs/EthAgentSelfHeal.log"
-if [ -x "$ETHAGENT_SCRIPT" ]; then
+if [ -f "$ETHAGENT_SCRIPT" ]; then
   # Log to system log
   echo_t "Running $ETHAGENT_SCRIPT"
   # Ensure log directory exists
