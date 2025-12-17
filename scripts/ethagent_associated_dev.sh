@@ -102,7 +102,7 @@ get_service_pid
 PID_BEFORE=$PID
 
 # Compare counts
-if [ "$DMCLI_SUM_BEFORE" -ne "$TOTAL_ETH_BEFORE" ]; then
+if [ "$DMCLI_SUM_BEFORE" -eq 0 ] && [ "$TOTAL_ETH_BEFORE" -ne 0 ]; then
     log "Mismatch detected (DMCLI_SUM=$DMCLI_SUM_BEFORE, Total_ETH=$TOTAL_ETH_BEFORE)"
     restart_service
 
