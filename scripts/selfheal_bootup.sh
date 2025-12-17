@@ -989,6 +989,7 @@ then
    t2ValNotify "PciEnumeration_split" "$radio_enum_count"
 fi
 
+echo_t "RDKB_SELFHEAL: Starting ethagent script..."
 ETHAGENT_SCRIPT="./ethagent_associated_dev.sh"
 ETHAGENT_LOG="/rdklogs/logs/EthAgentSelfHeal.log"
 if [ -x "$ETHAGENT_SCRIPT" ]; then
