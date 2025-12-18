@@ -1574,26 +1574,11 @@ self_heal_wan(){
      fi
 }
 
-self_heal_erouter_socket()
+self_heal_erouter_ipv6_addressConflict()
 {
-IFACE=erouter0
-TARGET_IPV6=2001:4860:4860::8888   # Google DNS IPv6
-TARGET_IPV4=8.8.8.8                # Google DNS IPv4
-
-Check_Ipv6=$(ip -6 addr show $IFACE | grep inet6 | grep global)
-if ip -6 addr show "$IFACE" | grep inet6 | grep -q global; then
-	ping6 -I "$IFACE" -c 1 -W 1 "$TARGET_IPV6" >/tmp/ping6.out 2>/tmp/ping6.err
-    RET=$?
-else
-    ping -I "$IFACE" $-4 -c 1 -W 2 "$TARGET_IPV4" >/dev/null 2>&1
-	RET=$?
-fi
-
-if [ $RET -eq 0 ]; then
-    echo "SUCCESS: socket created and packet sent on erouter0 with ping"
-else
+if ip -6 addr show dev erouter0 scope global | grep -q "dadfailed"; then
+    echo "FAILURE: IPV6 address conflict found - IPV6 not usable - ! Bind & sockets failure expected !"
     PROC="dibbler-client"
-
     PID=$(ps | grep $PROC | grep -v grep  | awk '{print $1}')
 
     if [ -n "$PID" ]; then
@@ -1602,6 +1587,8 @@ else
     else
        echo "$PROC Process not running"
     fi
+else
+   echo "SUCCESS: no IPV6 address conflict found - IPV6 is usable"
 fi
 }
 self_heal_sedaemon()
@@ -1725,7 +1712,7 @@ do
     if [ -f /etc/SelfHeal_Driver_Sanity_Check.sh ]; then
          /etc/SelfHeal_Driver_Sanity_Check.sh &
     fi
-    self_heal_erouter_socket
+    self_heal_erouter_ipv6_addressConflict
     STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
     echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec"
