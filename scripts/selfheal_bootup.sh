@@ -988,4 +988,28 @@ then
    echo_t "pci_enumeration_count:$radio_enum_count" >> $SELFHEALFILE
    t2ValNotify "PciEnumeration_split" "$radio_enum_count"
 fi
+
+# Tech XB7  => MODEL_NUM=CGM4331COM
+# CMX  XB7  => MODEL_NUM=TG4482A - not included
+# Tech XB8  => MODEL_NUM=CGM4981COM
+# Tech XB10    => MODEL_NUM=CGM601TCOM
+# Sercomm XB10 => MODEL_NUM=SG417DBCT
+
+if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || \
+   [ "$MODEL_NUM" = "SG417DBCT" ]; then
+
+  echo_t "RDKB_SELFHEAL: Starting ethagent script..."
+  ETHAGENT_SCRIPT="$TAD_PATH/ethagent_associated_dev.sh"
+  ETHAGENT_LOG="/rdklogs/logs/EthAgentSelfHeal.log"
+
+  if [ -f "$ETHAGENT_SCRIPT" ]; then
+    echo_t "RDKB_SELFHEAL: Running $ETHAGENT_SCRIPT"
+    mkdir -p /rdklogs/logs
+
+    sh "$ETHAGENT_SCRIPT" >> "$ETHAGENT_LOG" 2>&1
+  else
+    echo_t "RDKB_SELFHEAL: Script missing or not executable: $ETHAGENT_SCRIPT"
+  fi
+fi
+
 touch /tmp/selfheal_bootup_completed
