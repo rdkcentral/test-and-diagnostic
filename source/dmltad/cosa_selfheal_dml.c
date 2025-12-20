@@ -2327,7 +2327,33 @@ BOOL MemoryIncreaseDetection_SetParamBoolValue
                 {
                       CcspTraceWarning(("%s - System Command failure\n",__FUNCTION__ ));
                 }
+                else
+                {
+                    // Save enable state to config
+                    CosaWriteProcAnalConfig("Enable", "1");
+                    CcspTraceInfo(("%s: MemoryIncreaseDetection enabled and started\n", __FUNCTION__));
+                }
             }
+        }
+        else
+        {
+            // Disable and stop MemoryIncreaseDetection
+            CcspTraceInfo(("%s: Stopping MemoryIncreaseDetection\n", __FUNCTION__));
+            
+            // Stop the monitoring script
+            ret = v_secure_system("/lib/rdk/RunMemoryIncreaseDetection.sh stop &");
+            if(ret != 0)
+            {
+                CcspTraceWarning(("%s - Failed to stop MemoryIncreaseDetection\n",__FUNCTION__ ));
+            }
+            
+            // Clean up bucket status file
+            v_secure_system("rm -f /tmp/bucket_status.txt");
+            
+            // Save disabled state to config
+            CosaWriteProcAnalConfig("Enable", "0");
+            
+            CcspTraceInfo(("%s: MemoryIncreaseDetection disabled and stopped\n", __FUNCTION__));
         }
     }
     return TRUE;
