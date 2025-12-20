@@ -2255,23 +2255,21 @@ BOOL MemoryIncreaseDetection_GetParamBoolValue
     char res[BUF_64] = {0};
     if ( strcmp(ParamName, "Enable") == 0 )
     {
-    // check the uptime of device should be 30 mins
-    if (CosaGetDeviceUptime() < 30 * 60)
-    {
-        CcspTraceWarning(("%s: Device uptime is less than 30 minutes!\n", __FUNCTION__));
-        *bValue = FALSE;
-        return TRUE;
-    }
-	if( CosaIsProcAnalRunning() )
-    {
+        // check the uptime of device should be 30 mins
+        if (CosaGetDeviceUptime() < 30 * 60)
+        {
+            CcspTraceWarning(("%s: Device uptime is less than 30 minutes!\n", __FUNCTION__));
+            *bValue = FALSE;
+            return TRUE;
+        }
+        
+        // Read enable state from config file
         CosaReadProcAnalConfig(ParamName, res);
         if (res[0] == '1')
             *bValue = TRUE;
         else
             *bValue = FALSE;
-    }
-	else
-		*bValue = FALSE;
+            
         return TRUE;
     }
     return TRUE;
