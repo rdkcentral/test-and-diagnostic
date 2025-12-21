@@ -2256,9 +2256,9 @@ BOOL MemoryIncreaseDetection_GetParamBoolValue
     if ( strcmp(ParamName, "Enable") == 0 )
     {
         // check the uptime of device should be 30 mins
-        if (CosaGetDeviceUptime() < 30 * 60)
+        if (CosaGetDeviceUptime() < 5 * 60)
         {
-            CcspTraceWarning(("%s: Device uptime is less than 30 minutes!\n", __FUNCTION__));
+            CcspTraceWarning(("%s: Device uptime is less than 5 minutes!\n", __FUNCTION__));
             *bValue = FALSE;
             return TRUE;
         }
@@ -2308,9 +2308,9 @@ BOOL MemoryIncreaseDetection_SetParamBoolValue
         if ( bValue )
         {
             // check the uptime of device should be 30 mins
-            if (CosaGetDeviceUptime() < 30 * 60)
+            if (CosaGetDeviceUptime() < 5 * 60)
             {
-                CcspTraceWarning(("%s: Device uptime is less than 30 minutes!\n", __FUNCTION__));
+                CcspTraceWarning(("%s: Device uptime is less than 5 minutes!\n", __FUNCTION__));
                 return FALSE;
             }
             if (CosaIsProcAnalRunning())
