@@ -2264,7 +2264,7 @@ BOOL MemoryIncreaseDetection_GetParamBoolValue
         }
         
         // Read enable state from config file
-        CosaReadProcAnalConfig(ParamName, res);
+        CosaReadProcAnalConfig("FEATURE.CPUPROCANALYZER.MemoryIncreaseDetection.Enable", res);
         if (res[0] == '1')
             *bValue = TRUE;
         else
@@ -2328,7 +2328,7 @@ BOOL MemoryIncreaseDetection_SetParamBoolValue
                 else
                 {
                     // Save enable state to config
-                    CosaWriteProcAnalConfig("Enable", "1");
+                    CosaWriteProcAnalConfig("FEATURE.CPUPROCANALYZER.MemoryIncreaseDetection.Enable", "1");
                     CcspTraceInfo(("%s: MemoryIncreaseDetection enabled and started\n", __FUNCTION__));
                 }
             }
@@ -2349,7 +2349,7 @@ BOOL MemoryIncreaseDetection_SetParamBoolValue
             v_secure_system("rm -f /tmp/bucket_status.txt");
             
             // Save disabled state to config
-            CosaWriteProcAnalConfig("Enable", "0");
+            CosaWriteProcAnalConfig("FEATURE.CPUPROCANALYZER.MemoryIncreaseDetection.Enable", "0");
             
             CcspTraceInfo(("%s: MemoryIncreaseDetection disabled and stopped\n", __FUNCTION__));
         }
@@ -2476,7 +2476,7 @@ MemoryIncreaseDetection_GetParamStringValue
     BOOL isEnabled = FALSE;
     
     // Read enable state directly from config file
-    CosaReadProcAnalConfig("Enable", enableCheck);
+    CosaReadProcAnalConfig("FEATURE.CPUPROCANALYZER.MemoryIncreaseDetection.Enable", enableCheck);
     if (enableCheck[0] == '1')
     {
         isEnabled = TRUE;
