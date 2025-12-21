@@ -2470,6 +2470,31 @@ MemoryIncreaseDetection_GetParamStringValue
         ULONG*                      pUlSize
     )
 {
+    // Check if MemoryIncreaseDetection is enabled
+    // Only return process lists if the feature is actually running
+    char enableCheck[BUF_64] = {0};
+    BOOL isEnabled = FALSE;
+    
+    // Read enable state directly from config file
+    CosaReadProcAnalConfig("Enable", enableCheck);
+    if (enableCheck[0] == '1')
+    {
+        isEnabled = TRUE;
+    }
+    
+    // If not enabled, return empty string
+    if (!isEnabled)
+    {
+        CcspTraceInfo(("%s: MemoryIncreaseDetection is disabled, returning empty process list\n", __FUNCTION__));
+        if (pValue && pUlSize)
+        {
+            *pValue = '\0';
+            *pUlSize = 0;
+        }
+        return 0;
+    }
+    
+    // Feature is enabled, read from bucket status file
     if (strcmp(ParamName, "ProcessesInCodeYellow") == 0) {
         if (ReadProcessListFromBucketStatus("YELLOW", pValue, *pUlSize)) {
             *pUlSize = strlen(pValue);
@@ -2491,4 +2516,3 @@ MemoryIncreaseDetection_GetParamStringValue
     }
     return 0;
 }
-
