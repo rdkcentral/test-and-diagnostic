@@ -591,8 +591,9 @@ static void cleanup_passivemonitor(void *arg)
     }
     if ((pPassive->evio.data == pPassive) || (pPassive->bgtimer.data == pPassive))
     {
+		WANCHK_LOG_INFO("Calling ev_break\n");
         ev_break(pPassive->loop, EVBREAK_ALL);
-        ev_loop_destroy(pPassive->loop);
+        //ev_loop_destroy(pPassive->loop);
     }
     WANCHK_LOG_INFO("passive monitor pcap cleanup\n");
     if (pPassive->pcap)
@@ -602,8 +603,8 @@ static void cleanup_passivemonitor(void *arg)
     }
     v_secure_system("rm -f /tmp/actv_mon_pause_%s", pPassive->InterfaceName);
     v_secure_system("rm -f /tmp/passive_mon_stop_%s", pPassive->InterfaceName);
-    AnscFreeMemory(pPassive);
-    pPassive = NULL;
+    //AnscFreeMemory(pPassive);
+    //pPassive = NULL;
 }
 
 static void cleanup_activequery(void *arg)
@@ -843,6 +844,11 @@ void *wancnctvty_chk_passive_thread( void *arg )
 
     ev_run (pPassive->loop, 0);
 
+	WANCHK_LOG_INFO("Calling ev_loop_destroy\n");
+	ev_loop_destroy(pPassive->loop);
+	AnscFreeMemory(pPassive);
+	pPassive = NULL;
+	
     // pthread_cleanup_pop(0);
 
     return NULL;
