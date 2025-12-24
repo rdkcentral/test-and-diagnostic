@@ -1577,18 +1577,18 @@ self_heal_wan(){
 self_heal_erouter_ipv6_addressConflict()
 {
 if ip -6 addr show dev erouter0 scope global | grep -q "dadfailed"; then
-    echo "FAILURE: IPV6 address conflict found - IPV6 not usable - ! Bind & sockets failure expected !"
+    echo_t "FAILURE: IPV6 address conflict found - IPV6 not usable - ! Bind & sockets failure expected !"
     PROC="dibbler-client"
     PID=$(ps | grep $PROC | grep -v grep  | awk '{print $1}')
 
     if [ -n "$PID" ]; then
-       echo "Killing $PROC (PID: $PID)"
+       echo_t "Killing $PROC (PID: $PID)"
        kill $PID
     else
-       echo "$PROC Process not running"
+       echo_t "$PROC Process not running"
     fi
 else
-   echo "SUCCESS: no IPV6 address conflict found - IPV6 is usable"
+   echo_t "SUCCESS: no IPV6 address conflict found - IPV6 is usable"
 fi
 }
 
