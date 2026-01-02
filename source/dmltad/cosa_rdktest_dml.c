@@ -390,7 +390,33 @@ X_RDK_AutomationTest_SetParamStringValue
                     dlclose(handle);
                     return FALSE;
                 }
-            } else {
+            }
+            else if (strncasecmp(pString, "fileUpload|", 10) == 0) {
+                int (*Trigger_fileUpload)(char*);
+                // Get the function pointer (POSIX-recommended pattern)
+                void *func_ptr = dlsym(handle, "Trigger_fileUpload");
+                Trigger_fileUpload = (int (*)(char*))func_ptr;
+                if ((error = dlerror()) != NULL)  {
+                    fprintf(stderr, "%s\n", error);
+                    dlclose(handle);
+                    return FALSE;
+                }
+                AnscTraceFlow(("Input string: %s\n", pString));
+                if( FALSE == is_test_running() ) {
+                    char *input = pString + strlen("fileUpload|"); // Move past "fileUpload|"
+                    int status = Trigger_fileUpload(input);
+                    if( status != 0 ) {
+                        AnscTraceWarning(("%s : Failed to start fileUpload test\n", __FUNCTION__));
+                        dlclose(handle);
+                        return FALSE;
+                    }
+                } else {
+                    AnscTraceWarning(("%s : Automation test is already running\n", __FUNCTION__));
+                    dlclose(handle);
+                    return FALSE;
+                }
+            }
+            else {
                 AnscTraceWarning(("%s : Invalid test name '%s'\n", __FUNCTION__, pString));
                 dlclose(handle);
                 return FALSE;
