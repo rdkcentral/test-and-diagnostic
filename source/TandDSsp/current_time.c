@@ -37,6 +37,8 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <time.h>
 #include <string.h>
 #include <sys/time.h>
@@ -166,7 +168,7 @@ bool setSystemTime(time_t desired_epoch_time)
     if (settimeofday(&new_timeval, NULL) != 0) 
     {
         CcspTraceError(("Error setting system time\n"));
-		t2_event_d("SYST_ERROR_SYSTIME_FAIL",1);
+		t2_event_d("SYS_ERROR_SYSTIME_FAIL",1);
         return false;
     }
 
@@ -176,55 +178,55 @@ bool setSystemTime(time_t desired_epoch_time)
     }
     CcspTraceInfo(("System time set successfully.\n"));
 	snprintf(uptime_str, sizeof(uptime_str), "%lld", uptime_ms);
-    t2_event_s("SYST_INFO_SETSYSTIME_split", uptime_str); 
+    t2_event_s("SYS_INFO_SETSYSTIME_split", uptime_str); 
 
     return true;
 }
 
 //create /tmp/clock-event when device time is updated
+
 void setClockEventFile() 
 {    
-    // Check if file already exists
-    if (access(CLOCK_EVENT_PATH, F_OK) != -1) 
+    int fileDescriptor = open(CLOCK_EVENT_PATH, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (fileDescriptor == -1)
     {
-    	CcspTraceInfo(("File /tmp/clock-event already exists\n"));
+        if (errno == EEXIST)
+        {
+            CcspTraceInfo(("File /tmp/clock-event already exists\n"));
+        }
+        else
+        {
+            CcspTraceError(("Failed to create /tmp/clock-event file: %s\n", strerror(errno)));
+        }
     }
     else
     {
-    	// Create the file
-    	int fileDescriptor = creat(CLOCK_EVENT_PATH, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    	if (fileDescriptor != -1) 
-    	{
-       	close(fileDescriptor);
-        	CcspTraceInfo(("File /tmp/clock-event created successfully\n"));
-    	} 
-    	else 
-    	{
-        	CcspTraceError(("Failed to create /tmp/clock-event file\n"));
-    	}
+        close(fileDescriptor);
+        CcspTraceInfo(("File /tmp/clock-event created successfully\n"));
     }
 }
 //create /tmp/systimeset when system time is set
 void activateSystimeTarget() 
 {
     // Check if file already exists
-    if (access(SYSTIME_SET_PATH, F_OK) != -1) 
+    int fileDescriptor = open(SYSTIME_SET_PATH,
+                          O_CREAT | O_EXCL | O_WRONLY,
+                          S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+    if (fileDescriptor == -1)
     {
-    	CcspTraceInfo(("File system time set file already exists\n"));
+        if (errno == EEXIST)
+        {
+            CcspTraceInfo(("File system time set file already exists\n"));
+        } else
+        {
+            CcspTraceError(("Error creating systime set file: %s\n", strerror(errno)));
+        }
     }
     else
     {
-    	// Create the file
-    	int fileDescriptor = creat(SYSTIME_SET_PATH, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    	if (fileDescriptor != -1) 
-    	{
-       		close(fileDescriptor);
-        	CcspTraceInfo(("File system  time set file created successfully\n"));
-    	} 
-    	else 
-    	{
-        	CcspTraceError(("Failed to create system time set file\n"));
-    	}
+        close(fileDescriptor);
+        CcspTraceInfo(("File system time set file created successfully\n"));
     }
 }
 bool updateStoredTime(long long new_time) {
@@ -269,7 +271,7 @@ void UpdatedeviceTimeorbuildTime(long long currentEpochTime, long long build_epo
             setSystemTime(stored_time);
             CcspTraceInfo(("System time set to build time: %lld\n", stored_time));
 			snprintf(time_str, sizeof(time_str), "%lld", stored_time);
-			t2_event_s("SYST_INFO_SYSBUILD_split",time_str);
+			t2_event_d("SYS_INFO_SYSBUILD",1);
         }
     } 
 }
@@ -329,7 +331,7 @@ void* updateTimeThread(void* arg)
                                 {
           				CcspTraceInfo(("System time set as stored time: %lld after reboot as it is greater\n",stored_time));
 									snprintf(time_str, sizeof(time_str), "%lld", stored_time);
-									t2_event_s("SYST_INFO_SYSLKG_split",time_str);
+									t2_event_s("SYS_INFO_SYSLKG_split",time_str);
                                 }
           		}
           		else
@@ -426,7 +428,7 @@ void* updateTimeThread(void* arg)
         	else
         	{
         		CcspTraceError(("System time update failed\n"));	
-				t2_event_d("SYST_ERROR_SYSTIME_FAIL",1);
+				t2_event_d("SYS_ERROR_SYSTIME_FAIL",1);
         	}
         }
     }
