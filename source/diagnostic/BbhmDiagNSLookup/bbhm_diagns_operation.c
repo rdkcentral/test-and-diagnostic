@@ -1375,7 +1375,8 @@ BbhmDiagnsCalculateResult
     ULONG                           i            = 0;
 
     if ( pDiagnsInfo )
-    {
+    { 
+        AnscAcquireLock(&pMyObject->EchoTableLock);
         for(i = 0; i < pDslhDiagInfo->ResultNumberOfEntries; i++)
         {
             AnscFreeMemory(pDiagnsInfo[i].HostNameReturned);
@@ -1383,6 +1384,7 @@ BbhmDiagnsCalculateResult
         }
         AnscFreeMemory(pDiagnsInfo);
         pDiagnsInfo = NULL;
+        AnscReleaseLock(&pMyObject->EchoTableLock);
     }
 
     pDiagnsInfo = AnscAllocateMemory(sizeof(BBHM_NS_LOOKUP_ECHO_ENTRY) * Num);
@@ -1396,8 +1398,8 @@ BbhmDiagnsCalculateResult
         pDslhDiagInfo->hDiaginfo = pDiagnsInfo;
     }
 
-    pMyObject->DelAllPqueries(pMyObject);
 
+    pMyObject->DelAllPqueries(pMyObject);
     AnscAcquireLock(&pMyObject->EchoTableLock);
     pSLinkEntry = AnscSListPopEntry(&pMyObject->EchoTable);
 

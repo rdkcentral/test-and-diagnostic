@@ -700,6 +700,11 @@ void get_Clients_Count(char * arg_type,char * ret_buf,int size)   //Need to run 
    else
    {
        IHC_PRINT("%s CcspHalExtSw_getAssociatedDevice returns total_eth_device=%lu \n",__FUNCTION__,total_eth_device);
+       if (output_struct != NULL)
+       {
+           free(output_struct);
+           output_struct = NULL;
+       }
    }
    rc = sprintf_s(eth_cli_cnt, sizeof(eth_cli_cnt), "%lu", total_eth_device);
    if(rc < EOK)

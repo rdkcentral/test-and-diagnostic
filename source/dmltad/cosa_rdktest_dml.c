@@ -126,6 +126,7 @@ X_RDK_AutomationTest_GetParamStringValue
         /* collect value */
         const char* run = get_test_run();
         if (run == NULL) {
+            dlclose(handle);
             return -1;
         }
         rc = strcpy_s(pValue, *pUlSize, run);
@@ -149,6 +150,7 @@ X_RDK_AutomationTest_GetParamStringValue
         /* collect value */
         const char* result = get_test_status();
         if (result == NULL) {
+            dlclose(handle);
             return -1;
         }
         rc = strcpy_s(pValue, *pUlSize, result);
@@ -172,6 +174,7 @@ X_RDK_AutomationTest_GetParamStringValue
         /* collect value */
         const char* result = get_test_result();
         if (result == NULL) {
+            dlclose(handle);
             return -1;
         }
         rc = strcpy_s(pValue, *pUlSize, result);
@@ -182,6 +185,7 @@ X_RDK_AutomationTest_GetParamStringValue
         return 0;
     }
     /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
+    dlclose(handle);
     return -1;
  }
 
@@ -335,6 +339,28 @@ X_RDK_AutomationTest_SetParamStringValue
                     int status = TriggerFlowManagerTest(input);
                     if( status != 0 ) {
                         AnscTraceWarning(("%s : Failed to start FlowManager test\n", __FUNCTION__));
+                        dlclose(handle);
+                        return FALSE;
+                    }
+                } else {
+                    AnscTraceWarning(("%s : Automation test is already running\n", __FUNCTION__));
+                    dlclose(handle);
+                    return FALSE;
+                }
+            }
+            else if (strcasecmp(pString, "SpeedTestXLE") == 0 ) {
+                int (*Trigger_SpeedTestXLE)();
+                // Get the function pointer
+                *(void **) (&Trigger_SpeedTestXLE) = dlsym(handle, "Trigger_SpeedTestXLE");
+                if ((error = dlerror()) != NULL)  {
+                    fprintf(stderr, "%s\n", error);
+                    dlclose(handle);
+                    return FALSE;
+                }
+                if( FALSE == is_test_running() ) {
+                    int status = Trigger_SpeedTestXLE();
+                    if( status != 0 ) {
+                        AnscTraceWarning(("%s : Failed to start SpeedTest XLE test\n", __FUNCTION__));
                         dlclose(handle);
                         return FALSE;
                     }

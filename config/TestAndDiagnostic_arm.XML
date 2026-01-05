@@ -1440,7 +1440,8 @@
                         </parameter>
             </parameters>   
         </object>   
-        <object>
+<?ifndef NO_FAN_FEATURE_SUPPORT?>
+	<object>
             <name>Thermal</name>
             <objectType>object</objectType>
             <objects>
@@ -1485,7 +1486,8 @@
                 </object>
             </objects>
         </object>
-        <object>
+<?endif?>
+	<object>
             <name>X_RDK_hwHealthTest</name>
             <objectType>object</objectType>
             <functions>
@@ -1528,7 +1530,7 @@
                 </parameter>
                 <parameter>
                     <name>Result</name>
-                    <type>string(160)</type>
+                    <type>string(512)</type>
                     <syntax>string</syntax>
                 </parameter>
             </parameters>

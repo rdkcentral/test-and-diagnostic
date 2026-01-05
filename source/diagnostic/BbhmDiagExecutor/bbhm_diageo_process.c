@@ -298,13 +298,15 @@ BbhmDiageoResultQueryTask
         {
             pDiagInfo  = (PDSLH_DIAG_INFO_BASE)pMyObject->hDslhDiagInfo;
             bQueryDone = TRUE;
-
+            AnscAcquireLock(&pMyObject->AccessLock);
             if ( (pDiagInfo->DiagnosticState != DSLH_DIAG_STATE_TYPE_Inprogress)
                   && (pDiagInfo->DiagnosticState != DSLH_DIAG_STATE_TYPE_Requested) )
             {
                 pMyObject->ResultTimestamp = AnscGetTickInSeconds();
+                AnscReleaseLock(&pMyObject->AccessLock);
                 break;
             }
+            AnscReleaseLock(&pMyObject->AccessLock);
         }
         else
         {
