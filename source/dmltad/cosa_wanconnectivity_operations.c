@@ -216,7 +216,6 @@ ANSC_STATUS wancnctvty_chk_stop_threads(ULONG InstanceNumber,service_type_t type
         {
             WANCHK_LOG_INFO("Stop PassiveMonitor Monitor thread id:%lu\n",
                                             gIntfInfo->wancnctvychkpassivethread_tid);
-            // pthread_cancel(gIntfInfo->wancnctvychkpassivethread_tid);
             v_secure_system("touch /tmp/passive_mon_stop_%s", gIntfInfo->IPInterface.InterfaceName);
             WANCHK_LOG_INFO("[DEBUG] STOP Passive Monitor. Created /tmp/passive_mon_stop_%s\n", gIntfInfo->IPInterface.InterfaceName);
             gIntfInfo->wancnctvychkpassivethread_tid = 0;
@@ -593,7 +592,7 @@ static void cleanup_passivemonitor(void *arg)
     {
         ev_break(pPassive->loop, EVBREAK_ALL);
     }
-    WANCHK_LOG_INFO("passive monitor pcap cleanup\n");
+    WANCHK_LOG_DBG("passive monitor pcap cleanup\n");
     if (pPassive->pcap)
     {
         pcap_freecode(&pPassive->bpf_fp);
@@ -837,7 +836,7 @@ void *wancnctvty_chk_passive_thread( void *arg )
 
     ev_run (pPassive->loop, 0);
 
-	WANCHK_LOG_INFO("Calling ev_loop_destroy\n");
+	WANCHK_LOG_DBG("Calling ev_loop_destroy\n");
 	ev_loop_destroy(pPassive->loop);
 	AnscFreeMemory(pPassive);
 	pPassive = NULL;
