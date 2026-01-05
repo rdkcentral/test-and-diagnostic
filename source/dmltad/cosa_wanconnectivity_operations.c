@@ -217,7 +217,7 @@ ANSC_STATUS wancnctvty_chk_stop_threads(ULONG InstanceNumber,service_type_t type
             WANCHK_LOG_INFO("Stop PassiveMonitor Monitor thread id:%lu\n",
                                             gIntfInfo->wancnctvychkpassivethread_tid);
             v_secure_system("touch /tmp/passive_mon_stop_%s", gIntfInfo->IPInterface.InterfaceName);
-            WANCHK_LOG_INFO("[DEBUG] STOP Passive Monitor. Created /tmp/passive_mon_stop_%s\n", gIntfInfo->IPInterface.InterfaceName);
+            WANCHK_LOG_DBG("STOP Passive Monitor. Created /tmp/passive_mon_stop_%s\n", gIntfInfo->IPInterface.InterfaceName);
             gIntfInfo->wancnctvychkpassivethread_tid = 0;
             gIntfInfo->PassiveMonitor_Running = FALSE;
         }
