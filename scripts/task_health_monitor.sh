@@ -18,7 +18,7 @@
 # limitations under the License.
 #######################################################################################
 
-#define ROUTER_MODE_INIT_FILE "/tmp/router_mode_init_progress"
+#define ROUTER_MODE_INIT_FILE "/tmp/.router_mode_init"
 
 UTOPIA_PATH="/etc/utopia/service.d"
 TAD_PATH="/usr/ccsp/tad"
@@ -4054,10 +4054,11 @@ if [ "$xle_device_mode" -ne "1" ]; then
 fi
 # xle mode ends
 # Wait until the temp file is deleted (doesn't exist)
-#while [ -e "$ROUTER_MODE_INIT_FILE" ]; do
- #   echo_t "Waiting for $ROUTER_MODE_INIT_FILE to be deleted..."
- #   sleep 2
-#done
+while [ -e "$ROUTER_MODE_INIT_FILE" ]; do
+    echo_t "Waiting for $ROUTER_MODE_INIT_FILE to be deleted..."
+    sleep 2
+done
+
 if [ "$xle_device_mode" -ne "1" ]; then #zebra for non xle
     #Checking the zebra is running or not
     WAN_STATUS=$(sysevent get wan-status)
