@@ -103,6 +103,7 @@ typedef struct _wan_chk_passive_monitor
     /* libev stuff */
     struct ev_loop     *loop;
     ev_io              evio;                 /* libev I/O event handler */
+    ev_stat            stop_passive;             /*libev I/O stop monitor*/
     ev_timer           bgtimer;              /* background dns response monitor timer */
 
     /* libpcap stuff */
