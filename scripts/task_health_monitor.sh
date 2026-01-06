@@ -1,4 +1,4 @@
-#!/bin/sh
+/#!/bin/sh
 #######################################################################################
 # If not stated otherwise in this file or this component's Licenses.txt file the
 # following copyright and licenses apply:
@@ -444,16 +444,26 @@ self_heal_dual_cron()
 
 self_heal_sedaemon()
 {
-    if [ -f /tmp/started_ssad ] && [ "$kdftype" == "RSA" ]; then
+    if [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
          accessmgr=`pidof accessManager`
-         se05xd=`pidof se05xd`
-         if [[ -z "$se05xd" ]] || [[ -z "$accessmgr" ]]; then
-               echo_t "[RDKB_SELFHEAL] : Restarting accessmanager and se05xd"
+
+         if [ "$kdftype" = "ECC" ]; then
+             ssadaemon=`pidof rdkssaecckdf`
+             daemon_service="rdkssaeccdaemon.service"
+             daemon_name="rdkssaecckdf"
+         else
+             ssadaemon=`pidof se05xd`
+             daemon_service="startse05xd.service"
+             daemon_name="se05xd"
+         fi
+
+         if [[ -z "$ssadaemon" ]] || [[ -z "$accessmgr" ]]; then
+               echo_t "[RDKB_SELFHEAL] : Restarting accessmanager and $daemon_name"
                t2CountNotify "SYS_SH_SERestart"
-               systemctl stop startse05xd.service
+               systemctl stop $daemon_service
                systemctl stop accessmanager.service
                systemctl start accessmanager.service
-               systemctl start startse05xd.service
+               systemctl start $daemon_service
          fi
     fi
 }
