@@ -285,47 +285,6 @@ self_heal_meshAgent()
     fi
 }
 
-check_br403_is_created() {
-
-    local mesh_enable bridgeUtilEnable ovs_enable=false ip_addr
-    local IFACE="br403"
-
-    mesh_enable="$(syscfg get mesh_enable 2>/dev/null)"
-    bridgeUtilEnable="$(syscfg get bridge_util_enable 2>/dev/null)"
-
-    if command -v ovs-vsctl >/dev/null 2>&1; then
-        ovs_enable=true
-    fi
-
-    if [[ "$ovs_enable" != "true" && "$bridgeUtilEnable" != "true" ]] \
-       || [ "$mesh_enable" = "false" ]; then
-        return 0
-    fi
-
-    if [ "$ovs_enable" = "true" ]; then
-        if ! ovs-vsctl br-exists "$IFACE" 2>/dev/null; then
-            echo_t "[RDKB_SELFHEAL] : Interface $IFACE does not exist, creating it."
-            sysevent set meshbhaul-setup 10
-            return 0
-        fi
-    else
-        if ! brctl show 2>/dev/null | awk '{print $1}' | grep -qx "$IFACE"; then
-            echo_t "[RDKB_SELFHEAL] : Interface $IFACE does not exist, creating it."
-            sysevent set meshbhaul-setup 10
-            return 0
-        fi
-    fi
-
-    echo_t "[RDKB_SELFHEAL] : Interface $IFACE present"
-
-    ip_addr="$(ip -4 addr show "$IFACE" 2>/dev/null | awk '{print $2}')"
-
-    if [ -z "$ip_addr" ]; then
-        echo_t "[RDKB_SELFHEAL] : Interface $IFACE does NOT have an IP address."
-        sysevent set meshbhaul-setup 10
-    fi
-}
-
 self_heal_meshAgent_hung() {
     dmcli eRT getv Device.DeviceInfo.X_RDKCENTRAL-COM_xOpsDeviceMgmt.Mesh.Enable > /dev/null &
     local cmd_pid=$!
@@ -5122,7 +5081,6 @@ self_heal_dual_cron
 self_heal_meshAgent
 self_heal_meshAgent_hung
 self_heal_sedaemon
-check_br403_is_created
 self_heal_ethwan_mode_recover
 if [ "$T2_ENABLE" = "true" ]; then
     self_heal_t2
