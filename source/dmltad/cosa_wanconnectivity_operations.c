@@ -219,7 +219,8 @@ ANSC_STATUS wancnctvty_chk_stop_threads(ULONG InstanceNumber,service_type_t type
         {
             WANCHK_LOG_INFO("Stop PassiveMonitor Monitor thread id:%lu\n",
                                             gIntfInfo->wancnctvychkpassivethread_tid);
-            pthread_cancel(gIntfInfo->wancnctvychkpassivethread_tid);
+            v_secure_system("touch /tmp/passive_mon_stop_%s", gIntfInfo->IPInterface.InterfaceName);
+            WANCHK_LOG_DBG("STOP Passive Monitor. Created /tmp/passive_mon_stop_%s\n", gIntfInfo->IPInterface.InterfaceName);
             gIntfInfo->wancnctvychkpassivethread_tid = 0;
             gIntfInfo->PassiveMonitor_Running = FALSE;
         }
@@ -536,6 +537,24 @@ void actv_mntr_pause_cb (struct ev_loop *loop, ev_stat *w, int revents)
     }
 }
 
+void stop_passive_cb (struct ev_loop *loop, ev_stat *w, int revents)
+{
+    (void)loop;
+    (void)revents;
+    PWAN_CNCTVTY_CHK_PASSIVE_MONITOR pPassive = w->data;
+    WANCHK_LOG_DBG("%s: Stopping Passive monitor loop\n", __FUNCTION__);
+    if (!pPassive)
+    {
+        WANCHK_LOG_ERROR("%s:pPassive is NULL\n", __FUNCTION__);
+        return;
+    }
+    if (w->attr.st_nlink)
+    {
+        /* File is touched, stop the passive monitor for this interface */
+        WANCHK_LOG_DBG("%s: Cleaning up Passive monitor for %s", __FUNCTION__, pPassive->InterfaceName);
+        cleanup_passivemonitor((void *)pPassive);
+    }
+}
 static void cleanup_activemonitor_ev(void *arg)
 {
     PWAN_CNCTVTY_CHK_ACTIVE_MONITOR   pActive = (PWAN_CNCTVTY_CHK_ACTIVE_MONITOR)arg;
@@ -561,12 +580,6 @@ static void cleanup_passivemonitor(void *arg)
     PWAN_CNCTVTY_CHK_PASSIVE_MONITOR pPassive = (PWAN_CNCTVTY_CHK_PASSIVE_MONITOR)arg;
     if (!pPassive)
         return;
-    WANCHK_LOG_INFO("passive monitor pcap cleanup\n");
-    if (pPassive->pcap)
-    {
-        pcap_freecode(&pPassive->bpf_fp);
-        pcap_close(pPassive->pcap);
-    }
     WANCHK_LOG_INFO("stopping passive monitor loop\n");
     if (pPassive->bgtimer.data == pPassive)
     {
@@ -581,11 +594,15 @@ static void cleanup_passivemonitor(void *arg)
     if ((pPassive->evio.data == pPassive) || (pPassive->bgtimer.data == pPassive))
     {
         ev_break(pPassive->loop, EVBREAK_ALL);
-        ev_loop_destroy(pPassive->loop);
+    }
+    WANCHK_LOG_DBG("passive monitor pcap cleanup\n");
+    if (pPassive->pcap)
+    {
+        pcap_freecode(&pPassive->bpf_fp);
+        pcap_close(pPassive->pcap);
     }
     v_secure_system("rm -f /tmp/actv_mon_pause_%s", pPassive->InterfaceName);
-    AnscFreeMemory(pPassive);
-    pPassive = NULL;
+    v_secure_system("rm -f /tmp/passive_mon_stop_%s", pPassive->InterfaceName);
 }
 
 static void cleanup_activequery(void *arg)
@@ -719,10 +736,12 @@ void *wancnctvty_chk_passive_thread( void *arg )
         return NULL;
     }
     pPassive->doInfoLogOnce = TRUE;
+    char stop_passive_file[BUFLEN_128] = {0};
     char errbuf[PCAP_ERRBUF_SIZE];
     const char *source = pIPInterface->InterfaceName;
     errno_t rc = -1;
     int ind = -1;
+
     pPassive->InstanceNumber = pIPInterface->InstanceNumber;
     rc = strcpy_s(pPassive->InterfaceName, MAX_INTF_NAME_SIZE , pIPInterface->InterfaceName);
     ERR_CHK(rc);
@@ -804,16 +823,27 @@ void *wancnctvty_chk_passive_thread( void *arg )
     pPassive->evio.data = (void *)pPassive;
     ev_io_start(pPassive->loop, &pPassive->evio);
 
+    rc = sprintf_s(stop_passive_file, BUFLEN_128-1, "/tmp/passive_mon_stop_%s", pIPInterface->InterfaceName);
+    if (rc < EOK) {
+        ERR_CHK(rc);
+    }
+	
+    ev_stat_init (&pPassive->stop_passive, stop_passive_cb, stop_passive_file, 0.);
+    pPassive->stop_passive.data = (void *)pPassive;
+    ev_stat_start (pPassive->loop, &pPassive->stop_passive);
+
     ev_init (&pPassive->bgtimer, wanchk_bgtimeout_cb);
     pPassive->bgtimer.data = (void *)pPassive;
     pPassive->bgtimer.repeat = (pIPInterface->PassiveMonitorTimeout / 1000);
     ev_timer_start (pPassive->loop, &pPassive->bgtimer);
 
-    pthread_cleanup_push(cleanup_passivemonitor, pPassive);
-
     ev_run (pPassive->loop, 0);
 
-    pthread_cleanup_pop(0);
+	WANCHK_LOG_DBG("Calling ev_loop_destroy\n");
+	ev_loop_destroy(pPassive->loop);
+	AnscFreeMemory(pPassive);
+	pPassive = NULL;
+    return NULL;
 
 passive_mon_thrd_error:
 
