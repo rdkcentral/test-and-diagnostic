@@ -1574,6 +1574,23 @@ self_heal_wan(){
      fi
 }
 
+self_heal_waninterface_ipv6_addressConflict()
+{
+if ip -6 addr show dev $WAN_INTERFACE scope global | grep -q "dadfailed"; then
+    echo_t "FAILURE: IPV6 address conflict found - IPV6 not usable - ! Bind & sockets failure expected !"
+    PROC="dibbler-client"
+    PID=$(ps | grep $PROC | grep -v grep  | awk '{print $1}')
+
+    if [ -n "$PID" ]; then
+       Dhcpv6_Client_restart "dibbler-client" "Idle"
+    else
+       echo_t "$PROC Process not running"
+    fi
+else
+   echo_t "SUCCESS: no IPV6 address conflict found - IPV6 is usable"
+fi
+}
+
 self_heal_sedaemon()
 {
     accessmgr=`pidof accessManager`
@@ -1695,7 +1712,7 @@ do
     if [ -f /etc/SelfHeal_Driver_Sanity_Check.sh ]; then
          /etc/SelfHeal_Driver_Sanity_Check.sh &
     fi
-
+    self_heal_waninterface_ipv6_addressConflict
     STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
     echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec"
