@@ -1582,8 +1582,7 @@ if ip -6 addr show dev erouter0 scope global | grep -q "dadfailed"; then
     PID=$(ps | grep $PROC | grep -v grep  | awk '{print $1}')
 
     if [ -n "$PID" ]; then
-       echo_t "Killing $PROC (PID: $PID)"
-       kill $PID
+       Dhcpv6_Client_restart "dibbler-client" "Idle"
     else
        echo_t "$PROC Process not running"
     fi
