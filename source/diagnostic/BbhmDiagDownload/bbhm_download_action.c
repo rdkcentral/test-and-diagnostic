@@ -358,6 +358,8 @@ bbhmDownloadStartDiagTask
 
     pMyObject->bDownNotifyNeeded = FALSE;
 
+    AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask Enter\n"));
+
     /* make sure previous diag is done */
     while( pMyObject->bDownDiagOn )
     {
@@ -365,6 +367,7 @@ bbhmDownloadStartDiagTask
 
         if ( !pMyObject->bActive )
         {
+	    AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 370\n"));
             returnStatus = ANSC_STATUS_FAILURE;
 
             goto done;
@@ -384,6 +387,7 @@ bbhmDownloadStartDiagTask
 
     if ( pMyObject->bStopDownDiag )
     {
+	AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 390\n"));
         returnStatus = ANSC_STATUS_FAILURE;
         goto done;
     }
@@ -398,7 +402,7 @@ bbhmDownloadStartDiagTask
 		
         pMyObject->bDownNotifyNeeded = TRUE;
         pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_InitConnectionFailed;
-
+        AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 405\n"));
         returnStatus = ANSC_STATUS_FAILURE;
         goto done;
     }
@@ -413,7 +417,7 @@ bbhmDownloadStartDiagTask
 
         pMyObject->bDownNotifyNeeded = TRUE;
         pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_InitConnectionFailed;
-
+        AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 420\n"));
         returnStatus = ANSC_STATUS_FAILURE;
         goto done;
     }
@@ -425,7 +429,7 @@ bbhmDownloadStartDiagTask
     {
         pMyObject->bDownNotifyNeeded = TRUE;
         pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_InitConnectionFailed;
-
+        AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 432\n"));
         returnStatus = ANSC_STATUS_FAILURE;
         goto done;
     }
@@ -450,7 +454,7 @@ bbhmDownloadStartDiagTask
 			
 	        pMyObject->bDownNotifyNeeded = TRUE;
 	        pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_InitConnectionFailed;
-
+                AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 457\n"));
 	        returnStatus = ANSC_STATUS_FAILURE;
 	        goto done;
 	    }
@@ -459,6 +463,7 @@ bbhmDownloadStartDiagTask
 	/* DSCP */
 	if (pMyObject->DownloadDiagInfo.DSCP > 0 && pMyObject->DownloadDiagInfo.DSCP < 64)
 	{
+		AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 466\n"));
 		/* 6bits DSCP, and 2bits ENC */
 		tos = pMyObject->DownloadDiagInfo.DSCP << 2;
 		
@@ -491,7 +496,7 @@ bbhmDownloadStartDiagTask
 
         pMyObject->bDownNotifyNeeded = TRUE;
         pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_NoResponse;
-
+        AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 499\n"));
         returnStatus = ANSC_STATUS_FAILURE;
 
         AnscGetSystemTime(&pStats->TCPOpenResponseTime);
@@ -552,6 +557,7 @@ bbhmDownloadStartDiagTask
 
         pMyObject->bDownNotifyNeeded = TRUE;
         pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_InitConnectionFailed;
+	AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 560\n"));
 
         returnStatus = ANSC_STATUS_FAILURE;
         goto done;
@@ -567,6 +573,7 @@ bbhmDownloadStartDiagTask
 
         pMyObject->bDownNotifyNeeded = TRUE;
         pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_InitConnectionFailed;
+	AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 576\n"));
 
         returnStatus = ANSC_STATUS_FAILURE;
         goto done;
@@ -583,7 +590,7 @@ bbhmDownloadStartDiagTask
     {
         /* failed to receive the request */
         AnscTraceWarning(("Failed to recv or not 200 OK.\n"));
-
+        AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 593\n"));
         pMyObject->bDownNotifyNeeded = TRUE;
         pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_TransferFailed;
 
@@ -597,12 +604,13 @@ bbhmDownloadStartDiagTask
 		recv_buffer[s_result] = '\0'; /* allocated one more byte, so no problem */
 		AnscTraceWarning(("%s", recv_buffer));
 #endif
-
+        
         AnscGetSystemTime(&pStats->EOMTime);
         pStats->TestBytesReceived += s_result;
         if ( pMyObject->bStopDownDiag )
         {
             returnStatus = ANSC_STATUS_FAILURE;
+	    AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 613 while if bStopDownDiag true\n"));
             goto done;
         }
 
@@ -613,7 +621,7 @@ bbhmDownloadStartDiagTask
         {
             /* failed to receive the request */
             AnscTraceWarning(("Failed to recv packet.\n"));
-
+            AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 624\n"));
             pMyObject->bDownNotifyNeeded = TRUE;
             pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_TransferFailed;
 
@@ -623,6 +631,7 @@ bbhmDownloadStartDiagTask
     }
 
     /* succeeded */
+    AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 634 setting DiagStates as Completed\n"));
     pMyObject->bDownNotifyNeeded = TRUE;
     pStats->DiagStates           = DSLH_TR143_DIAGNOSTIC_Completed;
 
