@@ -604,7 +604,7 @@ bbhmDownloadStartDiagTask
 		recv_buffer[s_result] = '\0'; /* allocated one more byte, so no problem */
 		AnscTraceWarning(("%s", recv_buffer));
 #endif
-        
+        AnscTraceWarning((" SHARMAN-3882 bbhmDownloadStartDiagTask line number 607 inside while\n")); 
         AnscGetSystemTime(&pStats->EOMTime);
         pStats->TestBytesReceived += s_result;
         if ( pMyObject->bStopDownDiag )
@@ -616,7 +616,7 @@ bbhmDownloadStartDiagTask
 
         recv_size   = DOWNLOAD_SINGLE_BUFFER_SIZE;
         s_result    = _xskt_recv(aSocket, recv_buffer, recv_size, 0);
-
+        AnscTraceWarning((" SHARMAN-3882 bbhmDownloadStartDiagTask line number 619 inside while\n"));
         if ( s_result < 0 )
         {
             /* failed to receive the request */
@@ -628,14 +628,17 @@ bbhmDownloadStartDiagTask
             returnStatus = ANSC_STATUS_FAILURE;
             goto done;
         }
+
+	AnscTraceWarning((" SHARMAN-3882 bbhmDownloadStartDiagTask line number 632 inside while\n"));
     }
 
     /* succeeded */
-    AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 634 setting DiagStates as Completed\n"));
+    AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 636 setting DiagStates as Completed\n"));
     pMyObject->bDownNotifyNeeded = TRUE;
     pStats->DiagStates           = DSLH_TR143_DIAGNOSTIC_Completed;
 
 done:
+    AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 641 done \n"));
     /* clear resources if need */
     if (aSocket != XSKT_SOCKET_INVALID_SOCKET)
         _xskt_closesocket(aSocket);
@@ -662,14 +665,14 @@ done:
     {
         DslhResetDownloadDiagStats((&pMyObject->DownloadDiagStats));        
     }
-
+     AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 668 done\n"));
     pMyObject->DownloadDiagInfo.DiagnosticsState = pStats->DiagStates;
         
     /* clear flags */
     pMyObject->bDownNotifyNeeded   = FALSE;
     pMyObject->bDownDiagOn         = FALSE; 
     pMyObject->bStopDownDiag       = FALSE;
-
+    AnscTraceWarning(("SHARMAN-3882 bbhmDownloadStartDiagTask line number 675 return status"));
     return returnStatus;
 }
 
