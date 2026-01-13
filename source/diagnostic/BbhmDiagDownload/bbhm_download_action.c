@@ -322,7 +322,7 @@ static char http_get_request2[]=
 "Accept-Encoding: gzip,deflate\r\n"
 "Accept-Charset: x-gbk,utf-8;q=0.7,*;q=0.7\r\n"
 "Keep-Alive: 115\r\n"
-"Connection: keep-alive\r\n\r\n";
+"Connection: close\r\n\r\n";
 
 ANSC_STATUS
 bbhmDownloadStartDiagTask
