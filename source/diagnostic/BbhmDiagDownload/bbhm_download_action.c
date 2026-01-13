@@ -322,7 +322,11 @@ static char http_get_request2[]=
 "Accept-Encoding: gzip,deflate\r\n"
 "Accept-Charset: x-gbk,utf-8;q=0.7,*;q=0.7\r\n"
 "Keep-Alive: 115\r\n"
+#ifdef SKY
 "Connection: close\r\n\r\n";
+#else
+"Connection: keep-alive\r\n\r\n";
+#endif
 
 ANSC_STATUS
 bbhmDownloadStartDiagTask
