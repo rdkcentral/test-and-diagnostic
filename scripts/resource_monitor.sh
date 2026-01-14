@@ -45,8 +45,12 @@ COUNT=0
 
 sysevent set atom_hang_count 0
 
-while [ $SELFHEAL_ENABLE = "true" ]
-do
+if [ "$(syscfg get selfheal_enable)" != "true" ]; then
+    echo_t "[RDKB_AGG_SELFHEAL] : selfheal_enable != true, exiting"
+    exit 0
+fi
+
+
 	RESOURCE_MONITOR_INTERVAL=`syscfg get resource_monitor_interval`
 	if [ "$RESOURCE_MONITOR_INTERVAL" = "" ]
 	then
@@ -54,7 +58,7 @@ do
 	fi 
 	RESOURCE_MONITOR_INTERVAL=$(($RESOURCE_MONITOR_INTERVAL*60))
 
-	sleep $RESOURCE_MONITOR_INTERVAL
+	#sleep $RESOURCE_MONITOR_INTERVAL Moved to cron
 
         BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
         #IHC should be called once when a reboot happens
@@ -505,5 +509,4 @@ fi
             t2ValNotify "SlabUsage_split" "${8},${7},${16},${15},${24},${23}"
         )
     fi
-
-done
+exit 0

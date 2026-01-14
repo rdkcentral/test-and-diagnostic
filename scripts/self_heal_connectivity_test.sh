@@ -47,18 +47,18 @@ getCorrectiveActionState() {
 calcRandTimetoStartPing()
 {
 
-    rand_min=0
-    rand_sec=0
+#    rand_min=0
+#    rand_sec=0
 
     # Calculate random min
-    rand_min=`awk -v min=10 -v max=59 -v seed="$(date +%N)" 'BEGIN{srand(seed);print int(min+rand()*(max-min+1))}'`
+#    rand_min=`awk -v min=10 -v max=59 -v seed="$(date +%N)" 'BEGIN{srand(seed);print int(min+rand()*(max-min+1))}'`
 
     # Calculate random second
-    rand_sec=`awk -v min=0 -v max=59 -v seed="$(date +%N)" 'BEGIN{srand(seed);print int(min+rand()*(max-min+1))}'`
+#    rand_sec=`awk -v min=0 -v max=59 -v seed="$(date +%N)" 'BEGIN{srand(seed);print int(min+rand()*(max-min+1))}'`
 
-    sec_to_sleep=$(($rand_min*60 + $rand_sec))
-    echo_t "self_heal_connectivity_test is going into sleep for $sec_to_sleep sec"
-    sleep $sec_to_sleep; 
+#    sec_to_sleep=$(($rand_min*60 + $rand_sec))
+    echo_t "self_heal_connectivity_test: cron execution (random sleep removed)"
+    #sleep $sec_to_sleep; 
         
 }
 
@@ -573,55 +573,38 @@ runPingTest()
 }
 
 SELFHEAL_ENABLE=`syscfg get selfheal_enable`
+if [ "$SELFHEAL_ENABLE" != "true" ]; then
+    echo_t "[RDKB_SELFHEAL] : selfheal_enable != true, exiting"
+    exit 0
+fi
 
-while [ $SELFHEAL_ENABLE = "true" ]
-do
+WAN_INTERFACE=$(getWanInterfaceName)
+wan_status=`sysevent get wan-status`
+if [ "$wan_status" = "" ] || [ "$wan_status" = "stopped" ]
+then
+    echo_t "RDKB_SELFHEAL : WAN is not up, bypassing ping test"
+    exit 0
+fi
 
-	if [ "$calcRandom" -eq 1 ] 
-	then
+MAPT_CONFIG=`sysevent get mapt_config_flag`
+if [ "$MAPT_CONFIG" == "set" ]
+then
+    WAN_INTERFACE_IPV4="map0"
+fi
 
-		calcRandTimetoStartPing
-		calcRandom=0
-	else
-		INTERVAL=`syscfg get ConnTest_PingInterval`
+#LTE-1335 runPingTest needs to be run only in extender mode for xle.
+if [ "$BOX_TYPE" = "WNXL11BWL" ]
+then
+    xle_device_mode=`syscfg get Device_Mode`
+    if [ "$xle_device_mode" -eq "1" ]; then
+        echo_t "RDKB_SELFHEAL : Device is in Extender mode, calling runPingTest."
+        runPingTest
+    else
+        echo_t "RDKB_SELFHEAL : Device is in Gateway mode, runPingTest is not needed."
+    fi
+else
+    runPingTest
+fi
+runDNSPingTest
 
-		if [ "$INTERVAL" = "" ] 
-		then
-			INTERVAL=60
-		fi
-                INTERVAL=$(($INTERVAL*60))
-		sleep $INTERVAL
-	fi
-
-	WAN_INTERFACE=$(getWanInterfaceName)
-	wan_status=`sysevent get wan-status`
-	if [ "$wan_status" = "" ] || [ "$wan_status" = "stopped" ]
-	then
-		echo_t "RDKB_SELFHEAL : WAN is not up, bypassing ping test"
-	else
-		MAPT_CONFIG=`sysevent get mapt_config_flag`
-		if [ "$MAPT_CONFIG" == "set" ]
-		then
-			WAN_INTERFACE_IPV4="map0"
-		fi
-		
-		#LTE-1335 runPingTest needs to be run only in extender mode for xle.
-		if [ "$BOX_TYPE" = "WNXL11BWL" ]
-		then
-			xle_device_mode=`syscfg get Device_Mode`
-			if [ "$xle_device_mode" -eq "1" ]; then
-				echo_t "RDKB_SELFHEAL : Device is in Extender mode, calling runPingTest."
-				runPingTest
-			else
-				echo_t "RDKB_SELFHEAL : Device is in Gateway mode, runPingTest is not needed."
-			fi
-		else
-			runPingTest
-		fi
-		runDNSPingTest
-	fi
-
-	SELFHEAL_ENABLE=`syscfg get selfheal_enable`
-	# ping -I $WAN_INTERFACE -c $PINGCOUNT 
-		
-done
+exit 0

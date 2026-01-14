@@ -147,8 +147,8 @@ BOOL SelfHeal_SetParamBoolValue
     )
 {
     PCOSA_DATAMODEL_SELFHEAL            pMyObject    = (PCOSA_DATAMODEL_SELFHEAL)g_pCosaBEManager->hSelfHeal;
-    char buf[128] = {0};
-    FILE *fp;
+    //char buf[128] = {0};
+    //FILE *fp;
     if (strcmp(ParamName, "X_RDKCENTRAL-COM_Enable") == 0)
     {
         if( pMyObject->Enable == bValue )
@@ -163,14 +163,14 @@ BOOL SelfHeal_SetParamBoolValue
         }
         else 
         { 
-
+/*  Moving to cron
             if ( bValue == TRUE )
             {
-                v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &"); 
+                //v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &"); 
 
-                v_secure_system("/usr/ccsp/tad/resource_monitor.sh &"); 
+                //v_secure_system("/usr/ccsp/tad/resource_monitor.sh &"); Moving to cron
 
-                v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &");
+                //v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &"); Moving to cron
 	    }
             else
 	    {
@@ -184,7 +184,7 @@ BOOL SelfHeal_SetParamBoolValue
 	            CcspTraceWarning(("%s: Stop SelfHeal Monitor script\n", __FUNCTION__));
                     v_secure_system("kill -9 %s", buf);
                 }
-    
+
                 fp = v_secure_popen("r", "busybox pidof resource_monitor.sh");
                 copy_command_output(fp, buf, sizeof(buf));
                 v_secure_pclose(fp);
@@ -195,7 +195,7 @@ BOOL SelfHeal_SetParamBoolValue
 	            CcspTraceWarning(("%s: Stop Resource Monitor script\n", __FUNCTION__));
                     v_secure_system("kill -9 %s", buf);
                 }   
-       
+
                 fp = v_secure_popen("r", "busybox pidof selfheal_aggressive.sh");
                 copy_command_output(fp, buf, sizeof(buf));
                 v_secure_pclose(fp);
@@ -206,7 +206,9 @@ BOOL SelfHeal_SetParamBoolValue
 	            CcspTraceWarning(("%s: Aggressive self heal script\n", __FUNCTION__));
                     v_secure_system("kill -9 %s", buf);
                 }
+
 	    }
+*/
 	    pMyObject->Enable = bValue;
 	}
         return TRUE;
