@@ -34,9 +34,9 @@ calcRandom=1
 ping4_server_num=0
 ping6_server_num=0
 ping4_success=0
-ping6_success=0
+connectivity_ipv6_success=0
 ping4_failed=0
-ping6_failed=0
+connectivity_ipv6_failed=0
 
 getCorrectiveActionState() {
     Corrective_Action=`syscfg get ConnTest_CorrectiveAction`
@@ -120,6 +120,30 @@ runDNSPingTest()
 			fi
 		fi
 	fi
+}
+
+checkIPv6ConnectivityRdisc6() {
+    local wan_interface="$1"
+
+    echo_t "RDKB_SELFHEAL : Starting IPv6 connectivity check"
+
+    if ! command -v rdisc6 >/dev/null 2>&1; then
+        echo_t "RDKB_SELFHEAL : rdisc6 not available"
+        return 0
+    fi
+
+    # Try rdisc6 with increasing attempts
+    for i in 1 2 3; do
+        echo_t "RDKB_SELFHEAL : IPv6 connectivity attempt $i of 3"
+
+        RDISC_OUTPUT=`rdisc6 -$i -w $((3000 + i * 2000)) $wan_interface 2>/dev/null`
+        RDISC_RESULT=$?
+        if [ $RDISC_RESULT -eq 0 ] && [ "$RDISC_OUTPUT" != "" ]; then
+            return 1  # Success
+        fi
+		sleep 5
+    done
+    return 0  # Failed
 }
 
 runPingTest()
@@ -215,33 +239,21 @@ runPingTest()
 
 	if [ "$IPv6_Gateway_addr" != "" ]
 	then
-		for IPv6_Gateway_addr in $IPv6_Gateway_addr
-		do
-			PING_OUTPUT=`ping6 -I $WAN_INTERFACE -c $PINGCOUNT -w $RESWAITTIME $IPv6_Gateway_addr`
-			output_ipv6=`echo $?` 
-			CHECK_PACKET_RECEIVED=`echo $PING_OUTPUT | grep "packet loss" | cut -d"%" -f1 | awk '{print $NF}'`
-
-			if [ "$CHECK_PACKET_RECEIVED" != "" ]
-			then
-				if [ "$CHECK_PACKET_RECEIVED" -ne 100 ] 
-				then
-					ping6_success=1
-                                        ping6_failed=0
-					PING_LATENCY="PING_LATENCY_GWIPv6:"
-					PING_LATENCY_VAL=`echo $PING_OUTPUT | awk 'BEGIN {FS="ms"} { for(i=1;i<=NF;i++) print $i}' | grep "time=" | cut -d"=" -f4`
-					PING_LATENCY_VAL=${PING_LATENCY_VAL%?};
-					echo $PING_LATENCY$PING_LATENCY_VAL|sed 's/ /,/g'
-					break
-				else
-					ping6_failed=1
-				fi
-			else
-				ping6_failed=1
-			fi
-		done
+		echo_t "RDKB_SELFHEAL : Testing IPv6 connectivity on $WAN_INTERFACE"
+			
+		# Use the compact IPv6 connectivity check with rdisc6
+		checkIPv6ConnectivityRdisc6 "$WAN_INTERFACE"
+		ipv6_connectivity_result=$?
+		
+		if [ $ipv6_connectivity_result -eq 1 ]; then
+			connectivity_ipv6_success=1
+			connectivity_ipv6_failed=0
+		else
+			connectivity_ipv6_failed=1
+		fi
 	fi
 
-	if [ "$ping4_success" -ne 1 ] &&  [ "$ping6_success" -ne 1 ]
+	if [ "$ping4_success" -ne 1 ] &&  [ "$connectivity_ipv6_success" -ne 1 ]
 	then
 		echo_t "RDKB_SELFHEAL : Ping to both IPv4 and IPv6 Gateway Address failed."
 		t2CountNotify "RF_ERROR_IPV4IPV6PingFailed"
@@ -280,12 +292,12 @@ runPingTest()
 			echo_t "RDKB_SELFHEAL : Taking corrective action"
 			resetNeeded "" PING
 		fi
-	elif [ "$ping6_success" -ne 1 ]
+	elif [ "$connectivity_ipv6_success" -ne 1 ]
 	then
                 if [ "$IPv6_Gateway_addr" != "" ]
                 then
-		            echo_t "RDKB_SELFHEAL : Ping to IPv6 Gateway Address are failed."
-		            t2CountNotify "RF_ERROR_IPV6PingFailed"
+		            echo_t "RDKB_SELFHEAL : IPv6 connectivity test failed."
+		            t2CountNotify "RF_ERROR_IPV6ConnectivityFailed"
                 else
                     echo_t "RDKB_SELFHEAL : No IPv6 Gateway Address detected"
 		    t2CountNotify "SYS_INFO_NoIPv6_Address"
@@ -306,8 +318,8 @@ runPingTest()
 
 	ping4_success=0
 	ping4_failed=0
-	ping6_success=0
-	ping6_failed=0
+	connectivity_ipv6_success=0
+	connectivity_ipv6_failed=0
 
 
 	IPV4_SERVER_COUNT=`syscfg get Ipv4PingServer_Count`
@@ -362,21 +374,21 @@ runPingTest()
 			then
 				if [ "$CHECK_PACKET_RECEIVED" -ne 100 ] 
 				then
-					ping6_success=1
+					connectivity_ipv6_success=1
 					PING_LATENCY="PING_LATENCY_IPv6_SERVER:"
 					PING_LATENCY_VAL=`echo $PING_OUTPUT | awk 'BEGIN {FS="ms"} { for(i=1;i<=NF;i++) print $i}' | grep "time=" | cut -d"=" -f4`
 					PING_LATENCY_VAL=${PING_LATENCY_VAL%?};
 					echo $PING_LATENCY$PING_LATENCY_VAL|sed 's/ /,/g'
 				else
-					ping6_failed=1
+					connectivity_ipv6_failed=1
 				fi
 			else
-				ping6_failed=1
+				connectivity_ipv6_failed=1
 			fi
 
-			if [ "$ping6_failed" -eq 1 ];then
+			if [ "$connectivity_ipv6_failed" -eq 1 ];then
 			   echo_t "IPERROR_Ping: IP_Host=[$PING_SERVER_IS], Ping_Error = [$output_ping6server]"
-			   ping6_failed=0
+			   connectivity_ipv6_failed=0
 			fi
 
 		fi
@@ -397,7 +409,7 @@ runPingTest()
 					echo_t "RDKB_SELFHEAL : Taking corrective action"
 					resetNeeded "" PING
 				fi
-			elif [ "$ping6_success" -ne 1 ] && [ "$IPV6_SERVER_COUNT" -ne 0 ]
+			elif [ "$connectivity_ipv6_success" -ne 1 ] && [ "$IPV6_SERVER_COUNT" -ne 0 ]
 			then
 				echo_t "RDKB_SELFHEAL : Ping to IPv6 servers are failed."
 				if [ `getCorrectiveActionState` = "true" ]
@@ -410,7 +422,7 @@ runPingTest()
 				echo_t "RDKB_SELFHEAL : Connectivity Test is Successfull"
 			fi	
 
-	elif [ "$ping4_success" -ne 1 ] &&  [ "$ping6_success" -ne 1 ]
+	elif [ "$ping4_success" -ne 1 ] &&  [ "$connectivity_ipv6_success" -ne 1 ]
 	then
 		echo_t "RDKB_SELFHEAL : Ping to both IPv4 and IPv6 servers are failed."
 		t2CountNotify "RF_ERROR_IPV4IPV6PingFailed"
@@ -427,7 +439,7 @@ runPingTest()
 					echo_t "RDKB_SELFHEAL : Taking corrective action"
 					resetNeeded "" PING
 				fi
-	elif [ "$ping6_success" -ne 1 ]
+	elif [ "$connectivity_ipv6_success" -ne 1 ]
 	then
 		echo_t "RDKB_SELFHEAL : Ping to IPv6 servers are failed."
 				if [ `getCorrectiveActionState` = "true" ]
@@ -441,8 +453,8 @@ runPingTest()
 
 	ping4_success=0
 	ping4_failed=0
-	ping6_success=0
-	ping6_failed=0
+	connectivity_ipv6_success=0
+	connectivity_ipv6_failed=0
 	ping4_server_num=0
 	ping6_server_num=0
 
