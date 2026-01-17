@@ -42,6 +42,7 @@
 #include <errno.h>
 #include <math.h>
 #include <rbus/rbus.h>
+#include <mosquitto.h>
 #include "syscfg/syscfg.h"
 #define ADD_MAX_SAMPLE 10
 #define MAX_SAMPLE 50
@@ -99,6 +100,11 @@ pthread_mutex_t latency_report_lock = PTHREAD_MUTEX_INITIALIZER;
 #define TRUE 1
 #define FALSE 0
 #define BUF_SIZE 200
+#define MQTT_LOCAL_MQTT_BROKER_IP_ADDR   "192.168.245.254"
+#define MQTT_LOCAL_MQTT_BROKER_PORT_VAL  1883
+#define TCP_LAN_latency_TOPIC   "local/tcplatency"
+#define MQTT_KEEPALIVE_TIME 60
+
 enum ip_family
 {
     IPV4=0,
@@ -1301,6 +1307,31 @@ void* LatencyReportThread(void* arg)
 
 
 #if 1
+
+// Function that takes MAC + LAN latency (microseconds)
+int send_latency_message(struct mosquitto *mosq, const char *mac, long long lan_latency_sec, long long lan_latency_usec) {
+    char payload[256];
+    int rc =0;
+
+    // JSON payload: you can format however you need
+    snprintf(payload, sizeof(payload),
+             "{\"mac\":\"%s\", \"lan_latency_sec\":%lld.%06lld}", mac, lan_latency_sec, lan_latency_usec);
+
+
+    // Publish message
+    rc = mosquitto_publish(mosq, NULL, TCP_LAN_latency_TOPIC,
+	    strlen(payload), payload,
+	    1, false);
+
+    if (rc == MOSQ_ERR_SUCCESS) {
+	dbg_log("Published: %s", payload);
+    } else {
+	dbg_log("Failed to publish message: %s", mosquitto_strerror(rc));
+    }
+
+    return rc;
+}
+
 void* LatencyReportThreadPerSession(void* arg)
 {
     // detach the current thread 
@@ -1310,6 +1341,8 @@ void* LatencyReportThreadPerSession(void* arg)
     int count = 0;
     char *str = NULL;
     char str1[1024];
+    struct mosquitto *mosq;
+    int rc =0;
     str = (char*) malloc (MAX_REPORT_SIZE);
     if (str == NULL )
         return NULL;
@@ -1320,6 +1353,26 @@ void* LatencyReportThreadPerSession(void* arg)
     FILE *fp;
     //fp = fopen("LatencyReport.txt", "w+");
 
+    mosquitto_lib_init();
+    mosq = mosquitto_new("LatencyPublisher", true, NULL);
+    if (!mosq) {
+	dbg_log("Failed to create Mosquitto client");    
+        mosquitto_lib_cleanup();
+        return NULL;
+    }
+
+    rc = mosquitto_connect(mosq,
+	    MQTT_LOCAL_MQTT_BROKER_IP_ADDR,
+	    MQTT_LOCAL_MQTT_BROKER_PORT_VAL,
+	    MQTT_KEEPALIVE_TIME);
+
+    if (rc != MOSQ_ERR_SUCCESS) {
+	dbg_log("Failed to connect to MQTT broker: %s", mosquitto_strerror(rc));
+
+	mosquitto_destroy(mosq);
+	mosquitto_lib_cleanup();
+	return NULL;
+    } 
     while(1)
     {
         sleep(5);
@@ -1333,6 +1386,15 @@ void* LatencyReportThreadPerSession(void* arg)
                 if(hashArray[i].bComputed == TRUE)
                 {
                     tempCount = snprintf(str1,sizeof(str1),"%s,%u,%lld.%lld,%lld.%06lld|",hashArray[i].mac,hashArray[i].TcpInfo[INDEX_SYN].th_seq,hashArray[i].latency_sec,hashArray[i].latency_usec,hashArray[i].Lan_latency_sec,hashArray[i].Lan_latency_usec);
+		    //Send LAN side Latency Notification to HCM module 
+		    rc = send_latency_message(mosq, hashArray[i].mac,
+			    hashArray[i].Lan_latency_sec, hashArray[i].Lan_latency_usec);
+
+		    if (rc != MOSQ_ERR_SUCCESS) {
+			dbg_log("MQTT publish failed for MAC %s: %s",
+				hashArray[i].mac, mosquitto_strerror(rc));
+		    }
+
                     if(tempCount)
                     {
                         if((byteCount+tempCount) < MAX_REPORT_SIZE)
@@ -1394,6 +1456,9 @@ void* LatencyReportThreadPerSession(void* arg)
         free(str);
         str=NULL;
     }
+    mosquitto_disconnect(mosq);
+    mosquitto_destroy(mosq);
+    mosquitto_lib_cleanup();
     // exit the current thread
     //pthread_exit(NULL);
 }
