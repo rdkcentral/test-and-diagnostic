@@ -5122,7 +5122,9 @@ self_heal_dual_cron
 self_heal_meshAgent
 self_heal_meshAgent_hung
 self_heal_sedaemon
-check_br403_is_created
+if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ]; then
+    check_br403_is_created
+fi
 self_heal_ethwan_mode_recover
 if [ "$T2_ENABLE" = "true" ]; then
     self_heal_t2
