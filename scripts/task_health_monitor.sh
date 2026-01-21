@@ -4949,7 +4949,7 @@ self_heal_ethwan_mode_recover()
     fi
 }
 
-if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$MODEL_NUM" = "SCER11BEL" ] || [ "$MODEL_NUM" = "SR203" ] || [ "$MODEL_NUM" = "SR213" ]; then
+if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$MODEL_NUM" = "SCER11BEL" ] || [ "$MODEL_NUM" = "SR203" ] || [ "$MODEL_NUM" = "SR213" ]; then
     mesh_optimization_mode=$(deviceinfo.sh -optimization)
     mesh_enable=$(syscfg get mesh_enable)
     if [[ "$mesh_optimization_mode" == "monitor" || "$mesh_optimization_mode" == "enable" ]] && ! [[ "$mesh_enable" == "true" && "$mesh_optimization_mode" == "enable" ]] && ! [[ "$mesh_enable" == "false" && "$mesh_optimization_mode" == "monitor" ]]
@@ -5122,7 +5122,9 @@ self_heal_dual_cron
 self_heal_meshAgent
 self_heal_meshAgent_hung
 self_heal_sedaemon
-check_br403_is_created
+if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ]; then
+    check_br403_is_created
+fi
 self_heal_ethwan_mode_recover
 if [ "$T2_ENABLE" = "true" ]; then
     self_heal_t2
