@@ -148,6 +148,7 @@ parse_configure_options_file() {
     local cppflags=""
     local cflags=""
     local ldflags=""
+    local libs=""
     
     while IFS= read -r line || [[ -n "$line" ]]; do
         # Skip empty lines and comments
@@ -174,6 +175,9 @@ parse_configure_options_file() {
             LDFLAGS)
                 ldflags+="$line "
                 ;;
+            LIBS)
+                libs+="$line "
+                ;;
         esac
     done < "$conf_file"
     
@@ -182,11 +186,13 @@ parse_configure_options_file() {
     cppflags="${cppflags//\$HOME/$HOME}"
     cflags="${cflags//\$HOME/$HOME}"
     ldflags="${ldflags//\$HOME/$HOME}"
+    libs="${libs//\$HOME/$HOME}"
     
     # Build final options array
     [[ -n "$cppflags" ]] && options_array+=("CPPFLAGS=${cppflags% }")
     [[ -n "$cflags" ]] && options_array+=("CFLAGS=${cflags% }")
     [[ -n "$ldflags" ]] && options_array+=("LDFLAGS=${ldflags% }")
+    [[ -n "$libs" ]] && options_array+=("LIBS=${libs% }")
 }
 
 # Build with autotools
