@@ -1582,7 +1582,7 @@ if ip -6 addr show dev $WAN_INTERFACE scope global | grep -q "dadfailed"; then
     PID=$(ps | grep $PROC | grep -v grep  | awk '{print $1}')
 
     if [ -n "$PID" ]; then
-       Dhcpv6_Client_restart "dibbler-client" "Idle"
+       Kill -9 $PID
     else
        echo_t "$PROC Process not running"
     fi
