@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
-1. Build
+1. Build Test
 
 a> Set up following environment variables before invoking cosa_build.
     You can set up the environment variables using the following command:
