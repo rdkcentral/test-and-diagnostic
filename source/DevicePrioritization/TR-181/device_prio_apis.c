@@ -182,7 +182,7 @@ int DevicePrio_Generate_QOS_Active_Rules(char *result) {
 
 		snprintf(mac_buf, sizeof(mac_buf), "DCPC_PrioClients_Mac_%d",i);
 		snprintf(dscp_buf, sizeof(dscp_buf), "DCPC_PrioClients_DSCP_%d",i);
-		snprintf(traffic_buf, sizeof(traffic_buf), "DCPC_PrioClients_Action_%d_%d",i);
+		snprintf(traffic_buf, sizeof(traffic_buf), "DCPC_PrioClients_Action_%d",i);
 
 		if (syscfg_get(NULL, mac_buf, mac, sizeof(mac)) == 0 && strlen(mac) != 0 &&
 			syscfg_get(NULL, dscp_buf, dscp_val, sizeof(dscp_val)) == 0 && strlen(dscp_val) != 0 &&
