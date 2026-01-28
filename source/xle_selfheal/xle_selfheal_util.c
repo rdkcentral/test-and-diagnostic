@@ -52,6 +52,7 @@ struct xle_attributes
   int is_default_route;
   int is_mesh_default_route;
   int cellular_restart_count;
+  int cellular_retry_count;
 }xle_attributes;
 
 #define BUFLEN_128  128
@@ -168,7 +169,7 @@ void check_cellular_interface(void)
         if(count >= 3)
         {
             xle_log("[xle_self_heal] Rebooting in next selfheal cycle because wwan0 not available\n");
-            sysevent_set(sysevent_fd, sysevent_token, "LTE_DOWN", "1", 0);
+            sysevent_set(sysevent_fd, sysevent_token, "LTE_DOWN", "WWAN0_DOWN", 0);
             break;
         }
         count++;
@@ -180,11 +181,13 @@ void PopulateParameters()
 {
     char mesh_status[128] = {0};
     char countBuffer[4] = {0};
+    char retryBuffer[4] = {0};
     sysevent_fd =  sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "xle_selfheal", &sysevent_token);
     sysevent_get(sysevent_fd, sysevent_token, "wan_ifname", default_wan_ifname, sizeof(default_wan_ifname));
     sysevent_get(sysevent_fd, sysevent_token, "current_wan_ifname", current_wan_ifname, sizeof(current_wan_ifname));
     sysevent_get(sysevent_fd, sysevent_token, "mesh_wan_linkstatus", mesh_status, sizeof(mesh_status));
     sysevent_get(sysevent_fd, sysevent_token, "cellular_restart_count", countBuffer, sizeof(countBuffer));
+    sysevent_get(sysevent_fd, sysevent_token, "cellular_retry_count", retryBuffer, sizeof(retryBuffer));
     char *paramValue = NULL;
     char*  component_id = "ccsp.xle_self";
     int ret = 0;
@@ -204,7 +207,20 @@ void PopulateParameters()
     {        strncpy(mesh_interface_name,paramValue,sizeof(mesh_interface_name)-1);
         ((CCSP_MESSAGE_BUS_INFO *)bus_handle)->freefunc(paramValue);
     }
-    check_cellular_interface();
+
+    //check the last reboot reason is in LTE_DOWN or in WWAN0_DOWN
+    char buf[8] = {0};
+    if (0 == syscfg_get(NULL, "X_RDKCENTRAL-COM_LastRebootReason", buf, sizeof(buf)))
+    {
+        if (buf[0] != '\0')
+        {
+            if (strcmp(buf, "WWAN0_DOWN") != 0)
+            {
+                check_cellular_interface();
+            }
+        }
+    }
+
     check_lte_provisioned(lte_wan_status, lte_backup_enable, lte_interface_enable, ipaddr_family);
     if(( 0 == strncmp( lte_wan_status, "CONNECTED", 9 )) && ( 0 == strncmp( lte_backup_enable, "true", 4 )))
     {
@@ -438,6 +454,7 @@ void PopulateParameters()
         }
     }
     xle_params.cellular_restart_count = atoi(countBuffer);
+    xle_params.cellular_retry_count = atoi(retryBuffer);
 }
 
 void isWan_up()
@@ -650,14 +667,24 @@ int main(int argc,char *argv[])
     
     //LTE SelfHeal Enhancement
     xle_log("[xle_self_heal] ip address family: %s\n", ipaddr_family);
-    if((0 == strncmp( lte_interface_enable, "true", 4)) && ( 0 == strncmp( lte_backup_enable, "true", 4 )))
+    char count1[2];
+    char retry_buff[2];
+    if(((0 == strncmp( lte_interface_enable, "true", 4)) && ( 0 == strncmp( lte_backup_enable, "true", 4 ))) &&
+        ((0 != strncmp( lte_wan_status, "CONNECTED", 9 )) || ((strstr(ipaddr_family,"IPv4")) && (xle_params.is_ipv4present == 0)) || ((strstr(ipaddr_family,"IPv6")) && (xle_params.is_ipv6present == 0))))
     {
-        if((0 != strncmp( lte_wan_status, "CONNECTED", 9 )) || ((strstr(ipaddr_family,"IPv4")) && (xle_params.is_ipv4present == 0)) || ((strstr(ipaddr_family,"IPv6")) && (xle_params.is_ipv6present == 0)))
+        if(xle_params.cellular_retry_count < 3)
+        {
+            int retry_count = xle_params.cellular_retry_count;
+            retry_count+=1;
+            snprintf(retry_buff, sizeof(retry_buff), "%d", retry_count);
+            sysevent_set(sysevent_fd, sysevent_token, "cellular_retry_count", retry_buff, 0);
+            xle_log("[xle_self_heal] Cellular manager retry count:%d \n", retry_count);
+        }
+        else
         {
             if(xle_params.cellular_restart_count < 3)
             {
                 int count = xle_params.cellular_restart_count;
-                char count1[2];
                 count+=1;
                 snprintf(count1, sizeof(count1), "%d", count);
                 sysevent_set(sysevent_fd, sysevent_token, "cellular_restart_count", count1, 0);
@@ -667,13 +694,20 @@ int main(int argc,char *argv[])
                     xle_log("system() call failed\n");
                 }
                 xle_log("[xle_self_heal] Cellular manager restarted. Number of times restarted=%d \n", count);
-            }
-            else
-            {
+             }
+             else
+             {
                 xle_log("[xle_self_heal] Today's limit for cellular manager restart has exceeded\n");
-                sysevent_set(sysevent_fd, sysevent_token, "LTE_DOWN", "1", 0);
-            }
+                sysevent_set(sysevent_fd, sysevent_token, "LTE_DOWN", "LTE_DOWN", 0);
+             }
         }
+    }
+    else{
+         xle_log("[xle_self_heal] Reset counters for cellular retries and restarts\n");
+         xle_params.cellular_retry_count = 0;
+         sysevent_set(sysevent_fd, sysevent_token, "cellular_retry_count", "0", 0);
+         xle_params.cellular_restart_count = 0;
+         sysevent_set(sysevent_fd, sysevent_token, "cellular_restart_count", "0", 0);
     }
     
     if ( logFp != NULL)
