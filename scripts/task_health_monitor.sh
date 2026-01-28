@@ -1204,6 +1204,14 @@ case $SELFHEAL_TYPE in
         fi
 
         # Checking Lan Manager PID
+        if [ "$BOX_TYPE" = "ipq" ]; then
+            offline_clients=$(cat /rdklogs/logs/LM.txt.0 | grep 'Total_Offline_Clients=' | awk '{print $5}' | tail -1 | cut -d '=' -f 2)
+            connected_clients=$(cat /rdklogs/logs/LM.txt.0 | grep 'Total_Clients_Connected=' | awk '{print $5}' | tail -1 | cut -d '=' -f 2)
+            wifi_clients=$(cat /rdklogs/logs/LM.txt.0 | grep 'Total_WiFi_Clients=' | awk '{print $5}' | tail -1 | cut -d '=' -f 2)
+            t2ValNotify "Total_offline_clients_split" "$offline_clients"
+            t2ValNotify "Total_devices_connected_split" "$connected_clients"
+            t2ValNotify "Total_wifi_clients_split" "$wifi_clients"
+        fi
         LM_PID=$(busybox pidof CcspLMLite)
         if [ "$LM_PID" = "" ]; then
             echo_t "RDKB_PROCESS_CRASHED : LanManager_process is not running, need restart"
@@ -1627,6 +1635,15 @@ case $SELFHEAL_TYPE in
         fi
 
         # Checking Lan Manager PID
+	if [ "$BOX_TYPE" = "ipq" ]; then
+            offline_clients=$(cat /rdklogs/logs/LM.txt.0 | grep 'Total_Offline_Clients=' | awk '{print $5}' | tail -1 | cut -d '=' -f 2)
+            connected_clients=$(cat /rdklogs/logs/LM.txt.0 | grep 'Total_Clients_Connected=' | awk '{print $5}' | tail -1 | cut -d '=' -f 2)
+            wifi_clients=$(cat /rdklogs/logs/LM.txt.0 | grep 'Total_WiFi_Clients=' | awk '{print $5}' | tail -1 | cut -d '=' -f 2)
+            t2ValNotify "Total_offline_clients_split" "$offline_clients"
+            t2ValNotify "Total_devices_connected_split" "$connected_clients"
+            t2ValNotify "Total_wifi_clients_split" "$wifi_clients"
+        fi
+
         LM_PID=$(busybox pidof CcspLMLite)
         if [ "$LM_PID" = "" ]; then
             echo_t "RDKB_PROCESS_CRASHED : LanManager_process is not running, need restart"

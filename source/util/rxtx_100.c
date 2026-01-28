@@ -939,8 +939,8 @@ static int fetch_interface_stats(char *ifname,uint64_t *rx_bytes,uint64_t *tx_by
 static int fetch_port_stats(char *ifname,uint64_t *rx_bytes,uint64_t *tx_bytes)
 {
 int ret = SUCCESS;
-#if (!defined(_SR213_PRODUCT_REQ_) && ( defined(_HUB4_PRODUCT_REQ_)  || defined(_SR300_PRODUCT_REQ_))) \
-|| defined (_SE501_PRODUCT_REQ_) || defined(_WNXL11BWL_PRODUCT_REQ_) || defined(_XER5_PRODUCT_REQ_) || defined(_SCER11BEL_PRODUCT_REQ_) || defined(_SCXF11BFL_PRODUCT_REQ_)
+#if (((!defined(_SR213_PRODUCT_REQ_) && ( defined(_HUB4_PRODUCT_REQ_)  || defined(_SR300_PRODUCT_REQ_))) \
+|| defined (_SE501_PRODUCT_REQ_) || defined(_WNXL11BWL_PRODUCT_REQ_) || defined(_XER5_PRODUCT_REQ_) || defined(_SCER11BEL_PRODUCT_REQ_) || defined(_SCXF11BFL_PRODUCT_REQ_)) && !defined(_COSA_QCA_ARM_))
     if (ret == SUCCESS)
     {
         *rx_bytes = NEGATIVE_VALUE;
