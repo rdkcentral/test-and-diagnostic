@@ -188,7 +188,7 @@ int LowLatency_Set_IPv4Enable(bool new_val) {
 **********************************************************************************************/
 int LowLatency_Set_IPv6Enable(bool new_val) {
 
-	CcspTraceInfo(("'%s': setting value '%d'\n", __FUNCTION__, new_val));
+	CcspTraceInfo(("'%s': setting value '%d'\n", new_val));
 	// fetch previous value
 	bool old_val = LowLatencyInfo.IPv6Enable;
 	//update and publish the value
