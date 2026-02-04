@@ -147,8 +147,8 @@ BOOL SelfHeal_SetParamBoolValue
     )
 {
     PCOSA_DATAMODEL_SELFHEAL            pMyObject    = (PCOSA_DATAMODEL_SELFHEAL)g_pCosaBEManager->hSelfHeal;
-    char buf[128] = {0};
-    FILE *fp;
+    //char buf[128] = {0};
+    //FILE *fp;
     if (strcmp(ParamName, "X_RDKCENTRAL-COM_Enable") == 0)
     {
         if( pMyObject->Enable == bValue )
@@ -163,14 +163,14 @@ BOOL SelfHeal_SetParamBoolValue
         }
         else 
         { 
-
+/*  Moving to cron
             if ( bValue == TRUE )
             {
-                v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &"); 
+                //v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &"); 
 
-                v_secure_system("/usr/ccsp/tad/resource_monitor.sh &"); 
+                //v_secure_system("/usr/ccsp/tad/resource_monitor.sh &"); Moving to cron
 
-                v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &");
+                //v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &"); Moving to cron
 	    }
             else
 	    {
@@ -184,7 +184,7 @@ BOOL SelfHeal_SetParamBoolValue
 	            CcspTraceWarning(("%s: Stop SelfHeal Monitor script\n", __FUNCTION__));
                     v_secure_system("kill -9 %s", buf);
                 }
-    
+
                 fp = v_secure_popen("r", "busybox pidof resource_monitor.sh");
                 copy_command_output(fp, buf, sizeof(buf));
                 v_secure_pclose(fp);
@@ -195,7 +195,7 @@ BOOL SelfHeal_SetParamBoolValue
 	            CcspTraceWarning(("%s: Stop Resource Monitor script\n", __FUNCTION__));
                     v_secure_system("kill -9 %s", buf);
                 }   
-       
+
                 fp = v_secure_popen("r", "busybox pidof selfheal_aggressive.sh");
                 copy_command_output(fp, buf, sizeof(buf));
                 v_secure_pclose(fp);
@@ -206,7 +206,9 @@ BOOL SelfHeal_SetParamBoolValue
 	            CcspTraceWarning(("%s: Aggressive self heal script\n", __FUNCTION__));
                     v_secure_system("kill -9 %s", buf);
                 }
+
 	    }
+*/
 	    pMyObject->Enable = bValue;
 	}
         return TRUE;
@@ -343,6 +345,22 @@ SelfHeal_GetParamUlongValue
     if (strcmp(ParamName, "X_RDKCENTRAL-COM_LogBackupThreshold") == 0)
     {
         *puLong = pMyObject->LogBackupThreshold;
+        return TRUE;
+    }
+
+    if (strcmp(ParamName, "AggressiveInterval") == 0)
+    {
+        char buf[64] = {0};
+        
+        if (syscfg_get(NULL, "AggressiveInterval", buf, sizeof(buf)) == 0)
+        {
+            *puLong = (ULONG)atol(buf);
+        }
+        else
+        {
+            CcspTraceWarning(("syscfg_get failed for AggressiveInterval, returning default\n"));
+            *puLong = 5; // Default value
+        }
         return TRUE;
     }
 
@@ -502,6 +520,65 @@ SelfHeal_SetParamUlongValue
                 pMyObject->LogBackupThreshold = uValue;
         }
 
+        return TRUE;
+    }
+
+    if (strcmp(ParamName, "AggressiveInterval") == 0)
+    {
+        char currentValue[64] = {0};
+        ULONG currentInterval = 0;
+        
+        // Step 1: Get current value from syscfg
+        if (syscfg_get(NULL, "AggressiveInterval", currentValue, sizeof(currentValue)) == 0)
+        {
+            currentInterval = (ULONG)atol(currentValue);
+            
+            // Step 2: Compare with new value - if same, skip update
+            if (currentInterval == uValue)
+            {
+                CcspTraceInfo(("AggressiveInterval value unchanged (%lu), skipping update\n", uValue));
+                return TRUE;
+            }
+        }
+        
+        // Step 3: Validate the new value
+        if (uValue < 5 || uValue > 1440)
+        {
+            CcspTraceError(("Invalid AggressiveInterval value: %lu. Must be between 5 and 1440 minutes\n", uValue));
+            return FALSE;
+        }
+        
+        // Step 4: Check if new interval conflicts with resource_monitor_interval
+        char monitorBuf[64] = {0};
+        if (syscfg_get(NULL, "resource_monitor_interval", monitorBuf, sizeof(monitorBuf)) == 0)
+        {
+            ULONG monitorInterval = (ULONG)atol(monitorBuf);
+            if (monitorInterval <= uValue)
+            {
+                CcspTraceError(("AggressiveInterval (%lu) must be less than resource_monitor_interval (%lu)\n", 
+                               uValue, monitorInterval));
+                return FALSE;
+            }
+        }
+        
+        // Step 5: Save the new value to syscfg
+        if (syscfg_set_u_commit(NULL, "AggressiveInterval", uValue) != 0)
+        {
+            CcspTraceError(("syscfg_set_commit failed for AggressiveInterval\n"));
+            return FALSE;
+        }
+        
+        CcspTraceInfo(("AggressiveInterval updated from %lu to %lu minutes\n", currentInterval, uValue));
+        
+        // Step 6: Stop and restart selfheal_aggressive cron job with new interval
+        // First, remove old cron entry
+        v_secure_system("crontab -l 2>/dev/null | sed '/selfheal_aggressive.sh/d' | crontab -");
+        
+        // Then, add new cron entry with updated interval
+        v_secure_system("(crontab -l 2>/dev/null; echo \"*/%lu * * * * /usr/ccsp/tad/selfheal_aggressive.sh\") | crontab -", uValue);
+        
+        CcspTraceInfo(("Selfheal aggressive cron job restarted with interval: %lu minutes\n", uValue));
+        
         return TRUE;
     }
 

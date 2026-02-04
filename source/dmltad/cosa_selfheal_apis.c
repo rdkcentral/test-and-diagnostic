@@ -457,12 +457,12 @@ CosaDmlGetSelfHealCfg(
 	pMyObject->Enable = (!strcmp(buf, "true")) ? TRUE : FALSE;
         if ( pMyObject->Enable == TRUE )
         {
-            v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &");
+            //v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &");
 #if defined(_COSA_BCM_MIPS_)
             v_secure_system("/lib/rdk/xf3_wifi_self_heal.sh &");
 #endif
-	    v_secure_system("/usr/ccsp/tad/resource_monitor.sh &");
-            v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &");
+	    //v_secure_system("/usr/ccsp/tad/resource_monitor.sh &"); Moving to cron
+            //v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &"); Moving to cron
 	}  
 
 	rc = memset_s(buf,sizeof(buf),0,sizeof(buf));
