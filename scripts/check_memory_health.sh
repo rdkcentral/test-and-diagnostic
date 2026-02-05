@@ -47,7 +47,15 @@ fi
 
 /bin/sh /usr/ccsp/tad/log_buddyinfo.sh
 MemFragPercentage=`syscfg get CpuMemFrag_Host_Percentage`
-if [ "$MemFragPercentage" -gt 50 ]
+
+MemFragThreshold=`syscfg get MemFragThreshold_Value`
+if [ -z "$MemFragThreshold" ] || [ "$MemFragThreshold" -eq 0 ]
+then
+         MemFragThreshold=50
+fi
+
+echo_t "Memory fragmentation $MemFragPercentage MemFragThreshold $MemFragThreshold"
+if [ "$MemFragPercentage" -gt "$MemFragThreshold" ]
 then
 	echo_t "Memory fragmentation is more than 50 percent"
 	echo_t "clear cache and run memory compaction"
