@@ -147,7 +147,6 @@ self_heal_peer_ping ()
 		    CHECK_PING_RES=`echo $PING_RES | grep "packet loss" | cut -d"," -f3 | cut -d"%" -f1`
 		    if [ "$CHECK_PING_RES" != "" ]
 		    then
-                        CHECK_PING_RES=100
 			if [ "$CHECK_PING_RES" -ne 100 ]
 			then
 			    ping_success=1
