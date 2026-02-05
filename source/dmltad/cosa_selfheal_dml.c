@@ -876,7 +876,17 @@ ConnectivityTest_SetParamUlongValue
 			return FALSE;
 		}
         pMyObject->pConnTest->PingInterval = uValue;
-        return TRUE;
+	
+       	CcspTraceInfo(("Selfheal connectivity ping updated to %lu minutes\n", uValue));
+        // Stop and restart selfheal_aggressive cron job with new interval
+        v_secure_system("crontab -l 2>/dev/null | sed '/self_heal_connectivity_test.sh/d' | crontab -");
+        CcspTraceInfo(("%s : removed old cron entry \n", __FUNCTION__));
+        // Then, add new cron entry with updated interval
+        v_secure_system("(crontab -l 2>/dev/null; echo \"*/%lu * * * * /usr/ccsp/tad/self_heal_connectivity_test.sh\") | crontab -", uValue);
+
+        CcspTraceInfo(("Selfheal connectvity ping test cron job restarted with interval: %lu minutes\n", uValue));
+       
+       	return TRUE;
     }
 
     if (strcmp(ParamName, "X_RDKCENTRAL-COM_NumPingsPerServer") == 0)
@@ -1620,7 +1630,17 @@ ResourceMonitor_SetParamUlongValue
 	    CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
 	    return FALSE;
         }
+
 	pRescMonitor->MonIntervalTime = uValue;
+
+	CcspTraceInfo(("ResourceMonitorInterval updated to %lu minutes\n", uValue));
+	v_secure_system("crontab -l 2>/dev/null | sed '/resource_monitor.sh/d' | crontab -");
+
+	CcspTraceInfo(("Removed cron job entry of resource monitor \n"));
+
+	v_secure_system("(crontab -l 2>/dev/null; echo \"*/%lu * * * * /usr/ccsp/tad/resource_monitor.sh\") | crontab -", uValue);
+	CcspTraceInfo(("resource monitor cron job restarted with interval: %lu minutes\n", uValue));
+	
 	return TRUE;
     }
 
