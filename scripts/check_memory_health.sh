@@ -45,4 +45,16 @@ then
 fi
 
 
+/bin/sh /usr/ccsp/tad/log_buddyinfo.sh
+MemFragPercentage=`syscfg get CpuMemFrag_Host_Percentage`
+if [ "$MemFragPercentage" -gt 50 ]
+then
+	echo_t "Memory fragmentation is more than 50 percent"
+	echo_t "clear cache and run memory compaction"
+	sync
+	echo 1 > /proc/sys/vm/drop_caches
+	echo 1 > /proc/sys/vm/compact_memory
+else
+    echo_t "Memory fragmentation is $MemFragPercentage, no compaction needed"
+fi
 
