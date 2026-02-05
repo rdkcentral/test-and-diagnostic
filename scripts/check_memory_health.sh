@@ -21,6 +21,8 @@
 source /etc/utopia/service.d/log_capture_path.sh
 source /lib/rdk/t2Shared_api.sh
 
+check_min_mem()
+{
 Min_Mem_Value=`syscfg get MinMemoryThreshold_Value`
 
 free_mem=`free | awk 'FNR == 2 {print $4}'`
@@ -43,8 +45,10 @@ then
 		echo 1 > /proc/sys/vm/drop_caches	
 	fi
 fi
+}
 
-
+check_frag_mem()
+{
 /bin/sh /usr/ccsp/tad/log_buddyinfo.sh
 MemFragPercentage=`syscfg get CpuMemFrag_Host_Percentage`
 
@@ -65,4 +69,11 @@ then
 else
     echo_t "Memory fragmentation is $MemFragPercentage, no compaction needed"
 fi
+}
 
+if [ "$#" -eq 0 ]; then
+   check_min_mem
+   check_frag_mem
+else
+  "$@"
+fi
