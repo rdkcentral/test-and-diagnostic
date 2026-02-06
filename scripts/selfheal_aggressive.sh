@@ -1652,53 +1652,86 @@ if [ "$(syscfg get selfheal_enable)" != "true" ]; then
 fi
 
 INTERVAL=$(syscfg get AggressiveInterval)
-[ -z "$INTERVAL" ] && INTERVAL=5
-echo_t "[RDKB_AGG_SELFHEAL] : INTERVAL is: $INTERVAL (cron execution)"
 
 WAN_INTERFACE=$(getWanInterfaceName)
 BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
 
-# Skip during boot (first 3 minutes)
-if [ ! -f /tmp/selfheal_bootup_completed ] && [ "$BOOTUP_TIME_SEC" -lt 180 ]; then
-    echo_t "[RDKB_AGG_SELFHEAL] : Still booting, skipping"
-    exit 0
-fi
-
-# DHCPv6 detection (keep your existing logic)
-ti_dhcpv6_type="$(busybox pidof ti_dhcp6c)"
-dibbler_client_type="$(busybox pidof dibbler-client)"
-if [ "$ti_dhcpv6_type" = "" ] && [ "$dibbler_client_type" = "" ];then
-    DHCPv6_TYPE=""
-elif [ "$DHCPv6_TYPE" = "" ];then 
-    if [ "$ti_dhcpv6_type" = "" ] && [ ! -z "$dibbler_client_type" ];then
-        DHCPv6_TYPE="dibbler-client"
-    elif [ ! -z "$ti_dhcpv6_type" ] && [ "$dibbler_client_type" = "" ];then
-        DHCPv6_TYPE="ti_dhcp6c"
+Aggressive_Interval() {
+    if [ "$INTERVAL" = "" ]
+    then
+        INTERVAL=5
     fi
+    echo_t "[RDKB_AGG_SELFHEAL] : INTERVAL is: $INTERVAL"
+}
+
+DHCP_Selfheal() {
+    # DHCPv6 detection (keep your existing logic)
+    ti_dhcpv6_type="$(busybox pidof ti_dhcp6c)"
+    dibbler_client_type="$(busybox pidof dibbler-client)"
+    if [ "$ti_dhcpv6_type" = "" ] && [ "$dibbler_client_type" = "" ];then
+        DHCPv6_TYPE=""
+    elif [ "$DHCPv6_TYPE" = "" ];then 
+        if [ "$ti_dhcpv6_type" = "" ] && [ ! -z "$dibbler_client_type" ];then
+            DHCPv6_TYPE="dibbler-client"
+        elif [ ! -z "$ti_dhcpv6_type" ] && [ "$dibbler_client_type" = "" ];then
+            DHCPv6_TYPE="ti_dhcp6c"
+        fi
+    fi
+
+    MAPT_CONFIG=`sysevent get mapt_config_flag`
+    START_TIME_SEC=$(cut -d. -f1 /proc/uptime)
+
+    # Execute ALL your self_heal functions (exactly as before)
+    self_heal_conntrack
+    [ "$MULTI_CORE" = "yes" ] && self_heal_peer_ping
+    [ -f /tmp/dhcpmgr_initialized ] && self_heal_dnsmasq
+    self_heal_dhcpmgr
+    self_heal_dnsmasq_zombie
+    self_heal_interfaces
+    self_heal_dibbler_server
+    [ "$DHCPcMonitoring" != "false" ] && self_heal_dhcp_clients
+    self_heal_dropbear
+    self_heal_ccspwifissp_hung
+    self_heal_nas_ip
+    self_heal_wan
+    [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "TG4482A" ] && self_heal_process
+    [ -f /tmp/started_ssad ] && self_heal_sedaemon
+    [ -f /etc/SelfHeal_Driver_Sanity_Check.sh ] && /etc/SelfHeal_Driver_Sanity_Check.sh &
+    self_heal_waninterface_ipv6_addressConflict
+
+    STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
+    TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
+    echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec (cron)"
+}
+
+CRON_ENABLED=$(syscfg get SelfHealCronEnable)
+
+if [ "$CRON_ENABLED" = "true" ]; then
+    # Skip during boot (first 15 minutes)
+    if [ ! -f /tmp/selfheal_bootup_completed ] && [ "$BOOTUP_TIME_SEC" -lt 900 ]; then
+        echo_t "[RDKB_AGG_SELFHEAL] : Still booting, skipping"
+        exit 0
+    fi
+    if [ "$SELFHEAL_ENABLE" != "true" ]; then
+        echo_t "[RDKB_SELFHEAL] : selfheal_enable != true, exiting"
+        exit 0
+    fi
+    Aggressive_Interval
+    DHCP_Selfheal
+    exit 0
+
+else
+    echo_t "[RDKB_AGG_SELFHEAL] : Cron not enabled, running as a process"
+    if [ ! -f /tmp/selfheal_bootup_completed ] && [ "$BOOTUP_TIME_SEC" -lt 900 ]; then
+        WAIT_TIME=$((900 - BOOTUP_TIME_SEC))
+        echo "Uptime is $BOOTUP_TIME_SEC. Waiting $WAIT_TIME seconds..."
+        sleep $WAIT_TIME
+    fi
+    while [ $(syscfg get selfheal_enable) = "true" ]
+    do
+        Aggressive_Interval
+        sleep ${INTERVAL}m
+        DHCP_Selfheal
+    done
 fi
-
-MAPT_CONFIG=`sysevent get mapt_config_flag`
-START_TIME_SEC=$(cut -d. -f1 /proc/uptime)
-
-# Execute ALL your self_heal functions (exactly as before)
-self_heal_conntrack
-[ "$MULTI_CORE" = "yes" ] && self_heal_peer_ping
-[ -f /tmp/dhcpmgr_initialized ] && self_heal_dnsmasq
-self_heal_dhcpmgr
-self_heal_dnsmasq_zombie
-self_heal_interfaces
-self_heal_dibbler_server
-[ "$DHCPcMonitoring" != "false" ] && self_heal_dhcp_clients
-self_heal_dropbear
-self_heal_ccspwifissp_hung
-self_heal_nas_ip
-self_heal_wan
-[ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "TG4482A" ] && self_heal_process
-[ -f /tmp/started_ssad ] && self_heal_sedaemon
-[ -f /etc/SelfHeal_Driver_Sanity_Check.sh ] && /etc/SelfHeal_Driver_Sanity_Check.sh &
-self_heal_waninterface_ipv6_addressConflict
-
-STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
-TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
-echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec (cron)"
-exit 0
+#exit 0

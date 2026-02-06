@@ -461,8 +461,14 @@ CosaDmlGetSelfHealCfg(
 #if defined(_COSA_BCM_MIPS_)
             v_secure_system("/lib/rdk/xf3_wifi_self_heal.sh &");
 #endif
-	    //v_secure_system("/usr/ccsp/tad/resource_monitor.sh &"); Moving to cron
-            //v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &"); Moving to cron
+            syscfg_get( NULL, "SelfHealCronEnable", buf, sizeof(buf));
+            CcspTraceInfo(("SelfHealCronEnable value is %s\n", buf));
+            if( strcmp(buf, "false") == 0 )
+            {
+				CcspTraceInfo(("SelfHealCronEnable is disabled, running as background process\n"));
+	            //v_secure_system("/usr/ccsp/tad/resource_monitor.sh &"); Moving to cron
+                v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &");
+			}
 	}  
 
 	rc = memset_s(buf,sizeof(buf),0,sizeof(buf));
