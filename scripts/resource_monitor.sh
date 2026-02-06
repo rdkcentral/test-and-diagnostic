@@ -42,6 +42,7 @@ DELAY=30
 threshold_reached=0
 SELFHEAL_ENABLE=`syscfg get selfheal_enable`
 COUNT=0
+BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
 
 sysevent set atom_hang_count 0
 
@@ -53,10 +54,7 @@ resource_monitor_interval() {
 	RESOURCE_MONITOR_INTERVAL=$(($RESOURCE_MONITOR_INTERVAL*60))
 }
 
-	#sleep $RESOURCE_MONITOR_INTERVAL Moved to cron
-
-  #      BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
-        #IHC should be called once when a reboot happens
+#IHC should be called once when a reboot happens
 health_check_on_bootup() {
         if [ $BOOTUP_TIME_SEC -ge 800 ] && [ $BOOTUP_TIME_SEC -le 1100 ] && [ "$Last_reboot_reason" = "Software_upgrade" ]
         then
@@ -104,7 +102,7 @@ health_check_on_bootup() {
 
 		rebootNeeded RM MEM $reason $rebootCount
 	fi
-}
+
 	# Avg CPU usage reading from /proc/stat
 #	AvgCpuUsed=`grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print usage }'`
 #	AvgCpuUsed=`echo $AvgCpuUsed | cut -d "." -f1`
@@ -117,7 +115,6 @@ health_check_on_bootup() {
 #	echo "[`getDateTime`] RDKB_CPU_USAGE : CPU usage is $AvgCpuUsed"
 
 #Record the start statistics
-statemonitor_cpu() {
 	STARTSTAT=$(getstat)
 	
 	user_ini=`echo $STARTSTAT | cut -d 'x' -f 1`
@@ -376,9 +373,8 @@ statemonitor_cpu() {
 		fi
 fi
 
-}
+
 # Checking fans rotor lock. If not running log the telemetry string.
-Box_type() {
     if [ "$BOX_TYPE" == "WNXL11BWL" ] || [ "$BOX_TYPE" == "SE501" ]; then
 	    if [ "x$THERMALCTRL_ENABLE" == "xtrue" ]; then
 		    /bin/sh /usr/ccsp/tad/check_fan.sh
@@ -510,8 +506,7 @@ Box_type() {
     fi
 }
 
-BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
-CRON_ENABLED=$(syscfg get SelfHealCronEnable)
+CRON_ENABLED=`syscfg get X_RDKCENTRAL-COM_LastRebootReason`
 RESOURCE_MONITOR_INTERVAL=`syscfg get resource_monitor_interval`
 
 if [ "$CRON_ENABLED" = "true" ]; then
@@ -521,14 +516,13 @@ if [ "$CRON_ENABLED" = "true" ]; then
         echo "Device uptime is less than 15 minutes. Skipping execution."
         exit 0
     fi
-	if [ "$(syscfg get selfheal_enable)" != "true" ]; then
+ # Check if selfheal is enabled or not   
+    if [ "$(syscfg get selfheal_enable)" != "true" ]; then
         echo_t "[RDKB_AGG_SELFHEAL] : selfheal_enable != true, exiting"
         exit 0
     fi
 	resource_monitor_interval
 	health_check_on_bootup
-	statemonitor_cpu
-	Box_type
 	exit 0
 
 else
@@ -539,11 +533,9 @@ else
         sleep $WAIT_TIME
     fi
 	while [ $SELFHEAL_ENABLE = "true" ]
-    do
+        do
 	   resource_monitor_interval
 	   sleep $RESOURCE_MONITOR_INTERVAL
 	   health_check_on_bootup
-	   statemonitor_cpu
-	   Box_type
 	done
 fi

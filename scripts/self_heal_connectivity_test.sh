@@ -606,7 +606,7 @@ CommonPingTest() {
 
 SELFHEAL_ENABLE=`syscfg get selfheal_enable`
 
-CRON_ENABLED=$(syscfg get SelfHealCronEnable)
+CRON_ENABLED=`syscfg get SelfHealCronEnable`
 
 if [ "$CRON_ENABLED" = "true" ]; then
     # Check if device uptime is at least 15 minutes (900 seconds)
