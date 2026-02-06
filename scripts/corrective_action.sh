@@ -880,10 +880,10 @@ resetNeeded()
                        kill -9 "$SelfHealScript_PID"
                     fi
 
-                    SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
-                    if [ "$SelfHealScript_PID" != "" ]; then
-                        kill -9 "$SelfHealScript_PID"
-                    fi
+                 #   SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
+                    #if [ "$SelfHealScript_PID" != "" ]; then
+                    #    kill -9 "$SelfHealScript_PID"
+                   # fi
 		        fi
 
                 cd /usr/ccsp/tad

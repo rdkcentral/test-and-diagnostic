@@ -463,7 +463,7 @@ CosaDmlGetSelfHealCfg(
 			syscfg_get( NULL, "SelfHealCronEnable", temp, sizeof(temp));
 			if ( strcmp(temp, "false") == 0 ) {
                v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &");
-	           v_secure_system("/usr/ccsp/tad/resource_monitor.sh &");
+	          // v_secure_system("/usr/ccsp/tad/resource_monitor.sh &");
                v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &");
 			}
 	}  

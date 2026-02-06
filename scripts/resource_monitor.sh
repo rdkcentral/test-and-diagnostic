@@ -42,20 +42,26 @@ DELAY=30
 threshold_reached=0
 SELFHEAL_ENABLE=`syscfg get selfheal_enable`
 COUNT=0
-BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
 
 sysevent set atom_hang_count 0
 
-resource_monitor_interval() {
+if [ "$(syscfg get selfheal_enable)" != "true" ]; then
+    echo_t "[RDKB_AGG_SELFHEAL] : selfheal_enable != true, exiting"
+    exit 0
+fi
+
+
+	RESOURCE_MONITOR_INTERVAL=`syscfg get resource_monitor_interval`
 	if [ "$RESOURCE_MONITOR_INTERVAL" = "" ]
 	then
 		RESOURCE_MONITOR_INTERVAL=15
 	fi 
 	RESOURCE_MONITOR_INTERVAL=$(($RESOURCE_MONITOR_INTERVAL*60))
-}
 
-#IHC should be called once when a reboot happens
-health_check_on_bootup() {
+	#sleep $RESOURCE_MONITOR_INTERVAL Moved to cron
+
+        BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
+        #IHC should be called once when a reboot happens
         if [ $BOOTUP_TIME_SEC -ge 800 ] && [ $BOOTUP_TIME_SEC -le 1100 ] && [ "$Last_reboot_reason" = "Software_upgrade" ]
         then
             IHC_Enable="`syscfg get IHC_Mode`"
@@ -102,7 +108,6 @@ health_check_on_bootup() {
 
 		rebootNeeded RM MEM $reason $rebootCount
 	fi
-
 	# Avg CPU usage reading from /proc/stat
 #	AvgCpuUsed=`grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print usage }'`
 #	AvgCpuUsed=`echo $AvgCpuUsed | cut -d "." -f1`
@@ -115,6 +120,7 @@ health_check_on_bootup() {
 #	echo "[`getDateTime`] RDKB_CPU_USAGE : CPU usage is $AvgCpuUsed"
 
 #Record the start statistics
+
 	STARTSTAT=$(getstat)
 	
 	user_ini=`echo $STARTSTAT | cut -d 'x' -f 1`
@@ -373,49 +379,48 @@ health_check_on_bootup() {
 		fi
 fi
 
-
 # Checking fans rotor lock. If not running log the telemetry string.
-    if [ "$BOX_TYPE" == "WNXL11BWL" ] || [ "$BOX_TYPE" == "SE501" ]; then
-	    if [ "x$THERMALCTRL_ENABLE" == "xtrue" ]; then
-		    /bin/sh /usr/ccsp/tad/check_fan.sh
-	    fi
-    fi
+if [ "$BOX_TYPE" == "WNXL11BWL" ] || [ "$BOX_TYPE" == "SE501" ]; then
+	if [ "x$THERMALCTRL_ENABLE" == "xtrue" ]; then
+		/bin/sh /usr/ccsp/tad/check_fan.sh
+	fi
+fi
 
-    if [ "$BOX_TYPE" = "XB3" ] ; then
-    ####################################################
-    #Logic:We will read ATOM load average on ARM side using rpcclient, 
-    #	based on the load average threshold value,reboot the box.
-    Curr_AtomLoad_Avg=`rpcclient $ATOM_ARPING_IP "cat /proc/loadavg" | sed '4q;d'`
-    Load_Avg1=`echo $Curr_AtomLoad_Avg | awk  '{print $1}'`
-    Load_Avg10=`echo $Curr_AtomLoad_Avg | awk  '{print $2}'`
-    Load_Avg15=`echo $Curr_AtomLoad_Avg | awk  '{print $3}'`
-    # Calculate value of AtomHighLoad threshold for an hour based on RESOURCE_MONITOR_INTERVAL
-    AtomHighLoadCountThreshold=$((3600/$RESOURCE_MONITOR_INTERVAL))
-    if [ "$AtomHighLoadCountThreshold" -eq 0 ]; then
-        AtomHighLoadCountThreshold=1
-    fi
-        if [ ${Load_Avg1%%.*} -ge 5 ] && [ ${Load_Avg10%%.*} -ge 5 ] && [ ${Load_Avg15%%.*} -ge 5 ]; then
-            if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ]; then
-                AtomHighLoadCount=$(($AtomHighLoadCount + 1))
-                echo_t "RDKB_SELFHEAL : ATOM_HIGH_LOADAVG detected. $AtomHighLoadCount / $AtomHighLoadCountThreshold"
-                if [ "$AtomHighLoadCount" -ge "$AtomHighLoadCountThreshold" ]; then
-		        #echo_t "Setting Last reboot reason as ATOM_HIGH_LOADAVG"
-                    reason="ATOM_HIGH_LOADAVG"
-		        rebootCount=1
-		        #setRebootreason $reason $rebootCount
-		        rebootNeeded RM ATOM_HIGH_LOADAVG $reason $rebootCount
-                fi
-                else
-	            #echo_t "Setting Last reboot reason as ATOM_HIGH_LOADAVG"
-                    reason="ATOM_HIGH_LOADAVG"
-                    rebootCount=1
-	            #setRebootreason $reason $rebootCount
-	            rebootNeeded RM ATOM_HIGH_LOADAVG $reason $rebootCount
-                fi
-            else
-                AtomHighLoadCount=0
+if [ "$BOX_TYPE" = "XB3" ] ; then
+####################################################
+#Logic:We will read ATOM load average on ARM side using rpcclient, 
+#	based on the load average threshold value,reboot the box.
+Curr_AtomLoad_Avg=`rpcclient $ATOM_ARPING_IP "cat /proc/loadavg" | sed '4q;d'`
+Load_Avg1=`echo $Curr_AtomLoad_Avg | awk  '{print $1}'`
+Load_Avg10=`echo $Curr_AtomLoad_Avg | awk  '{print $2}'`
+Load_Avg15=`echo $Curr_AtomLoad_Avg | awk  '{print $3}'`
+# Calculate value of AtomHighLoad threshold for an hour based on RESOURCE_MONITOR_INTERVAL
+AtomHighLoadCountThreshold=$((3600/$RESOURCE_MONITOR_INTERVAL))
+if [ "$AtomHighLoadCountThreshold" -eq 0 ]; then
+    AtomHighLoadCountThreshold=1
+fi
+    if [ ${Load_Avg1%%.*} -ge 5 ] && [ ${Load_Avg10%%.*} -ge 5 ] && [ ${Load_Avg15%%.*} -ge 5 ]; then
+        if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ]; then
+            AtomHighLoadCount=$(($AtomHighLoadCount + 1))
+            echo_t "RDKB_SELFHEAL : ATOM_HIGH_LOADAVG detected. $AtomHighLoadCount / $AtomHighLoadCountThreshold"
+            if [ "$AtomHighLoadCount" -ge "$AtomHighLoadCountThreshold" ]; then
+		#echo_t "Setting Last reboot reason as ATOM_HIGH_LOADAVG"
+                reason="ATOM_HIGH_LOADAVG"
+		rebootCount=1
+		#setRebootreason $reason $rebootCount
+		rebootNeeded RM ATOM_HIGH_LOADAVG $reason $rebootCount
             fi
+        else
+	    #echo_t "Setting Last reboot reason as ATOM_HIGH_LOADAVG"
+            reason="ATOM_HIGH_LOADAVG"
+            rebootCount=1
+	    #setRebootreason $reason $rebootCount
+	    rebootNeeded RM ATOM_HIGH_LOADAVG $reason $rebootCount
         fi
+    else
+        AtomHighLoadCount=0
+    fi
+fi
 
 ####################################################
 	
@@ -504,38 +509,4 @@ fi
             t2ValNotify "SlabUsage_split" "${8},${7},${16},${15},${24},${23}"
         )
     fi
-}
-
-CRON_ENABLED=`syscfg get X_RDKCENTRAL-COM_LastRebootReason`
-RESOURCE_MONITOR_INTERVAL=`syscfg get resource_monitor_interval`
-
-if [ "$CRON_ENABLED" = "true" ]; then
-	echo_t "[RDKB_AGG_SELFHEAL] : SelfHeal Cron is enabled"
-# Check if device uptime is at least 15 minutes (900 seconds)
-    if [ "$BOOTUP_TIME_SEC" -lt 900 ]; then
-        echo "Device uptime is less than 15 minutes. Skipping execution."
-        exit 0
-    fi
- # Check if selfheal is enabled or not   
-    if [ "$(syscfg get selfheal_enable)" != "true" ]; then
-        echo_t "[RDKB_AGG_SELFHEAL] : selfheal_enable != true, exiting"
-        exit 0
-    fi
-	resource_monitor_interval
-	health_check_on_bootup
-	exit 0
-
-else
-	echo_t "[RDKB_AGG_SELFHEAL] : SelfHeal Cron is disabled"
-	if [ "$BOOTUP_TIME_SEC" -lt 900 ]; then
-        WAIT_TIME=$((900 - BOOTUP_TIME_SEC))
-        echo "Uptime is $BOOTUP_TIME_SEC. Waiting $WAIT_TIME seconds..."
-        sleep $WAIT_TIME
-    fi
-	while [ $SELFHEAL_ENABLE = "true" ]
-        do
-	   resource_monitor_interval
-	   sleep $RESOURCE_MONITOR_INTERVAL
-	   health_check_on_bootup
-	done
-fi
+exit 0

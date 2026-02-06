@@ -29,14 +29,14 @@ source /lib/rdk/t2Shared_api.sh
 
 exec 3>&1 4>&2 >>$SELFHEALFILE 2>&1
 
-SELFHEAL_CRON_ENABLE=$(syscfg get SelfHealCronEnable)
-if [ "$SELFHEAL_CRON_ENABLE" != "true" ] && [ -f /tmp/.resource_monitor_started ]; then
-       SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
-        if [ -z "$SelfHealScript_PID" ]; then
-		echo_t "RDKB_PROCESS_CRASHED : resource_monitor.sh is not running, need restart"
-                echo_t "Restarting resource monitor script - Testing due to moving the script to cron"
-		t2CountNotify "SYS_SH_ResourceMonitor_restart"
-                $TAD_PATH/resource_monitor.sh &
-        fi
-fi
+#SELFHEAL_CRON_ENABLE=$(syscfg get SelfHealCronEnable)
+#if [ "$SELFHEAL_CRON_ENABLE" != "true" ] && [ -f /tmp/.resource_monitor_started ]; then
+#       SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
+#        if [ -z "$SelfHealScript_PID" ]; then
+#		echo_t "RDKB_PROCESS_CRASHED : resource_monitor.sh is not running, need restart"
+#                echo_t "Restarting resource monitor script - Testing due to moving the script to cron"
+#		t2CountNotify "SYS_SH_ResourceMonitor_restart"
+#                $TAD_PATH/resource_monitor.sh &
+#        fi
+#fi
 

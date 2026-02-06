@@ -76,13 +76,13 @@ if [ $? != 0 ]; then
 				$TAD_PATH/self_heal_connectivity_test.sh &
 			fi
 
-			SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
-			if [ "$SelfHealScript_PID" == "" ]; then
-				echo_t "Restarting resource monitor script"
-				t2CountNotify "SYS_SH_ResourceMonitor_restart"
-				$TAD_PATH/resource_monitor.sh & 
-			fi
-			echo_t "RDKB_SELFHEAL : syscfg DB Testing"	
+			#SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
+			#if [ "$SelfHealScript_PID" == "" ]; then
+			#	echo_t "Restarting resource monitor script"
+			#	t2CountNotify "SYS_SH_ResourceMonitor_restart"
+			#	$TAD_PATH/resource_monitor.sh & 
+			#fi
+			#echo_t "RDKB_SELFHEAL : syscfg DB Testing"	
 		fi
 	else
 	   echo_t "RDKB_SELFHEAL : syscfg DB creation failed"		

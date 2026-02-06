@@ -169,7 +169,7 @@ BOOL SelfHeal_SetParamBoolValue
                 {
                     v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &"); 
 
-                    v_secure_system("/usr/ccsp/tad/resource_monitor.sh &");
+                    //v_secure_system("/usr/ccsp/tad/resource_monitor.sh &");
 
                     v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &");
                 }
@@ -186,7 +186,7 @@ BOOL SelfHeal_SetParamBoolValue
                         v_secure_system("kill -9 %s", buf);
                     }
 
-                    fp = v_secure_popen("r", "busybox pidof resource_monitor.sh");
+                    /*fp = v_secure_popen("r", "busybox pidof resource_monitor.sh");
                     copy_command_output(fp, buf, sizeof(buf));
                     v_secure_pclose(fp);
 
@@ -195,7 +195,7 @@ BOOL SelfHeal_SetParamBoolValue
                     } else {    
 	                CcspTraceWarning(("%s: Stop Resource Monitor script\n", __FUNCTION__));
                         v_secure_system("kill -9 %s", buf);
-                    }   
+                    }   */
 
                     fp = v_secure_popen("r", "busybox pidof selfheal_aggressive.sh");
                     copy_command_output(fp, buf, sizeof(buf));
