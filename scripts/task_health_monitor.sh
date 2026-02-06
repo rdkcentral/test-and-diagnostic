@@ -312,7 +312,7 @@ self_heal_meshAgent_hung() {
 }
 
 # This is a workaround till fork calls are removed from t2
-# Purpose of this selfheal is to kil t2 telemetry2_0 childs if it is :
+# Purpose of this selfheal is to kill t2 telemetry2_0 childs if it is :
 #   1] running for more than 120 sec
 
 detect_and_kill_locked_pids() {
@@ -431,7 +431,7 @@ detect_and_kill_locked_pids() {
       sleep 5
 
       if [ -d "/proc/$pid" ]; then
-        echo "  Forcing SIGKILL $pid"
+        echo_t "  Forcing SIGKILL $pid"
         kill -9 "$pid" 2>/dev/null
         sleep 1
       fi
@@ -446,9 +446,7 @@ detect_and_kill_locked_pids() {
 self_heal_t2() {
 
     restartNeeded=0
-
-	detect_and_kill_locked_pids "telemetry2_0"
-
+    detect_and_kill_locked_pids "telemetry2_0"
     # Floor limit on telemetry2_0 memory usage
     t2MemMax=30000
     # using busybox as different platforms are behaving differently with top command using -mbn1 to get the rss data
