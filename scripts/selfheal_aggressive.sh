@@ -1645,18 +1645,17 @@ then
     exit
 fi
 
-# Single execution for cron - NO LOOP, NO SLEEP
-if [ "$(syscfg get selfheal_enable)" != "true" ]; then
-    echo_t "[RDKB_AGG_SELFHEAL] : selfheal_enable != true, exiting"
-    exit 0
+# Skip during boot (first 15 minutes)
+BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
+if [ ! -f /tmp/selfheal_bootup_completed ] && [ "$BOOTUP_TIME_SEC" -lt 900 ]; then
+        WAIT_TIME=$((900 - BOOTUP_TIME_SEC))
+        echo "Uptime is $BOOTUP_TIME_SEC. Waiting $WAIT_TIME seconds..."
+        sleep $WAIT_TIME
 fi
 
-INTERVAL=$(syscfg get AggressiveInterval)
-
-WAN_INTERFACE=$(getWanInterfaceName)
-BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
 
 Aggressive_Interval() {
+    INTERVAL=$(syscfg get AggressiveInterval)
     if [ "$INTERVAL" = "" ]
     then
         INTERVAL=5
@@ -1665,6 +1664,7 @@ Aggressive_Interval() {
 }
 
 DHCP_Selfheal() {
+    WAN_INTERFACE=$(getWanInterfaceName)
     # DHCPv6 detection (keep your existing logic)
     ti_dhcpv6_type="$(busybox pidof ti_dhcp6c)"
     dibbler_client_type="$(busybox pidof dibbler-client)"
@@ -1698,40 +1698,39 @@ DHCP_Selfheal() {
     [ -f /tmp/started_ssad ] && self_heal_sedaemon
     [ -f /etc/SelfHeal_Driver_Sanity_Check.sh ] && /etc/SelfHeal_Driver_Sanity_Check.sh &
     self_heal_waninterface_ipv6_addressConflict
-
     STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
     echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec (cron)"
 }
 
+SELFHEAL_ENABLE=$(syscfg get selfheal_enable)
+
+cron_mode()
+{
+	if [ "$SELFHEAL_ENABLE" != "true" ]; then
+            echo_t "[RDKB_SELFHEAL] : selfheal_enable != true, exiting"
+            exit 0
+        fi
+        Aggressive_Interval
+        DHCP_Selfheal
+        exit 0
+}
+
+process_mode()
+{
+	echo_t "[RDKB_AGG_SELFHEAL] : Cron not enabled, running as a process"
+        while [ $SELFHEAL_ENABLE = "true" ]
+        do
+            Aggressive_Interval
+            sleep ${INTERVAL}m
+            DHCP_Selfheal
+        done
+}
+
 CRON_ENABLED=$(syscfg get SelfHealCronEnable)
 
 if [ "$CRON_ENABLED" = "true" ]; then
-    # Skip during boot (first 15 minutes)
-    if [ ! -f /tmp/selfheal_bootup_completed ] && [ "$BOOTUP_TIME_SEC" -lt 900 ]; then
-        echo_t "[RDKB_AGG_SELFHEAL] : Still booting, skipping"
-        exit 0
-    fi
-    if [ "$SELFHEAL_ENABLE" != "true" ]; then
-        echo_t "[RDKB_SELFHEAL] : selfheal_enable != true, exiting"
-        exit 0
-    fi
-    Aggressive_Interval
-    DHCP_Selfheal
-    exit 0
-
+	cron_mode
 else
-    echo_t "[RDKB_AGG_SELFHEAL] : Cron not enabled, running as a process"
-    if [ ! -f /tmp/selfheal_bootup_completed ] && [ "$BOOTUP_TIME_SEC" -lt 900 ]; then
-        WAIT_TIME=$((900 - BOOTUP_TIME_SEC))
-        echo "Uptime is $BOOTUP_TIME_SEC. Waiting $WAIT_TIME seconds..."
-        sleep $WAIT_TIME
-    fi
-    while [ $(syscfg get selfheal_enable) = "true" ]
-    do
-        Aggressive_Interval
-        sleep ${INTERVAL}m
-        DHCP_Selfheal
-    done
+	process_mode
 fi
-#exit 0

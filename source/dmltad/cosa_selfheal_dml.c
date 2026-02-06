@@ -155,6 +155,7 @@ BOOL SelfHeal_SetParamBoolValue
         {
             return TRUE;
 	    }
+	    }
 
         if (syscfg_set_commit(NULL, "selfheal_enable", bValue ? "true" : "false") != 0)
         {
@@ -169,34 +170,35 @@ BOOL SelfHeal_SetParamBoolValue
                 CcspTraceInfo(("%s : SelfHealCronEnable is disabled, running as background process\n", __FUNCTION__));
                 if ( bValue == TRUE )
                 {
-                    //v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &"); 
+                    v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &"); 
 
-                    //v_secure_system("/usr/ccsp/tad/resource_monitor.sh &");
+                    v_secure_system("/usr/ccsp/tad/resource_monitor.sh &");
 
                     v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &");
 	            }
                 else
 	            {
-                    //fp = v_secure_popen("r", "busybox pidof self_heal_connectivity_test.sh");
-                    //copy_command_output(fp, buf, sizeof(buf));
-                    // v_secure_pclose(fp);
+                    fp = v_secure_popen("r", "busybox pidof self_heal_connectivity_test.sh");
+                    copy_command_output(fp, buf, sizeof(buf));
+                     v_secure_pclose(fp);
 
-                    //if (!strcmp(buf, "")) {
-	                //CcspTraceWarning(("%s: SelfHeal connectivity test script is not running\n", __FUNCTION__));
-                    //} else {    
-	                    //CcspTraceWarning(("%s: Stop SelfHeal connectivity test script\n", __FUNCTION__));
-                        //v_secure_system("kill -9 %s", buf);
-                    //}
+                    if (!strcmp(buf, "")) {
+	                CcspTraceWarning(("%s: SelfHeal connectivity test script is not running\n", __FUNCTION__));
+                    } else {    
+	                    CcspTraceWarning(("%s: Stop SelfHeal connectivity test script\n", __FUNCTION__));
+                        v_secure_system("kill -9 %s", buf);
+                    }
 
-                    //fp = v_secure_popen("r", "busybox pidof resource_monitor.sh");
-                    //copy_command_output(fp, buf, sizeof(buf));
-                    //v_secure_pclose(fp);
+                    fp = v_secure_popen("r", "busybox pidof resource_monitor.sh");
+                    copy_command_output(fp, buf, sizeof(buf));
+                    v_secure_pclose(fp);
 
-                    //if (!strcmp(buf, "")) {
-	                //CcspTraceWarning(("%s: Resource Monitor script is not running\n", __FUNCTION__));
-                    //} else {    
-	                //CcspTraceWarning(("%s: Stop Resource Monitor script\n", __FUNCTION__));
-                    //v_secure_system("kill -9 %s", buf); 
+                    if (!strcmp(buf, "")) {
+	                CcspTraceWarning(("%s: Resource Monitor script is not running\n", __FUNCTION__));
+                    } else {    
+	                CcspTraceWarning(("%s: Stop Resource Monitor script\n", __FUNCTION__));
+                    v_secure_system("kill -9 %s", buf);
+                    }
 
                     fp = v_secure_popen("r", "busybox pidof selfheal_aggressive.sh");
                     copy_command_output(fp, buf, sizeof(buf));
@@ -210,7 +212,6 @@ BOOL SelfHeal_SetParamBoolValue
                     }
                 }
 
-	        }
             pMyObject->Enable = bValue;
 	    }
         return TRUE;
