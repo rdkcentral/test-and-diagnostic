@@ -61,7 +61,7 @@ fi
 echo_t "Memory fragmentation $MemFragPercentage MemFragThreshold $MemFragThreshold"
 if [ "$MemFragPercentage" -gt "$MemFragThreshold" ]
 then
-	echo_t "Memory fragmentation is more than 50 percent"
+	echo_t "Memory fragmentation is more than $MemFragThreshold percent"
 	echo_t "clear cache and run memory compaction"
 	sync
 	echo 1 > /proc/sys/vm/drop_caches
