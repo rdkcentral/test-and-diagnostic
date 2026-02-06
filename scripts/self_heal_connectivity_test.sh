@@ -47,17 +47,19 @@ getCorrectiveActionState() {
 calcRandTimetoStartPing()
 {
 
-    rand_min=0
-    rand_sec=0
+#    rand_min=0
+#    rand_sec=0
 
     # Calculate random min
-    rand_min=`awk -v min=10 -v max=59 -v seed="$(date +%N)" 'BEGIN{srand(seed);print int(min+rand()*(max-min+1))}'`
+#    rand_min=`awk -v min=10 -v max=59 -v seed="$(date +%N)" 'BEGIN{srand(seed);print int(min+rand()*(max-min+1))}'`
 
     # Calculate random second
-    rand_sec=`awk -v min=0 -v max=59 -v seed="$(date +%N)" 'BEGIN{srand(seed);print int(min+rand()*(max-min+1))}'`
+#    rand_sec=`awk -v min=0 -v max=59 -v seed="$(date +%N)" 'BEGIN{srand(seed);print int(min+rand()*(max-min+1))}'`
 
-    sec_to_sleep=$(($rand_min*60 + $rand_sec))
-    sleep $sec_to_sleep;        
+#    sec_to_sleep=$(($rand_min*60 + $rand_sec))
+    echo_t "self_heal_connectivity_test: cron execution (random sleep removed)"
+    #sleep $sec_to_sleep; 
+        
 }
 
 # A generic function which can be used for any URL parsing
@@ -570,80 +572,39 @@ runPingTest()
 
 }
 
-# Check if device uptime is at least 15 minutes (900 seconds)
-BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
-
-CommonPingTest() {
-    WAN_INTERFACE=$(getWanInterfaceName)
-    wan_status=`sysevent get wan-status`
-    if [ "$wan_status" = "" ] || [ "$wan_status" = "stopped" ]
-    then
-       echo_t "RDKB_SELFHEAL : WAN is not up, bypassing ping test"
-       exit 0
-    fi
-
-    MAPT_CONFIG=`sysevent get mapt_config_flag`
-    if [ "$MAPT_CONFIG" == "set" ]
-    then
-        WAN_INTERFACE_IPV4="map0"
-    fi
-
-    #LTE-1335 runPingTest needs to be run only in extender mode for xle.
-    if [ "$BOX_TYPE" = "WNXL11BWL" ]
-    then
-        xle_device_mode=`syscfg get Device_Mode`
-        if [ "$xle_device_mode" -eq "1" ]; then
-            echo_t "RDKB_SELFHEAL : Device is in Extender mode, calling runPingTest."
-            runPingTest
-        else
-            echo_t "RDKB_SELFHEAL : Device is in Gateway mode, runPingTest is not needed."
-        fi
-    else
-        runPingTest
-    fi
-    runDNSPingTest
-}
-
 SELFHEAL_ENABLE=`syscfg get selfheal_enable`
-
-CRON_ENABLED=`syscfg get SelfHealCronEnable`
-
-if [ "$CRON_ENABLED" = "true" ]; then
-    # Check if device uptime is at least 15 minutes (900 seconds)
-    if [ "$BOOTUP_TIME_SEC" -lt 900 ]; then
-        echo "Device uptime is less than 15 minutes. Skipping execution."
-        exit 0
-    fi
-    if [ "$SELFHEAL_ENABLE" != "true" ]; then
-        echo_t "[RDKB_SELFHEAL] : selfheal_enable != true, exiting"
-        exit 0
-    fi
-    CommonPingTest
+if [ "$SELFHEAL_ENABLE" != "true" ]; then
+    echo_t "[RDKB_SELFHEAL] : selfheal_enable != true, exiting"
     exit 0
-
-else
-    echo_t "[RDKB_SELFHEAL] : selfheal cron disabled, running in while loop"
-	if [ "$BOOTUP_TIME_SEC" -lt 900 ]; then
-        WAIT_TIME=$((900 - BOOTUP_TIME_SEC))
-        echo "Uptime is $BOOTUP_TIME_SEC. Waiting $WAIT_TIME seconds..."
-        sleep $WAIT_TIME
-    fi
-	while [ $SELFHEAL_ENABLE = "true" ]
-	do
-	    if [ "$calcRandom" -eq 1 ] 
-	    then
-            calcRandTimetoStartPing
-		    calcRandom=0
-	    else
-		    INTERVAL=`syscfg get ConnTest_PingInterval`
-            if [ "$INTERVAL" = "" ] 
-		    then
-			    INTERVAL=60
-		    fi
-                INTERVAL=$(($INTERVAL*60))
-		    sleep $INTERVAL
-	    fi
-	    CommonPingTest
-	done
 fi
-     
+
+WAN_INTERFACE=$(getWanInterfaceName)
+wan_status=`sysevent get wan-status`
+if [ "$wan_status" = "" ] || [ "$wan_status" = "stopped" ]
+then
+    echo_t "RDKB_SELFHEAL : WAN is not up, bypassing ping test"
+    exit 0
+fi
+
+MAPT_CONFIG=`sysevent get mapt_config_flag`
+if [ "$MAPT_CONFIG" == "set" ]
+then
+    WAN_INTERFACE_IPV4="map0"
+fi
+
+#LTE-1335 runPingTest needs to be run only in extender mode for xle.
+if [ "$BOX_TYPE" = "WNXL11BWL" ]
+then
+    xle_device_mode=`syscfg get Device_Mode`
+    if [ "$xle_device_mode" -eq "1" ]; then
+        echo_t "RDKB_SELFHEAL : Device is in Extender mode, calling runPingTest."
+        runPingTest
+    else
+        echo_t "RDKB_SELFHEAL : Device is in Gateway mode, runPingTest is not needed."
+    fi
+else
+    runPingTest
+fi
+runDNSPingTest
+
+exit 0

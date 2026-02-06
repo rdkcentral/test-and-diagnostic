@@ -874,17 +874,15 @@ resetNeeded()
 
             elif [ "$SELFHEAL_TYPE" = "BASE" -o "$SELFHEAL_TYPE" = "TCCBR" ] && [ "$ProcessName" = "CcspTandDSsp" ]; then
                 echo_t "RDKB_SELFHEAL : Resetting process $ProcessName"
-                if [ "$(syscfg get SelfHealCronEnable)" != "true" ]; then
-                    SelfHealScript_PID=$(busybox pidof self_heal_connectivity_test.sh)
-                    if [ "$SelfHealScript_PID" != "" ]; then
-                       kill -9 "$SelfHealScript_PID"
-                    fi
+                #SelfHealScript_PID=$(busybox pidof self_heal_connectivity_test.sh)
+                #if [ "$SelfHealScript_PID" != "" ]; then
+                #    kill -9 "$SelfHealScript_PID"
+                #fi
 
-                 #   SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
-                    #if [ "$SelfHealScript_PID" != "" ]; then
-                    #    kill -9 "$SelfHealScript_PID"
-                   # fi
-		        fi
+                #SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
+                #if [ "$SelfHealScript_PID" != "" ]; then
+                #    kill -9 "$SelfHealScript_PID"
+                #fi
 
                 cd /usr/ccsp/tad
                 $BINPATH/CcspTandDSsp -subsys $Subsys
