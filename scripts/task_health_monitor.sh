@@ -313,12 +313,141 @@ self_heal_meshAgent_hung() {
     fi
 }
 
+# This is a workaround till fork calls are removed from t2
+# Purpose of this selfheal is to kill t2 telemetry2_0 childs if it is :
+#   1] running for more than 120 sec
+
+detect_and_kill_locked_pids() {
+  local name="$1" THRESH="${2:-120}"
+
+  if [ -z "$name" ]; then
+    return 2
+  fi
+
+  local pids=$(pidof "$name")
+  if [ -z "$pids" ]; then
+    return 0
+  fi
+
+  local pid_count
+  pid_count=$(set -- $pids; echo $#)
+  if [ "$pid_count" -le 1 ]; then
+    return 0
+  fi
+
+  echo_t "[RDKB_SELFHEAL_T2] Multiple telemetry pids are running $pids"
+
+  # 1. CLK_TCK (USER_HZ) & Uptime
+  # USER_HZ is almost always 100 on Linux regardless of CONFIG_HZ
+  local hz=1000
+  if [ -r /proc/config.gz ]; then
+    local detected_hz=$(zcat /proc/config.gz 2>/dev/null | grep "^CONFIG_HZ=" | cut -d= -f2)
+    if [ -n "$detected_hz" ]; then
+        hz=$detected_hz
+    fi
+  fi
+
+  local uptime_sec=$(awk '{print int($1)}' /proc/uptime)
+
+  # 2. Identify Parent (prefer multi-threaded; fallback to oldest)
+  local parent=""
+  local oldest_pid=""
+  local oldest_start_ticks=""
+
+  for pid in $pids; do
+    if [ ! -r "/proc/$pid/stat" ]; then
+        continue
+    fi
+
+    local stat_data=$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null)
+    if [ -z "$stat_data" ]; then
+        continue
+    fi
+
+    local start_ticks=$(echo "$stat_data" | cut -d' ' -f20)
+    if [ -z "$start_ticks" ]; then
+        continue
+    fi
+
+    # Track oldest (smallest start_ticks)
+    if [ -z "$oldest_pid" ] || [ "$start_ticks" -lt "$oldest_start_ticks" ]; then
+      oldest_pid="$pid"
+      oldest_start_ticks="$start_ticks"
+    fi
+
+    # Prefer "multi-threaded" heuristic if present
+    if [ -z "$parent" ]; then
+        if [ -d "/proc/$pid/task" ]; then
+            local task_count=$(ls "/proc/$pid/task" 2>/dev/null | wc -l)
+            if [ "$task_count" -gt 1 ]; then
+                parent="$pid"
+            fi
+        fi
+    fi
+  done
+
+  echo_t "[RDKB_SELFHEAL_T2] Received Parent PID: $parent, Oldest PID: $oldest_pid"
+
+  if [ -z "$parent" ]; then
+    parent="$oldest_pid"
+  fi
+
+  if [ -z "$parent" ]; then
+    return 0
+  fi
+
+  echo_t "[RDKB_SELFHEAL_T2] Selected Parent PID: $parent"
+
+  # 3. Loop Children
+  for pid in $pids; do
+    # Skip if it is the parent or process is already gone
+    if [ "$pid" = "$parent" ]; then
+        continue
+    fi
+    if [ ! -d "/proc/$pid" ]; then
+        continue
+    fi
+
+    local stat_data=$(sed 's/.*) //' "/proc/$pid/stat" 2>/dev/null)
+    if [ -z "$stat_data" ]; then
+        continue
+    fi
+
+    local state=$(echo "$stat_data" | cut -d' ' -f1)
+    local ppid=$(echo "$stat_data" | cut -d' ' -f2)
+    local start_ticks=$(echo "$stat_data" | cut -d' ' -f20)
+
+    if [ "$ppid" != "$parent" ]; then
+        continue
+    fi
+
+    # Calculate Age
+    local started_sec=$(( start_ticks / hz ))
+    local elapsed=$(( uptime_sec - started_sec ))
+
+    # 4. Action Logic
+    if [ "$elapsed" -ge "$THRESH" ]; then
+      echo_t "[RDKB_SELFHEAL_T2] : PID $pid: State=$state, Age=${elapsed}s (Kill Triggered)"
+
+      kill -15 "$pid" 2>/dev/null
+      sleep 5
+
+      if [ -d "/proc/$pid" ]; then
+        echo_t "  Forcing SIGKILL $pid"
+        kill -9 "$pid" 2>/dev/null
+        sleep 1
+      fi
+    fi
+  done
+}
+
 # This is a workaround to be out of the finger pointing state of telemetry2_0 being in between generic KP monitoring and uncontrolled profile assignments from cloud
 # Purpose of this selfheal is to restart telemetry2_0 if it is :
 #   1] Consuming more memory than the threshold
 #   2] Stops reporting due to issues external to telemetry2_0 causing it to go to hung state
 self_heal_t2() {
 
+    detect_and_kill_locked_pids "telemetry2_0"
     restartNeeded=0
 
     # Floor limit on telemetry2_0 memory usage
@@ -363,9 +492,10 @@ self_heal_t2() {
 
     # Check for rbus communication failure
     ERROR_STRING="rbus_set Failed for \[Telemetry.ReportProfiles.EventMarker\]"
+    ERROR_STRING_NEW="Caching the event to File"
     telemetry2_0_client "TEST_RT_CONNECTION" "1" > /tmp/t2_test_broker_health 2>&1
     if [ -f /tmp/t2_test_broker_health ]; then
-        if [ `grep -c "$ERROR_STRING" /tmp/t2_test_broker_health` -gt 0 ]; then
+	if [ `grep -c "$ERROR_STRING" /tmp/t2_test_broker_health` -gt 0 ] || [ `grep -c "$ERROR_STRING_NEW" /tmp/t2_test_broker_health` -gt 0 ]; then
             echo_t "[RDKB_SELFHEAL] : telemetry2_0 is hung at rbus queries. Set restart flag for telemetry2_0."
             restartNeeded=1
         fi
