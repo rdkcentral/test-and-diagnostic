@@ -24,7 +24,6 @@
 #include "safec_lib_common.h"
 #include <syscfg/syscfg.h>
 #include "secure_wrapper.h"
-#include "ccsp_base_api.h"
 
 #define DEFAULT_MONITOR_INTERVAL    15 /* in minute */ 
 #define DEFAULT_CPU_THRESHOLD       100 /* in percentage */
