@@ -74,6 +74,7 @@
 #include "safec_lib_common.h"
 #include <syscfg/syscfg.h>
 #include "secure_wrapper.h"
+#include "ccsp_base_api.h"
 
 static char *Ipv4_Server ="Ipv4_PingServer_%d";
 static char *Ipv6_Server ="Ipv6_PingServer_%d";
@@ -457,12 +458,17 @@ CosaDmlGetSelfHealCfg(
 	pMyObject->Enable = (!strcmp(buf, "true")) ? TRUE : FALSE;
         if ( pMyObject->Enable == TRUE )
         {
-            v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &");
 #if defined(_COSA_BCM_MIPS_)
             v_secure_system("/lib/rdk/xf3_wifi_self_heal.sh &");
 #endif
-	    v_secure_system("/usr/ccsp/tad/resource_monitor.sh &");
-            v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &");
+	        buf[0]='\0';
+            syscfg_get( NULL, "SelfHealCronEnable", buf, sizeof(buf));
+            CcspTraceInfo(("SelfHealCronEnable value is %s\n", buf));
+            if( strcmp(buf, "false") == 0 )
+            {
+		        CcspTraceInfo(("SelfHealCronEnable is disabled, running as background process\n"));
+		        start_self_heal_scripts();
+	        }
 	}  
 
 	rc = memset_s(buf,sizeof(buf),0,sizeof(buf));
