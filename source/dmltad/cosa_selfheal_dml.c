@@ -2264,7 +2264,7 @@ BOOL MemoryIncreaseDetection_GetParamBoolValue
         }
         
         // Read enable state from config file
-        CosaReadProcAnalConfig("FEATURE.CPUPROCANALYZER.MemoryIncreaseDetection.Enable", res);
+        CosaReadProcAnalConfig("MemoryIncreaseDetection.Enable", res);
         if (res[0] == '1')
             *bValue = TRUE;
         else
@@ -2328,7 +2328,7 @@ BOOL MemoryIncreaseDetection_SetParamBoolValue
                 else
                 {
                     // Save enable state to config
-                    CosaWriteProcAnalConfig("FEATURE.CPUPROCANALYZER.MemoryIncreaseDetection.Enable", "1");
+                    CosaWriteProcAnalConfig("MemoryIncreaseDetection.Enable", "1");
                     CcspTraceInfo(("%s: MemoryIncreaseDetection enabled and started\n", __FUNCTION__));
                 }
             }
@@ -2349,7 +2349,7 @@ BOOL MemoryIncreaseDetection_SetParamBoolValue
             v_secure_system("rm -f /tmp/bucket_status.txt");
             
             // Save disabled state to config
-            CosaWriteProcAnalConfig("FEATURE.CPUPROCANALYZER.MemoryIncreaseDetection.Enable", "0");
+            CosaWriteProcAnalConfig("MemoryIncreaseDetection.Enable", "0");
             
             CcspTraceInfo(("%s: MemoryIncreaseDetection disabled and stopped\n", __FUNCTION__));
         }
@@ -2387,7 +2387,7 @@ MemoryIncreaseDetection_GetParamUlongValue
 {
     char res[BUF_64] = {0};
     char *ptr = NULL;
-    if( (strcmp(ParamName, "Intervals") == 0) || (strcmp(ParamName, "RSSThreshold") == 0) )
+    if( (strcmp(ParamName, "Interval") == 0) || (strcmp(ParamName, "RSSThreshold") == 0) )
     {
         CosaReadProcAnalConfig(ParamName, res);
         *puLong = strtoul(res,&ptr,10);
@@ -2424,12 +2424,18 @@ MemoryIncreaseDetection_SetParamUlongValue
         ULONG                       uValue
     )
 {
-    if( (strcmp(ParamName, "Intervals") == 0) || (strcmp(ParamName, "RSSThreshold") == 0) )
+    if( (strcmp(ParamName, "Interval") == 0) || (strcmp(ParamName, "RSSThreshold") == 0) )
     {
-        char res[24];
+        char key[24], res[24];
+        snprintf(key, sizeof(key), "MemoryIncreaseDetection.%s", ParamName);
         snprintf(res, sizeof(res), "%lu", uValue);
-        CosaWriteProcAnalConfig(ParamName, res);
-        CcspTraceWarning(("%s - ProcAnalyzer setting Interval of %s for MemmoryIncreaseDectection \n", res, __FUNCTION__));
+        CosaWriteProcAnalConfig(key, res);
+        if (strcmp(ParamName, "Interval") == 0) {
+            CcspTraceInfo(("%s - ProcAnalyzer setting Interval of %s for MemoryIncreaseDectection \n", res, __FUNCTION__));
+        }
+        else {
+            CcspTraceInfo(("%s - ProcAnalyzer setting RSSThreshold of %s for MemoryIncreaseDectection \n", res, __FUNCTION__));
+        }
     }
     else
     {
@@ -2476,7 +2482,7 @@ MemoryIncreaseDetection_GetParamStringValue
     BOOL isEnabled = FALSE;
     
     // Read enable state directly from config file
-    CosaReadProcAnalConfig("FEATURE.CPUPROCANALYZER.MemoryIncreaseDetection.Enable", enableCheck);
+    CosaReadProcAnalConfig("MemoryIncreaseDetection.Enable", enableCheck);
     if (enableCheck[0] == '1')
     {
         isEnabled = TRUE;
