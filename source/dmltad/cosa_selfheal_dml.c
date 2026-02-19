@@ -2426,7 +2426,7 @@ MemoryIncreaseDetection_SetParamUlongValue
 {
     if( (strcmp(ParamName, "Interval") == 0) || (strcmp(ParamName, "RSSThreshold") == 0) )
     {
-        char key[24], res[24];
+        char key[48], res[24];
         snprintf(key, sizeof(key), "MemoryIncreaseDetection.%s", ParamName);
         snprintf(res, sizeof(res), "%lu", uValue);
         CosaWriteProcAnalConfig(key, res);
