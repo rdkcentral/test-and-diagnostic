@@ -2389,8 +2389,13 @@ MemoryIncreaseDetection_GetParamUlongValue
     char *ptr = NULL;
     if( (strcmp(ParamName, "Interval") == 0) || (strcmp(ParamName, "RSSThreshold") == 0) )
     {
-        CosaReadProcAnalConfig(ParamName, res);
-        *puLong = strtoul(res,&ptr,10);
+        if (strcmp(ParamName, "Interval") == 0) {
+            CosaReadProcAnalConfig("MemoryIncreaseDetection.Interval", res);
+        }
+        else {
+            CosaReadProcAnalConfig("MemoryIncreaseDetection.RSSThreshold", res);
+        }
+        *puLong = strtoul(res, &ptr, 10);
         return TRUE;
     }
     return FALSE;
@@ -2426,15 +2431,15 @@ MemoryIncreaseDetection_SetParamUlongValue
 {
     if( (strcmp(ParamName, "Interval") == 0) || (strcmp(ParamName, "RSSThreshold") == 0) )
     {
-        char key[48], res[24];
-        snprintf(key, sizeof(key), "MemoryIncreaseDetection.%s", ParamName);
+        char res[24] = {0};
         snprintf(res, sizeof(res), "%lu", uValue);
-        CosaWriteProcAnalConfig(key, res);
         if (strcmp(ParamName, "Interval") == 0) {
-            CcspTraceInfo(("%s - ProcAnalyzer setting Interval of %s for MemoryIncreaseDectection \n", res, __FUNCTION__));
+            CosaWriteProcAnalConfig("MemoryIncreaseDetection.Interval", res);
+            CcspTraceInfo(("%s - ProcAnalyzer setting Interval of %s for MemoryIncreaseDectection \n", __FUNCTION__, res));
         }
         else {
-            CcspTraceInfo(("%s - ProcAnalyzer setting RSSThreshold of %s for MemoryIncreaseDectection \n", res, __FUNCTION__));
+            CosaWriteProcAnalConfig("MemoryIncreaseDetection.RSSThreshold", res);
+            CcspTraceInfo(("%s - ProcAnalyzer setting RSSThreshold of %s for MemoryIncreaseDectection \n", __FUNCTION__, res));
         }
     }
     else
