@@ -248,7 +248,7 @@ int LowLatency_Set_TCP_Stats_Report(char* new_val) {
 **********************************************************************************/
 int LowLatency_Set_PercentileCalc_Enable(bool new_val)
 {
-	CcspTraceInfo(("'%s': setting value '%d'\n", __FUNCTION__, new_val));
+	CcspTraceInfo(("'%s': setting value '%d'\n", new_val));
 	// fetch previous value
 	bool old_val = LowLatencyInfo.PercentileCalc_Enable;
 	//update and publish the value
