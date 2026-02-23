@@ -1645,19 +1645,8 @@ then
     exit
 fi
 
-while [ $(syscfg get selfheal_enable) = "true" ]
-do
-    INTERVAL=$(syscfg get AggressiveInterval)
-
-    if [ "$INTERVAL" = "" ]
-    then
-        INTERVAL=5
-    fi
-    echo_t "[RDKB_AGG_SELFHEAL] : INTERVAL is: $INTERVAL"
-    sleep ${INTERVAL}m
-    
+DHCP_Selfheal() {
     WAN_INTERFACE=$(getWanInterfaceName)
-
     BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     # This Feature is only enabled on devices that have Comcast Product Requirement to be up[ WEB PA Up] within 3:00
     if [ ! -f /tmp/selfheal_bootup_completed ] && [ $BOOTUP_TIME_SEC -lt 180 ] ; then
@@ -1716,4 +1705,44 @@ do
     STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
     echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec"
-done
+}
+
+cron_mode()
+{
+	echo_t "[RDKB_AGG_SELFHEAL] : Cron job is enabled"
+	# skip during boot of first 15 minutes
+	BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
+	if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
+            echo_t "[RDKB_AGG_SELFHEAL] : Still booting, skipping"
+            exit 0
+        fi
+
+	if [ "$(syscfg get selfheal_enable)" != "true" ]; then
+            echo_t "[RDKB_SELFHEAL] : selfheal_enable != true, exiting"
+            exit 0
+        fi
+        
+        DHCP_Selfheal
+        exit 0
+}
+
+process_mode()
+{
+	echo_t "[RDKB_AGG_SELFHEAL] : Cron not enabled, running as a process"
+	while [ $(syscfg get selfheal_enable) = "true" ]
+        do
+		INTERVAL=$(syscfg get AggressiveInterval)
+		[ -z "$INTERVAL" ] && INTERVAL=5
+                echo_t "[RDKB_AGG_SELFHEAL] : INTERVAL is: $INTERVAL"
+                sleep ${INTERVAL}m
+                DHCP_Selfheal
+        done
+}
+
+CRON_ENABLED=$(syscfg get SelfHealCronEnable)
+
+if [ "$CRON_ENABLED" = "true" ]; then
+	cron_mode
+else
+	process_mode
+fi
