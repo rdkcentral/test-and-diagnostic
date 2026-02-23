@@ -121,7 +121,7 @@ void start_self_heal_scripts() {
 }
 /* Stop all self-heal scripts */
 void stop_self_heal_scripts() {
-    char buf[64];
+    char buf[64] = {0};
 	FILE *fp = NULL;
     for (size_t i = 0; i < SCRIPT_COUNT; i++) {
 		fp = v_secure_popen("r", "busybox pidof %s", SELF_HEAL_SCRIPTS[i]);
