@@ -3,7 +3,7 @@
 # If not stated otherwise in this file or this component's Licenses.txt file the
 # following copyright and licenses apply:
 
-#  Copyright 2018 RDK Management
+#  Copyright 2026 RDK Management
 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,4 +30,39 @@ if [ ! -f "$MODE_FILE" ]; then
         echo "PROCESS" > "$MODE_FILE"
     fi
 fi
-SAVED_MODE=$(cat "$MODE_FILE")
+SELFHEAL_EXECUTION_MODE=$(cat "$MODE_FILE")
+
+# Usage: acquire_lock "LOCK_NAME" "SCRIPT_FILENAME"
+acquire_lock() {
+    LOCK_NAME="$1"
+    SCRIPT_NAME="$2"
+    LOCKDIR="/tmp/${LOCK_NAME}.lock"
+    PIDFILE="$LOCKDIR/pid"
+
+    # Try to acquire the lock atomically
+    if mkdir "$LOCKDIR" 2>/dev/null; then
+        echo "$$" > "$PIDFILE"
+        trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
+    else
+        pid="$(cat "$PIDFILE" 2>/dev/null)"
+
+        if [ -n "$pid" ] && [ -d "/proc/$pid" ]; then
+            cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)"
+
+            case "$cmd" in
+                *"$SCRIPT_NAME"*)
+                    echo_t "$SCRIPT_NAME already running (pid=$pid); skipping"
+                    exit 0
+                    ;;
+            esac
+        fi
+
+        # Stale lock recovery
+        echo_t "Stale lock detected for $SCRIPT_NAME; cleaning up"
+        rm -rf "$LOCKDIR" 2>/dev/null
+        mkdir "$LOCKDIR" || exit 1
+        echo "$$" > "$PIDFILE"
+        trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
+    fi
+    echo_t "$SCRIPT_NAME lock acquired (pid=$$)"
+}

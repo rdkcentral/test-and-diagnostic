@@ -58,7 +58,7 @@ calcRandTimetoStartPing()
 
     sec_to_sleep=$(($rand_min*60 + $rand_sec))
     echo_t "self_heal_connectivity_test is going into sleep for $sec_to_sleep sec"
-    sleep $sec_to_sleep; 
+    sleep $sec_to_sleep;
         
 }
 
@@ -574,7 +574,6 @@ runPingTest()
 
 SELFHEAL_ENABLE=$(syscfg get selfheal_enable)
 BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
-CRON_ENABLED=$(syscfg get SelfHealCronEnable)
 
 run_connectivity_test() {
     WAN_INTERFACE=$(getWanInterfaceName)
@@ -606,20 +605,11 @@ run_connectivity_test() {
     runDNSPingTest
 }
 
-
 cron_mode()
 {
-	LOCKDIR="/tmp/self_heal_conn_test.lockdir"
-    if ! mkdir "$LOCKDIR" 2>/dev/null; then
-       echo_t "Already a cron instance is running; No 2nd instance"
-       exit 0
-    fi
-    echo_t "Cron instance started"
-    cleanup() { rmdir "$LOCKDIR" 2>/dev/null || true; }
-    trap cleanup EXIT
-
-	echo_t "RDKB_CONN_SELFHEAL : Cron job is enabled"
-	if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
+    acquire_lock "self_heal_connectivity_test" "self_heal_connectivity_test.sh"
+    echo_t "RDKB_CONN_SELFHEAL : Cron job is enabled"
+    if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
             echo_t "[RDKB_CONN_SELFHEAL] : Still booting, skipping"
             exit 0
         fi
@@ -650,7 +640,7 @@ process_mode()
 	 done
 }
 
-if [ "$SAVED_MODE" = "CRON" ]; then
+if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
     cron_mode
 else
     process_mode

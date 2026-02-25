@@ -183,6 +183,7 @@ void manage_self_heal_cron_state(BOOL isEnabled) {
         {"resource_monitor_recover.sh", NULL, 5}
     };
 
+	size_t selfheal_script_count = sizeof(self_heal_scripts) / sizeof(self_heal_scripts[0]);
 	size_t recovery_script_count = sizeof(recovery_scripts) / sizeof(recovery_scripts[0]);
 
     if (isEnabled) {
@@ -191,13 +192,13 @@ void manage_self_heal_cron_state(BOOL isEnabled) {
         for (size_t i = 0; i < recovery_script_count; i++) update_cron_entry(recovery_scripts[i].name, 0, false);
 
 		// Start Cron Jobs of Self-Heal Scripts
-		for (size_t i = 0; i < SELFHEAL_SCRIPT_COUNT; i++) {
+		for (size_t i = 0; i < selfheal_script_count; i++) {
 			update_cron_entry(self_heal_scripts[i].name, get_interval(self_heal_scripts[i].key, self_heal_scripts[i].def_val), true);
 		}
     } 
     else {
         // Stop Cron Job of Self-Heal and Recovery Scripts
-        for (size_t i = 0; i < SELFHEAL_SCRIPT_COUNT; i++) update_cron_entry(self_heal_scripts[i].name, 0, false);
+        for (size_t i = 0; i < selfheal_script_count; i++) update_cron_entry(self_heal_scripts[i].name, 0, false);
         for (size_t i = 0; i < recovery_script_count; i++) update_cron_entry(recovery_scripts[i].name, 0, false);
     }
 }

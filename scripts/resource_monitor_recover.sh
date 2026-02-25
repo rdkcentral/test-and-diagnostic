@@ -31,7 +31,7 @@ source $TAD_PATH/boot_mode.sh
 exec 3>&1 4>&2 >>$SELFHEALFILE 2>&1
 
 SELFHEAL_ENABLE=$(syscfg get selfheal_enable)
-if [ "$SELFHEAL_ENABLE" = "true" ] && [ -f /tmp/.resource_monitor_started ] && [ "$SAVED_MODE" != "CRON" ]; then
+if [ "$SELFHEAL_ENABLE" = "true" ] && [ -f /tmp/.resource_monitor_started ] && [ "$SELFHEAL_EXECUTION_MODE" != "CRON" ]; then
                 SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
                 if [ -z "$SelfHealScript_PID" ]; then
 		        echo_t "RDKB_PROCESS_CRASHED : resource_monitor.sh is not running, need restart"

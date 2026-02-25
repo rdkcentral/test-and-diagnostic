@@ -874,7 +874,7 @@ resetNeeded()
 
             elif [ "$SELFHEAL_TYPE" = "BASE" -o "$SELFHEAL_TYPE" = "TCCBR" ] && [ "$ProcessName" = "CcspTandDSsp" ]; then
                 echo_t "RDKB_SELFHEAL : Resetting process $ProcessName"
-               if [ "$SAVED_MODE" != "CRON" ]; then
+               if [ "$SELFHEAL_EXECUTION_MODE" != "CRON" ]; then
                     SelfHealScript_PID=$(busybox pidof self_heal_connectivity_test.sh)
                     if [ "$SelfHealScript_PID" != "" ]; then
                         kill -9 "$SelfHealScript_PID"

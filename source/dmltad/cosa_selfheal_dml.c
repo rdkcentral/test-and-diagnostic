@@ -148,23 +148,23 @@ BOOL SelfHeal_SetParamBoolValue
     )
 {
     PCOSA_DATAMODEL_SELFHEAL            pMyObject    = (PCOSA_DATAMODEL_SELFHEAL)g_pCosaBEManager->hSelfHeal;
+    
     if (strcmp(ParamName, "X_RDKCENTRAL-COM_Enable") == 0)
     {
         if( pMyObject->Enable == bValue )
         {
             return TRUE;
-	}
+	    }
 
         if (syscfg_set_commit(NULL, "selfheal_enable", bValue ? "true" : "false") != 0)
         {
 	        CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
 	        return FALSE;
         }
-        else 
+        else
         {
-           //CHECK the LOCKED mode and the RUNTIME bValue (SelfHealEnable)
-            if (g_boot_cron_mode == 0)
-            {
+	        if(g_boot_cron_mode == 0)
+	        {
                 CcspTraceInfo(("%s : SelfHealCronEnable is disabled, running as background process\n", __FUNCTION__));
                 if ( bValue == TRUE )
                 {
@@ -181,8 +181,14 @@ BOOL SelfHeal_SetParamBoolValue
             {
                 // Stop any background processes of selfheal
                 stop_self_heal_scripts();
-                // Let the Cron Manager handle the crontab based on bValue
-                manage_self_heal_cron_state(bValue);
+                if( bValue == TRUE )
+                {
+                    manage_self_heal_cron_state(TRUE);
+                }
+			    else
+                {
+                    manage_self_heal_cron_state(FALSE);
+                }
             }
 	        pMyObject->Enable = bValue;
 	    }
@@ -863,7 +869,6 @@ ConnectivityTest_SetParamUlongValue
 		    CcspTraceWarning(("%s syscfg set failed for ConnTest_PingInterval\n",__FUNCTION__));
 		    return FALSE;
 	    }
-      
         if(g_boot_cron_mode == 1)
         {
             CcspTraceInfo(("Connectivity ping Interval updated from %lu to %lu minutes\n", currentInterval, uValue));
