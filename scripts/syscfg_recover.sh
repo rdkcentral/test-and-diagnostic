@@ -69,12 +69,13 @@ if [ $? != 0 ]; then
 	   echo_t "RDKB_SELFHEAL : syscfg DB functional now"
 
 		SELFHEAL_ENABLE=`syscfg get selfheal_enable`
-		if [ "$SELFHEAL_ENABLE" == "true" ]; then
-			SelfHealScript_PID=$(busybox pidof self_heal_connectivity_test.sh)
-			if [ "$SelfHealScript_PID" == "" ]; then
-				echo_t "Restarting selfheal connectivity script"
-				$TAD_PATH/self_heal_connectivity_test.sh &
-			fi
+		CRON_ENABLED=$(syscfg get SelfHealCronEnable)
+		if [ "$SELFHEAL_ENABLE" == "true" ] && [ "$CRON_ENABLED" != "true" ]; then
+			    SelfHealScript_PID=$(busybox pidof self_heal_connectivity_test.sh)
+			    if [ "$SelfHealScript_PID" == "" ]; then
+				    echo_t "Restarting selfheal connectivity script"
+			     	$TAD_PATH/self_heal_connectivity_test.sh &
+			    fi
 
 			SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
 			if [ "$SelfHealScript_PID" == "" ]; then

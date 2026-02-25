@@ -208,6 +208,14 @@
           "build_dir": "build",
           "cmake_flags": "-DCMAKE_INSTALL_PREFIX=$HOME/usr -DCMAKE_PREFIX_PATH=/usr -DBUILD_FOR_DESKTOP=ON -DCMAKE_BUILD_TYPE=Debug"
         }
+      },
+      {
+        "name": "rdkb-halif-emmc",
+        "repo": "https://github.com/rdkcentral/rdkb-halif-emmc.git",
+        "branch": "develop",
+        "header_paths": [
+          { "source": "include", "destination": "$HOME/usr/include/rdkb" }
+        ]
       }
     ]
   },
@@ -218,17 +226,14 @@
     "include_path": "$HOME/usr/include/rdkb/",
     "lib_output_path": "$HOME/usr/local/lib/",
     "pre_build_commands": [
-      {
-        "description": "Generate dm_pack_datamodel.c from XML",
-        "command": "python3 $HOME/usr/include/rdkb/dm_pack_code_gen.py config/TestAndDiagnostic_arm.XML source/TandDSsp/dm_pack_datamodel.c"
-      }
+        {
+            "description": "Generate dm_pack_datamodel.c from XML",
+            "command": "python3 $HOME/usr/include/rdkb/dm_pack_code_gen.py config/TestAndDiagnostic_arm.XML source/TandDSsp/dm_pack_datamodel.c"
+        }
     ],
     "build": {
-      "type": "autotools",
-      "configure_options": [
-        "CPPFLAGS=-I$HOME/usr/include/rdkb/ -I/usr/include/ -I$HOME/usr/include/rdkb/rbus -I/usr/include/dbus-1.0 -I/usr/lib/x86_64-linux-gnu/dbus-1.0/include -DSAFEC_DUMMY_API",
-        "LDFLAGS=-L$HOME/usr/local/lib/ -Wl,--allow-shlib-undefined -Wl,--unresolved-symbols=ignore-all"
-      ]
+        "type": "autotools",
+        "configure_options_file": "cov_docker_script/configure_options.conf"
     }
   }
 }

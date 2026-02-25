@@ -242,6 +242,9 @@ VOID CosaSelfHealAPIModifyCronSchedule( BOOL bForceRun );
 void CpuMemFragCronSchedule(ULONG uinterval, BOOL bConnectnow);
 void CosaDmlGetSelfHealCpuMemFragData(PCOSA_DML_CPU_MEM_FRAG_DMA pCpuMemFragDma );
 void copy_command_output(FILE *fp, char * buf, int len);
+void stop_self_heal_scripts();
+void start_self_heal_scripts();
+void manage_self_heal_cron_state(BOOL SelfhealCronEnable);
 
 //Proc Analyzer TR-181 support
 char* RemoveSpaces(char *str);
