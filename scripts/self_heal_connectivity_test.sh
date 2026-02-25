@@ -609,6 +609,15 @@ run_connectivity_test() {
 
 cron_mode()
 {
+	LOCKDIR="/tmp/self_heal_conn_test.lockdir"
+    if ! mkdir "$LOCKDIR" 2>/dev/null; then
+       echo_t "Already a cron instance is running; No 2nd instance"
+       exit 0
+    fi
+    echo_t "Cron instance started"
+    cleanup() { rmdir "$LOCKDIR" 2>/dev/null || true; }
+    trap cleanup EXIT
+
 	echo_t "RDKB_CONN_SELFHEAL : Cron job is enabled"
 	if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
             echo_t "[RDKB_CONN_SELFHEAL] : Still booting, skipping"
@@ -641,10 +650,8 @@ process_mode()
 	 done
 }
 
-if [ "$CRON_ENABLED" = "true" ]; then
-	cron_mode
-
+if [ "$SAVED_MODE" = "CRON" ]; then
+    cron_mode
 else
-	process_mode
-
+    process_mode
 fi

@@ -29,6 +29,7 @@ SYSCFG_FILE=$SYSCFG_TMP_LOCATION/syscfg.db
 source $UTOPIA_PATH/log_env_var.sh
 source /etc/log_timestamp.sh
 source /lib/rdk/t2Shared_api.sh
+source $TAD_PATH/boot_mode.sh
 
 exec 3>&1 4>&2 >>$SELFHEALFILE 2>&1
 # skipping the run if uptime is lessthan 15 mins to avoid the race condtion 
@@ -69,8 +70,7 @@ if [ $? != 0 ]; then
 	   echo_t "RDKB_SELFHEAL : syscfg DB functional now"
 
 		SELFHEAL_ENABLE=`syscfg get selfheal_enable`
-		CRON_ENABLED=$(syscfg get SelfHealCronEnable)
-		if [ "$SELFHEAL_ENABLE" == "true" ] && [ "$CRON_ENABLED" != "true" ]; then
+		if [ "$SELFHEAL_ENABLE" == "true" ] && [ "$SAVED_MODE" != "CRON" ]; then
 			    SelfHealScript_PID=$(busybox pidof self_heal_connectivity_test.sh)
 			    if [ "$SelfHealScript_PID" == "" ]; then
 				    echo_t "Restarting selfheal connectivity script"

@@ -509,6 +509,15 @@ BOOT_TASK_FLAG="/tmp/.boot_healthcheck_done"
 
 cron_mode()
 {
+	LOCKDIR="/tmp/resource_monitor.lockdir"
+    if ! mkdir "$LOCKDIR" 2>/dev/null; then
+       echo_t "Already a cron instance is running; No 2nd instance"
+       exit 0
+    fi
+    echo_t "Cron instance started"
+    cleanup() { rmdir "$LOCKDIR" 2>/dev/null || true; }
+    trap cleanup EXIT
+
 	echo_t "[RDKB_RES_SELFHEAL] : Cron job is enabled"
 	# Skip during boot (first 15 minutes)
     if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
@@ -552,8 +561,8 @@ process_mode()
         done
 }
 
-if [ "$CRON_ENABLED" = "true" ]; then
-	cron_mode
+if [ "$SAVED_MODE" = "CRON" ]; then
+    cron_mode
 else
-	process_mode
+    process_mode
 fi

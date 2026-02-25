@@ -1743,21 +1743,30 @@ DHCP_Selfheal() {
 
 cron_mode()
 {
+    LOCKDIR="/tmp/selfheal_aggressive.lockdir"
+    if ! mkdir "$LOCKDIR" 2>/dev/null; then
+       echo_t "Already a cron instance is running; No 2nd instance"
+       exit 0
+    fi
+    echo_t "Cron instance started"
+    cleanup() { rmdir "$LOCKDIR" 2>/dev/null || true; }
+    trap cleanup EXIT
+    
 	echo_t "[RDKB_AGG_SELFHEAL] : Cron job is enabled"
-	# skip during boot of first 15 minutes
+	# skip during boot of first 5 minutes
 	BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
-	if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
+	if [ "$BOOTUP_TIME_SEC" -le 300 ]; then
             echo_t "[RDKB_AGG_SELFHEAL] : Still booting, skipping"
             exit 0
-        fi
+    fi
 
 	if [ "$(syscfg get selfheal_enable)" != "true" ]; then
             echo_t "[RDKB_SELFHEAL] : selfheal_enable != true, exiting"
             exit 0
-        fi
+    fi
         
-        DHCP_Selfheal
-        exit 0
+    DHCP_Selfheal
+    exit 0
 }
 
 process_mode()
@@ -1773,10 +1782,8 @@ process_mode()
         done
 }
 
-CRON_ENABLED=$(syscfg get SelfHealCronEnable)
-
-if [ "$CRON_ENABLED" = "true" ]; then
-	cron_mode
+if [ "$SAVED_MODE" = "CRON" ]; then
+    cron_mode
 else
-	process_mode
+    process_mode
 fi
