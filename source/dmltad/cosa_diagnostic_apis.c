@@ -168,8 +168,6 @@ CosaDiagInitialize
     PDSLH_PING_INFO                 pDiagPingInfo        = (PDSLH_PING_INFO      )NULL;
     PDSLH_TRACEROUTE_INFO           pDiagTracerouteInfo  = (PDSLH_TRACEROUTE_INFO)NULL;
     PDSLH_NSLOOKUP_INFO             pDiagNSLookInfo      = (PDSLH_NSLOOKUP_INFO  )NULL;
-    /* COVERITY TEST - LOW SEVERITY: Unused variable (dead code) */
-    int                             unusedCounter        = 0;
 #if !defined (RESOURCE_OPTIMIZATION)
     PDSLH_TR143_DOWNLOAD_DIAG_INFO  pDownloadInfo        = (PDSLH_TR143_DOWNLOAD_DIAG_INFO)NULL;
     PDSLH_TR143_UPLOAD_DIAG_INFO    pUploadInfo          = (PDSLH_TR143_UPLOAD_DIAG_INFO)NULL;
@@ -183,6 +181,9 @@ CosaDiagInitialize
     if ( !pDiagPingInfo )
     {
         return ANSC_STATUS_RESOURCES;
+
+        /* COVERITY TEST - LOW SEVERITY: Dead code (unreachable code) */
+        pDiagPingInfo = NULL;
     }
     else
     {
