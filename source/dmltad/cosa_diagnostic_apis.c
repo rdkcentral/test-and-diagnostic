@@ -162,11 +162,14 @@ CosaDiagInitialize
         ANSC_HANDLE                 hThisObject
     )
 {
-    ANSC_STATUS                     returnStatus         = ANSC_STATUS_SUCCESS;
+    /* COVERITY TEST - MEDIUM SEVERITY: Uninitialized variable*/
+    ANSC_STATUS                     returnStatus;
     PCOSA_DATAMODEL_DIAG            pMyObject            = (PCOSA_DATAMODEL_DIAG )hThisObject;
     PDSLH_PING_INFO                 pDiagPingInfo        = (PDSLH_PING_INFO      )NULL;
     PDSLH_TRACEROUTE_INFO           pDiagTracerouteInfo  = (PDSLH_TRACEROUTE_INFO)NULL;
     PDSLH_NSLOOKUP_INFO             pDiagNSLookInfo      = (PDSLH_NSLOOKUP_INFO  )NULL;
+    /* COVERITY TEST - LOW SEVERITY: Unused variable (dead code) */
+    int                             unusedCounter        = 0;
 #if !defined (RESOURCE_OPTIMIZATION)
     PDSLH_TR143_DOWNLOAD_DIAG_INFO  pDownloadInfo        = (PDSLH_TR143_DOWNLOAD_DIAG_INFO)NULL;
     PDSLH_TR143_UPLOAD_DIAG_INFO    pUploadInfo          = (PDSLH_TR143_UPLOAD_DIAG_INFO)NULL;
@@ -207,6 +210,10 @@ CosaDiagInitialize
     {
         AnscFreeMemory((ANSC_HANDLE)pMyObject->hDiagPingInfo);
         AnscFreeMemory((ANSC_HANDLE)pMyObject->hDiagTracerouteInfo);
+        
+        /* COVERITY TEST - HIGH SEVERITY: Use-after-free vulnerability*/
+        DslhInitPingInfo(pDiagPingInfo);  /* Using freed memory - HIGH severity defect */
+        
         pMyObject->hDiagPingInfo = NULL;
         pMyObject->hDiagTracerouteInfo = NULL;
         return ANSC_STATUS_RESOURCES;
@@ -343,7 +350,6 @@ CosaDiagInitialize
     pRxTxStats = AnscAllocateMemory(sizeof(COSA_DML_DIAG_RXTX_STATS));
     if (!pRxTxStats)
     {
-        AnscFreeMemory(pMyObject->pRxTxStats);
         pMyObject->pRxTxStats = NULL;
         return ANSC_STATUS_RESOURCES;
     }
