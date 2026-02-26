@@ -38,6 +38,36 @@ HomeSecuritySupport=`sysevent get HomeSecuritySupport`
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
 
 DIBBLER_SERVER_CONF="/etc/dibbler/server.conf"
+
+
+# Global variable to indicate if any DHCPv6 client is enabled
+DHCPV6C_ENABLED=0
+
+# Function to check if any DHCPv6 client is enabled
+is_dhcpv6c_enabled() {
+    local num_entries i enabled alias
+    num_entries=$(dmcli eRT retv Device.DHCPv6.ClientNumberOfEntries 2>/dev/null)
+    if [[ -z "$num_entries" ]] || [[ $num_entries -eq 0 ]]; then
+        echo_t "no wan interface specified"
+        DHCPV6C_ENABLED=0
+        return
+    fi
+    for i in $(seq 1 "$num_entries"); do
+        alias=$(dmcli eRT retv Device.DHCPv6.Client.$i.Alias 2>/dev/null)
+        #We need to skip checking the status of DHCPv6 client for hotspot as it is used for hotspot clients, 
+        #and we have to define here if any other clients are added in future which are not used for wan connection .
+        if [ "$alias" = "HOTSPOT" ]; then
+            continue
+        fi
+        enabled=$(dmcli eRT retv Device.DHCPv6.Client.$i.Enable 2>/dev/null)
+        if [ "$enabled" = "true" ] || [ "$enabled" = "1" ]; then
+            DHCPV6C_ENABLED=1
+            return
+        fi
+    done
+    DHCPV6C_ENABLED=0
+}
+
 if [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "CGA4131COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "VTER11QEL" ]
 then
     DHCPV6_HANDLER="/usr/bin/service_dhcpv6_client"
@@ -444,16 +474,26 @@ self_heal_dual_cron()
 
 self_heal_sedaemon()
 {
-    if [ -f /tmp/started_ssad ] && [ "$kdftype" == "RSA" ]; then
+    if [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
          accessmgr=`pidof accessManager`
-         se05xd=`pidof se05xd`
-         if [[ -z "$se05xd" ]] || [[ -z "$accessmgr" ]]; then
-               echo_t "[RDKB_SELFHEAL] : Restarting accessmanager and se05xd"
+
+         if [ "$kdftype" = "ECC" ]; then
+             ssadaemon=`pidof rdkssaecckdf`
+             daemon_service="rdkssaeccdaemon.service"
+             daemon_name="rdkssaecckdf"
+         else
+             ssadaemon=`pidof se05xd`
+             daemon_service="startse05xd.service"
+             daemon_name="se05xd"
+         fi
+
+         if [[ -z "$ssadaemon" ]] || [[ -z "$accessmgr" ]]; then
+               echo_t "[RDKB_SELFHEAL] : Restarting accessmanager and $daemon_name"
                t2CountNotify "SYS_SH_SERestart"
-               systemctl stop startse05xd.service
+               systemctl stop $daemon_service
                systemctl stop accessmanager.service
                systemctl start accessmanager.service
-               systemctl start startse05xd.service
+               systemctl start $daemon_service
          fi
     fi
 }
@@ -3880,7 +3920,11 @@ if [ "$xle_device_mode" -ne "1" ]; then
     DIBBLER_PID=$(busybox pidof dibbler-server)
     if [ "$DIBBLER_PID" = "" ]; then
     #   IPV6_STATUS=`sysevent get ipv6-status`
-        DHCPV6C_ENABLED=$(sysevent get dhcpv6c_enabled)
+        if [ -f /tmp/dhcpmgr_initialized ]; then
+            is_dhcpv6c_enabled
+        else
+            DHCPV6C_ENABLED=$(sysevent get dhcpv6c_enabled)
+        fi
         routerMode="`syscfg get last_erouter_mode`"
 
     if [ "$BOX_TYPE" = "HUB4" ]; then
@@ -5122,7 +5166,9 @@ self_heal_dual_cron
 self_heal_meshAgent
 self_heal_meshAgent_hung
 self_heal_sedaemon
-check_br403_is_created
+if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ]; then
+    check_br403_is_created
+fi
 self_heal_ethwan_mode_recover
 if [ "$T2_ENABLE" = "true" ]; then
     self_heal_t2

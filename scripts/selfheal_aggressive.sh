@@ -18,11 +18,41 @@
 # limitations under the License.
 #######################################################################################
 
+
 TAD_PATH="/usr/ccsp/tad"
 source $TAD_PATH/corrective_action.sh
 source /etc/waninfo.sh
 source /etc/utopia/service.d/event_handler_functions.sh
 DIBBLER_SERVER_CONF="/etc/dibbler/server.conf"
+
+
+# Global variable to indicate if any DHCPv6 client is enabled
+DHCPV6C_ENABLED=0
+
+# Function to check if any DHCPv6 client is enabled
+is_dhcpv6c_enabled() {
+    local num_entries i enabled alias
+    num_entries=$(dmcli eRT retv Device.DHCPv6.ClientNumberOfEntries 2>/dev/null)
+    if [[ -z "$num_entries" ]] || [[ $num_entries -eq 0 ]]; then
+        echo_t "no wan interface specified"
+        DHCPV6C_ENABLED=0
+        return
+    fi
+    for i in $(seq 1 "$num_entries"); do
+         #We need to skip checking the status of DHCPv6 client for hotspot as it is used for hotspot clients, 
+        #and we have to define here if any other clients are added in future which are not used for wan connection.
+        alias=$(dmcli eRT retv Device.DHCPv6.Client.$i.Alias 2>/dev/null)
+        if [ "$alias" = "HOTSPOT" ]; then
+            continue
+        fi
+        enabled=$(dmcli eRT retv Device.DHCPv6.Client.$i.Enable 2>/dev/null)
+        if [ "$enabled" = "true" ] || [ "$enabled" = "1" ]; then
+            DHCPV6C_ENABLED=1
+            return
+        fi
+    done
+    DHCPV6C_ENABLED=0
+}
 
 SelfHeal_Support=`sysevent get SelfhelpWANConnectionDiagSupport`
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
@@ -671,7 +701,11 @@ self_heal_dibbler_server()
 #       IPV6_STATUS=$(sysevent get ipv6-status)
         DHCPv6_ServerType="`syscfg get dhcpv6s00::servertype`"
         routerMode="`syscfg get last_erouter_mode`"
-        DHCPV6C_ENABLED=$(sysevent get dhcpv6c_enabled)
+        if [ -f /tmp/dhcpmgr_initialized ]; then
+            is_dhcpv6c_enabled
+        else
+            DHCPV6C_ENABLED=$(sysevent get dhcpv6c_enabled)
+        fi
         if [ $BR_MODE -eq 0 ] && [ "$DHCPV6C_ENABLED" = "1" ]; then
             Sizeof_ServerConf=`stat -c %s $DIBBLER_SERVER_CONF`
             case $SELFHEAL_TYPE in
@@ -1582,7 +1616,7 @@ if ip -6 addr show dev $WAN_INTERFACE scope global | grep -q "dadfailed"; then
     PID=$(ps | grep $PROC | grep -v grep  | awk '{print $1}')
 
     if [ -n "$PID" ]; then
-       Dhcpv6_Client_restart "dibbler-client" "Idle"
+       Kill -9 $PID
     else
        echo_t "$PROC Process not running"
     fi
@@ -1645,19 +1679,8 @@ then
     exit
 fi
 
-while [ $(syscfg get selfheal_enable) = "true" ]
-do
-    INTERVAL=$(syscfg get AggressiveInterval)
-
-    if [ "$INTERVAL" = "" ]
-    then
-        INTERVAL=5
-    fi
-    echo_t "[RDKB_AGG_SELFHEAL] : INTERVAL is: $INTERVAL"
-    sleep ${INTERVAL}m
-    
+DHCP_Selfheal() {
     WAN_INTERFACE=$(getWanInterfaceName)
-
     BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     # This Feature is only enabled on devices that have Comcast Product Requirement to be up[ WEB PA Up] within 3:00
     if [ ! -f /tmp/selfheal_bootup_completed ] && [ $BOOTUP_TIME_SEC -lt 180 ] ; then
@@ -1716,4 +1739,44 @@ do
     STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
     echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec"
-done
+}
+
+cron_mode()
+{
+	echo_t "[RDKB_AGG_SELFHEAL] : Cron job is enabled"
+	# skip during boot of first 15 minutes
+	BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
+	if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
+            echo_t "[RDKB_AGG_SELFHEAL] : Still booting, skipping"
+            exit 0
+        fi
+
+	if [ "$(syscfg get selfheal_enable)" != "true" ]; then
+            echo_t "[RDKB_SELFHEAL] : selfheal_enable != true, exiting"
+            exit 0
+        fi
+        
+        DHCP_Selfheal
+        exit 0
+}
+
+process_mode()
+{
+	echo_t "[RDKB_AGG_SELFHEAL] : Cron not enabled, running as a process"
+	while [ $(syscfg get selfheal_enable) = "true" ]
+        do
+		INTERVAL=$(syscfg get AggressiveInterval)
+		[ -z "$INTERVAL" ] && INTERVAL=5
+                echo_t "[RDKB_AGG_SELFHEAL] : INTERVAL is: $INTERVAL"
+                sleep ${INTERVAL}m
+                DHCP_Selfheal
+        done
+}
+
+CRON_ENABLED=$(syscfg get SelfHealCronEnable)
+
+if [ "$CRON_ENABLED" = "true" ]; then
+	cron_mode
+else
+	process_mode
+fi
