@@ -1744,9 +1744,9 @@ DHCP_Selfheal() {
 cron_mode()
 {
 	echo_t "[RDKB_AGG_SELFHEAL] : Cron job is enabled"
-	# skip during boot of first 15 minutes
+	# skip during boot of first 5 minutes
 	BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
-	if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
+	if [ "$BOOTUP_TIME_SEC" -le 300 ]; then
             echo_t "[RDKB_AGG_SELFHEAL] : Still booting, skipping"
             exit 0
         fi
