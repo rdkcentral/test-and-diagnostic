@@ -80,6 +80,22 @@ static char *Ipv6_Server ="Ipv6_PingServer_%d";
 
 //static int count=0; /*RDKB-24432 : Memory usage and fragmentation selfheal*/
 
+// Declaring selfheal scripts
+char *SELF_HEAL_SCRIPTS[] = {
+    "selfheal_aggressive.sh",
+    "self_heal_connectivity_test.sh",
+    "resource_monitor.sh"
+};
+
+//Start/stop cron jobs
+typedef struct {
+    const char *name;
+    const char *key;
+    int def_val;
+} CronJob;
+
+#define SCRIPT_COUNT (sizeof(SELF_HEAL_SCRIPTS) / sizeof(SELF_HEAL_SCRIPTS[0]))
+
 void copy_command_output(FILE *fp, char * buf, int len)
 {
     char * p;
@@ -92,6 +108,98 @@ void copy_command_output(FILE *fp, char * buf, int len)
         if ((p = strchr(buf, '\n'))) {
                 *p = 0;
         }
+    }
+}
+
+/* Start all self-heal scripts */
+void start_self_heal_scripts() {
+    for (size_t i = 0; i < SCRIPT_COUNT; i++) {
+        CcspTraceWarning(("%s: Starting %s\n", __FUNCTION__, SELF_HEAL_SCRIPTS[i]));
+        // Uses the shared path and script name
+        v_secure_system("/usr/ccsp/tad/%s &", SELF_HEAL_SCRIPTS[i]);
+    }
+}
+/* Stop all self-heal scripts */
+void stop_self_heal_scripts() {
+    char buf[64] = {0};
+	FILE *fp = NULL;
+    for (size_t i = 0; i < SCRIPT_COUNT; i++) {
+		fp = v_secure_popen("r", "busybox pidof %s", SELF_HEAL_SCRIPTS[i]);
+		if (fp != NULL)
+        {
+            copy_command_output(fp, buf, sizeof(buf));
+            CcspTraceInfo(("%s: pidof %s returned: %s\n", __FUNCTION__, SELF_HEAL_SCRIPTS[i], buf));
+            v_secure_pclose(fp);
+        }
+        else
+        {
+            CcspTraceWarning(("%s: v_secure_popen failed for %s\n", __FUNCTION__, SELF_HEAL_SCRIPTS[i]));
+        }
+        if (buf[0] == '\0') {
+            CcspTraceWarning(("%s: %s is not running\n", __FUNCTION__, SELF_HEAL_SCRIPTS[i]));
+        } else {
+            CcspTraceWarning(("%s: Stopping %s \n", __FUNCTION__, SELF_HEAL_SCRIPTS[i]));
+            v_secure_system("kill -9 %s", buf);
+        }
+    }
+}
+
+/* To fetch syscfg values */
+unsigned long get_interval(const char *key, int def_val) {
+    // Handle fixed intervals (null keys)
+    if (!key) return (unsigned long)def_val;
+
+    char buf[32] = {0};
+    unsigned long result = (unsigned long)def_val;
+
+    if (syscfg_get(NULL, key, buf, sizeof(buf)) == 0 && buf[0] != '\0') {
+        result = (unsigned long)atol(buf);
+    }
+    return result;
+}
+
+/* To Update Crontab (Removes old, Adds new) */
+void update_cron_entry(const char *script, unsigned long interval, BOOL should_run) {
+    // We always remove the old entry to avoid duplicates
+    v_secure_system("crontab -l 2>/dev/null | sed '/%s/d' | crontab -", script);
+    // If should_run is true, we append the new timing
+    if (should_run) {
+        v_secure_system("(crontab -l 2>/dev/null; echo '*/%lu * * * * /usr/ccsp/tad/%s') | crontab -", 
+                        interval, script);
+    }
+}
+
+/* function to Manage add/remove of cron jobs */
+void manage_self_heal_cron_state(BOOL SelfhealCronEnable) {
+    const CronJob self_heal_scripts[] = {
+        {"self_heal_connectivity_test.sh", "ConnTest_PingInterval", 60},
+        {"resource_monitor.sh", "resource_monitor_interval", 15},
+        {"selfheal_aggressive.sh", "AggressiveInterval", 5}
+    };
+
+    const CronJob recovery_scripts[] = {
+        {"syscfg_recover.sh", NULL, 15},
+        {"resource_monitor_recover.sh", NULL, 5}
+    };
+
+    if (SelfhealCronEnable) {
+        // Stop Cron Job of Recovery Scripts
+        for (int i = 0; i < 2; i++) 
+            update_cron_entry(recovery_scripts[i].name, 0, false);
+        
+        // Start Cron Jobs of Self-Heal Scripts (using syscfg lookup)
+        for (int i = 0; i < 3; i++) {
+            unsigned long val = get_interval(self_heal_scripts[i].key, self_heal_scripts[i].def_val);
+            update_cron_entry(self_heal_scripts[i].name, val, true);
+        }
+    } else {
+        // Stop Cron Job of Self-Heal Scripts
+        for (int i = 0; i < 3; i++) 
+            update_cron_entry(self_heal_scripts[i].name, 0, false);
+        
+        // Start Cron Job of Recovery Scripts (using fixed defaults)
+        for (int i = 0; i < 2; i++) 
+            update_cron_entry(recovery_scripts[i].name, recovery_scripts[i].def_val, true);
     }
 }
 
@@ -457,12 +565,17 @@ CosaDmlGetSelfHealCfg(
 	pMyObject->Enable = (!strcmp(buf, "true")) ? TRUE : FALSE;
         if ( pMyObject->Enable == TRUE )
         {
-            v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &");
 #if defined(_COSA_BCM_MIPS_)
             v_secure_system("/lib/rdk/xf3_wifi_self_heal.sh &");
 #endif
-	    v_secure_system("/usr/ccsp/tad/resource_monitor.sh &");
-            v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &");
+	        buf[0]='\0';
+            syscfg_get( NULL, "SelfHealCronEnable", buf, sizeof(buf));
+            CcspTraceInfo(("SelfHealCronEnable value is %s\n", buf));
+            if( strcmp(buf, "false") == 0 )
+            {
+		        CcspTraceInfo(("SelfHealCronEnable is disabled, running as background process\n"));
+		        start_self_heal_scripts();
+	        }
 	}  
 
 	rc = memset_s(buf,sizeof(buf),0,sizeof(buf));

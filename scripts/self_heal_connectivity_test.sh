@@ -572,56 +572,79 @@ runPingTest()
 
 }
 
-SELFHEAL_ENABLE=`syscfg get selfheal_enable`
+SELFHEAL_ENABLE=$(syscfg get selfheal_enable)
+BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
+CRON_ENABLED=$(syscfg get SelfHealCronEnable)
 
-while [ $SELFHEAL_ENABLE = "true" ]
-do
+run_connectivity_test() {
+    WAN_INTERFACE=$(getWanInterfaceName)
+    wan_status=$(sysevent get wan-status)
 
-	if [ "$calcRandom" -eq 1 ] 
-	then
+    if [ -z "$wan_status" ] || [ "$wan_status" = "stopped" ]; then
+        echo_t "RDKB_SELFHEAL : WAN is not up, bypassing connectivity test"
+        return
+    fi
 
-		calcRandTimetoStartPing
-		calcRandom=0
-	else
-		INTERVAL=`syscfg get ConnTest_PingInterval`
+    MAPT_CONFIG=$(sysevent get mapt_config_flag)
+    if [ "$MAPT_CONFIG" = "set" ]; then
+        WAN_INTERFACE_IPV4="map0"
+    fi
 
-		if [ "$INTERVAL" = "" ] 
-		then
-			INTERVAL=60
-		fi
-                INTERVAL=$(($INTERVAL*60))
-		sleep $INTERVAL
-	fi
+    #LTE-1335 runPingTest needs to be run only in extender mode for xle.
+    if [ "$BOX_TYPE" = "WNXL11BWL" ]
+    then
+        xle_device_mode=`syscfg get Device_Mode`
+        if [ "$xle_device_mode" -eq "1" ]; then
+            echo_t "RDKB_SELFHEAL : Device is in Extender mode, calling runPingTest."
+            runPingTest
+        else
+            echo_t "RDKB_SELFHEAL : Device is in Gateway mode, runPingTest is not needed."
+        fi
+    else
+        runPingTest
+    fi
+    runDNSPingTest
+}
 
-	WAN_INTERFACE=$(getWanInterfaceName)
-	wan_status=`sysevent get wan-status`
-	if [ "$wan_status" = "" ] || [ "$wan_status" = "stopped" ]
-	then
-		echo_t "RDKB_SELFHEAL : WAN is not up, bypassing ping test"
-	else
-		MAPT_CONFIG=`sysevent get mapt_config_flag`
-		if [ "$MAPT_CONFIG" == "set" ]
-		then
-			WAN_INTERFACE_IPV4="map0"
-		fi
-		
-		#LTE-1335 runPingTest needs to be run only in extender mode for xle.
-		if [ "$BOX_TYPE" = "WNXL11BWL" ]
-		then
-			xle_device_mode=`syscfg get Device_Mode`
-			if [ "$xle_device_mode" -eq "1" ]; then
-				echo_t "RDKB_SELFHEAL : Device is in Extender mode, calling runPingTest."
-				runPingTest
-			else
-				echo_t "RDKB_SELFHEAL : Device is in Gateway mode, runPingTest is not needed."
-			fi
-		else
-			runPingTest
-		fi
-		runDNSPingTest
-	fi
 
-	SELFHEAL_ENABLE=`syscfg get selfheal_enable`
-	# ping -I $WAN_INTERFACE -c $PINGCOUNT 
-		
-done
+cron_mode()
+{
+	echo_t "RDKB_CONN_SELFHEAL : Cron job is enabled"
+	if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
+            echo_t "[RDKB_CONN_SELFHEAL] : Still booting, skipping"
+            exit 0
+        fi
+	if [ "$SELFHEAL_ENABLE" != "true" ]; then
+            echo_t "[RDKB_CONN_SELFHEAL] : selfheal_enable != true, exiting"
+            exit 0
+        fi
+        run_connectivity_test
+        exit 0
+}
+
+process_mode()
+{
+	echo_t "RDKB_CONN_SELFHEAL : Self Heal Cron is disabled "
+	while [ $SELFHEAL_ENABLE = "true" ]
+        do
+            if [ "$calcRandom" -eq 1 ]
+            then
+                    calcRandTimetoStartPing
+                    calcRandom=0
+            else
+                    INTERVAL=`syscfg get ConnTest_PingInterval`
+		            [ -z "$INTERVAL" ] && INTERVAL=60
+                    INTERVAL=$(($INTERVAL*60))
+                    sleep $INTERVAL
+            fi
+            run_connectivity_test
+	 done
+}
+
+if [ "$CRON_ENABLED" = "true" ]; then
+	cron_mode
+
+else
+	process_mode
+
+fi
