@@ -45,30 +45,9 @@ COUNT=0
 
 sysevent set atom_hang_count 0
 
-while [ $SELFHEAL_ENABLE = "true" ]
-do
-	RESOURCE_MONITOR_INTERVAL=`syscfg get resource_monitor_interval`
-	if [ "$RESOURCE_MONITOR_INTERVAL" = "" ]
-	then
-		RESOURCE_MONITOR_INTERVAL=15
-	fi 
-	RESOURCE_MONITOR_INTERVAL=$(($RESOURCE_MONITOR_INTERVAL*60))
 
-	sleep $RESOURCE_MONITOR_INTERVAL
-
-        BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
-        #IHC should be called once when a reboot happens
-        if [ $BOOTUP_TIME_SEC -ge 800 ] && [ $BOOTUP_TIME_SEC -le 1100 ] && [ "$Last_reboot_reason" = "Software_upgrade" ]
-        then
-            IHC_Enable="`syscfg get IHC_Mode`"
-            #starting the IHC now
-            if [[ "$IHC_Enable" = "Monitor" ]]
-            then
-                echo_t "Starting the ImageHealthChecker from bootup-check mode"
-                /usr/bin/ImageHealthChecker bootup-check &
-            fi
-        fi
-
+Selfheal_res_monitor()
+{
 	totalMemSys=`free | awk 'FNR == 2 {print $2}'`
 	usedMemSys=`free | awk 'FNR == 2 {print $3}'`
 	freeMemSys=`free | awk 'FNR == 2 {print $4}'`
@@ -505,5 +484,76 @@ fi
             t2ValNotify "SlabUsage_split" "${8},${7},${16},${15},${24},${23}"
         )
     fi
+}
 
-done
+Bootup_HealthCheck()
+{
+	echo_t "[RDKB_RES_SELFHEAL] : Bootup Healthcheck"
+    #IHC should be called once when a reboot happens
+    if [ "$Last_reboot_reason" = "Software_upgrade" ]
+    then
+	    echo_t "[RDKB_RES_SELFHEAL] : Entering into ImageHealthChecker condition"
+        IHC_Enable="`syscfg get IHC_Mode`"
+        #starting the IHC now
+        if [[ "$IHC_Enable" = "Monitor" ]]
+        then
+            echo_t "[RDKB_RES_SELFHEAL] : Starting the ImageHealthChecker from bootup-check mode"
+            /usr/bin/ImageHealthChecker bootup-check &
+        fi
+    fi
+}
+
+CRON_ENABLED=$(syscfg get SelfHealCronEnable)
+BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
+BOOT_TASK_FLAG="/tmp/.boot_healthcheck_done"
+
+cron_mode()
+{
+	echo_t "[RDKB_RES_SELFHEAL] : Cron job is enabled"
+	# Skip during boot (first 15 minutes)
+    if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
+		echo_t "[RDKB_RES_SELFHEAL] : Still booting, skipping"
+        exit 0
+    fi
+       
+	if [ "$SELFHEAL_ENABLE" != "true" ]; then
+        echo_t "[RDKB_RES_SELFHEAL] : selfheal_enable != true, exiting"
+        exit 0
+    fi
+    
+	# Check if the function has already been executed this boot session
+    if [ ! -f "$BOOT_TASK_FLAG" ]; then    
+        Bootup_HealthCheck    
+        # Create the flag file immediately so it never runs again
+        touch "$BOOT_TASK_FLAG"
+    fi
+
+    Selfheal_res_monitor
+    exit 0
+}
+
+process_mode()
+{
+        echo_t "[RDKB_RES_SELFHEAL] : Cron not enabled, running as a process"
+        while [ $SELFHEAL_ENABLE = "true" ]
+        do
+	        RESOURCE_MONITOR_INTERVAL=`syscfg get resource_monitor_interval`
+            [ -z "$RESOURCE_MONITOR_INTERVAL" ] && RESOURCE_MONITOR_INTERVAL=15
+	        RESOURCE_MONITOR_INTERVAL=$(($RESOURCE_MONITOR_INTERVAL*60))
+            sleep $RESOURCE_MONITOR_INTERVAL
+
+			BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
+            #IHC should be called once when a reboot happens
+            if [ $BOOTUP_TIME_SEC -ge 800 ] && [ $BOOTUP_TIME_SEC -le 1100 ]; then
+	            Bootup_HealthCheck
+			fi
+
+			Selfheal_res_monitor
+        done
+}
+
+if [ "$CRON_ENABLED" = "true" ]; then
+	cron_mode
+else
+	process_mode
+fi
