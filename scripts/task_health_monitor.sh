@@ -498,6 +498,55 @@ self_heal_sedaemon()
     fi
 }
 
+validate_files()
+{
+    empty_json=$(syscfg get X_RDKCENTRAL-COM_EmptyJson)
+
+    critical_files=(
+        "/nvram/bootstrap.json"
+        "/opt/secure/bootstrap.json"
+        "/nvram/partners_defaults.json"
+    )
+
+    # Check if all files are empty
+    all_empty=true
+    for file in "${critical_files[@]}"; do
+        if [ -s "$file" ]; then
+            all_empty=false
+            break
+        fi
+    done
+
+    if [ "$all_empty" = true ]; then
+        if [ "$empty_json" != "1" ]; then
+            echo_t "ERROR: All critical JSON files are empty. Initiating recovery reboot..."
+
+            # Remove all files
+            for file in "${critical_files[@]}"; do
+                rm -vf "$file"
+            done
+
+            t2CountNotify "SYS_ERROR_Empty_nvram_json"
+            syscfg set X_RDKCENTRAL-COM_LastRebootReason empty_nvram_json
+            syscfg set X_RDKCENTRAL-COM_EmptyJson 1
+            syscfg commit
+
+            reboot
+        else
+            echo_t "ERROR: Critical JSON files still empty after reboot"
+            t2CountNotify "SYS_ERROR_Persistent_Empty_nvram_json"
+        fi
+    else
+        if [ "$empty_json" = "1" ]; then
+            echo_t "INFO: Critical JSON files recovered after reboot"
+            t2CountNotify "SYS_SH_Recovered_nvram_json"
+
+            syscfg set X_RDKCENTRAL-COM_EmptyJson 0
+            syscfg commit
+        fi
+    fi
+}
+
 xle_device_mode=0
 if [ "$BOX_TYPE" = "WNXL11BWL" ]; then
 
@@ -540,6 +589,7 @@ if [ "$BOX_TYPE" = "WNXL11BWL" ]; then
         echo "===== ls -al /tmp ====="
         ls -al /tmp/
     fi
+    validate_files
   /usr/bin/xle_selfheal $xle_device_mode &
 
   check_xle_dns_route
