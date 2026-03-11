@@ -295,20 +295,20 @@ void MonitorLatencyMeasurementServices()
 					Lan_prefix_flag=true;
 				}
 				CheckLatencyMeasurementServiceStatus(SNIFFER_SERVICE,ServicePID);
-				token_ipv4 = strtok_r(rest_ipv4, " ", &rest_ipv4);
-				CcspTraceInfo(("%s: xNetSniffer_v4 service PID:%s rest:%s\n", __FUNCTION__,token_ipv4,rest_ipv4));
-				if(IPV6PID==atoi(rest_ipv4))
+				if (strlen(ServicePID) == 0)
 				{
-					IPv4PID=atoi(token_ipv4);
+					CcspTraceInfo(("%s: Failed to run IPv4 xNetSniffer service\n", __FUNCTION__));
+				} else {
+					token_ipv4 = strtok_r(rest_ipv4, " ", &rest_ipv4);
+					CcspTraceInfo(("%s: xNetSniffer_v4 service PID:%s rest:%s\n", __FUNCTION__,token_ipv4,rest_ipv4));
+					if((rest_ipv4 != NULL) && (IPV6PID==atoi(rest_ipv4)))
+					{
+						IPv4PID=atoi(token_ipv4);
+					} else {
+						IPv4PID=atoi(ServicePID);
+					}
+					CcspTraceInfo(("%s: ServicePID:%s xNetSniffer IPv4:%d service started in background\n", __FUNCTION__,ServicePID,IPv4PID));
 				}
-				else if(IPV6PID==atoi(token_ipv4))
-				{
-					IPv4PID=atoi(rest_ipv4);
-				}
-				else{
-					IPv4PID=atoi(ServicePID);
-				}
-				CcspTraceInfo(("%s: ServicePID:%s xNetSniffer IPv4:%d service started in background\n", __FUNCTION__,ServicePID,IPv4PID));
 			}
 		}
 
@@ -333,21 +333,22 @@ void MonitorLatencyMeasurementServices()
 				
 				CheckLatencyMeasurementServiceStatus(SNIFFER_SERVICE,ServicePID);
 				CcspTraceInfo(("xNetSniffer service PID:%s ServicePID:%s\n",rest,ServicePID));
-				token = strtok_r(rest, " ", &rest);
-				CcspTraceInfo(("%s: xNetSniffer service PID:%s rest:%s\n", __FUNCTION__,token,rest));
-				if(IPv4PID==atoi(rest))
+				if (strlen(ServicePID) == 0)
 				{
-					IPV6PID=atoi(token);
+					CcspTraceInfo(("%s: Failed to run IPv6 xNetSniffer service\n", __FUNCTION__));
+				} else {
+					token = strtok_r(rest, " ", &rest);
+					CcspTraceInfo(("%s: xNetSniffer service PID:%s rest:%s\n", __FUNCTION__,token,rest));
+					if((rest != NULL) && (IPv4PID==atoi(rest)))
+					{
+						IPV6PID=atoi(token);
+					}
+					else{
+						IPV6PID=atoi(ServicePID);
+					}
+					CcspTraceInfo(("IPV6PID:%s %d\n",rest,IPV6PID));
+					CcspTraceInfo(("%s: xNetSniffer IPv6::%s service started in background\n", __FUNCTION__,Ipv6Cmd));
 				}
-				else if(IPv4PID==atoi(token))
-				{
-					IPV6PID=atoi(rest);
-				}
-				else{
-					IPV6PID=atoi(ServicePID);
-				}
-				CcspTraceInfo(("IPV6PID:%s %d\n",rest,IPV6PID));
-				CcspTraceInfo(("%s: xNetSniffer IPv6::%s service started in background\n", __FUNCTION__,Ipv6Cmd));
 			}
 		}
 	}
