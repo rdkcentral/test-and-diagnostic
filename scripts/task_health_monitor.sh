@@ -2981,9 +2981,10 @@ Radio_5G_Enable_Check()
     if [ "$isRadioExecutionSucceed_5" != "" ]; then
         isRadioEnabled_5=$(echo "$radioenable_5" | grep "false")
         if [ "$isRadioEnabled_5" != "" ]; then
-            echo_t "[RDKB_SELFHEAL] : Both 5G Radio(Radio 2) and 5G Private SSID are in DISABLED state"
+            RADIO_DISBLD_5G=1
+            echo_t "[RDKB_SELFHEAL] : 5G Radio(Radio 2) is Disabled"
         else
-            echo_t "[RDKB_SELFHEAL] : 5G Radio(Radio 2) is Enabled, only 5G Private SSID is DISABLED"
+            echo_t "[RDKB_SELFHEAL] : 5G Radio(Radio 2) is Enabled"
             fi
     else
         echo_t "[RDKB_PLATFORM_ERROR] : Something went wrong while checking 5G Radio status."
@@ -2997,12 +2998,12 @@ Radio_5G_Enable_Check()
 case $SELFHEAL_TYPE in
     "BASE")
         SSID_DISABLED=0
+        RADIO_DISBLD_5G=0
         ssidEnable=$(dmcli eRT getv Device.WiFi.SSID.2.Enable)
         ssidExecution=$(echo "$ssidEnable" | grep "Execution succeed")
         if [ "$ssidExecution" != "" ]; then
             isEnabled=$(echo "$ssidEnable" | grep "false")
             if [ "$isEnabled" != "" ]; then
-                Radio_5G_Enable_Check
                 SSID_DISABLED=1
                 echo_t "[RDKB_SELFHEAL] : SSID 5GHZ is disabled"
                 t2CountNotify "WIFI_INFO_5G_DISABLED"
@@ -3017,6 +3018,7 @@ case $SELFHEAL_TYPE in
                 echo "$ssidEnable"
             fi
         fi
+        Radio_5G_Enable_Check
     ;;
     "TCCBR")
         #Selfheal will run after 15mins of bootup, then by now the WIFI initialization must have
@@ -3024,6 +3026,7 @@ case $SELFHEAL_TYPE in
         #Restart the WIFI if initialization is not done with in 15mins of poweron.
         if [ "$WiFi_Flag" = "false" ]; then
             SSID_DISABLED=0
+            RADIO_DISBLD_5G=0
             if [ -f "/tmp/wifi_initialized" ]; then
                 echo_t "[RDKB_SELFHEAL] : WiFi Initialization done"
                 ssidEnable=$(dmcli eRT getv Device.WiFi.SSID.2.Enable)
@@ -3031,7 +3034,6 @@ case $SELFHEAL_TYPE in
                 if [ "$ssidExecution" != "" ]; then
                     isEnabled=$(echo "$ssidEnable" | grep "false")
                     if [ "$isEnabled" != "" ]; then
-                        Radio_5G_Enable_Check
                         SSID_DISABLED=1
                         echo_t "[RDKB_SELFHEAL] : SSID 5GHZ is disabled"
                         t2CountNotify "WIFI_INFO_5G_DISABLED"
@@ -3046,6 +3048,7 @@ case $SELFHEAL_TYPE in
                         echo "$ssidEnable"
                     fi
                 fi
+                Radio_5G_Enable_Check
             else
                 echo_t  "[RDKB_PLATFORM_ERROR] : WiFi initialization not done"
                 if [ -f "$thisREADYFILE" ]; then
@@ -3062,6 +3065,7 @@ case $SELFHEAL_TYPE in
         #Restart the WIFI if initialization is not done with in 15mins of poweron.
         if [ "$WiFi_Flag" = "false" -a "$MODEL_NUM" != "CVA601ZCOM" ]; then
             SSID_DISABLED=0
+            RADIO_DISBLD_5G=0
             if [ -f "/tmp/wifi_initialized" ]; then
                 echo_t "[RDKB_SELFHEAL] : WiFi Initialization done"
                 ssidEnable=$(dmcli eRT getv Device.WiFi.SSID.2.Enable)
@@ -3069,7 +3073,6 @@ case $SELFHEAL_TYPE in
                 if [ "$ssidExecution" != "" ]; then
                     isEnabled=$(echo "$ssidEnable" | grep "false")
                     if [ "$isEnabled" != "" ]; then
-                        Radio_5G_Enable_Check
                         SSID_DISABLED=1
                         echo_t "[RDKB_SELFHEAL] : SSID 5GHZ is disabled"
 			t2CountNotify "WIFI_INFO_5G_DISABLED"
@@ -3084,6 +3087,7 @@ case $SELFHEAL_TYPE in
                         echo "$ssidEnable"
                     fi
                 fi
+                Radio_5G_Enable_Check
             else
                 echo_t  "[RDKB_PLATFORM_ERROR] : WiFi initialization not done"
 		if [ "$BOX_TYPE" = "XB6" ] && ( [ "$MANUFACTURE" = "Technicolor" ] || [ "$MANUFACTURE" = "Sercomm"] ); then
@@ -3183,7 +3187,7 @@ fi
 if ([ "$SELFHEAL_TYPE" = "BASE" ] || [ "$WiFi_Flag" = "false" ]) && [ "$MODEL_NUM" != "CVA601ZCOM" ]; then
     # If bridge mode is not set and WiFI is not disabled by user,
     # check the status of SSID
-    if [ $BR_MODE -eq 0 ] && [ $SSID_DISABLED -eq 0 ]; then
+    if [ $BR_MODE -eq 0 ] && [ $SSID_DISABLED -eq 0 ] && [ $RADIO_DISBLD_5G -eq 0 ]; then
         ssidStatus_5=$(dmcli eRT getv Device.WiFi.SSID.2.Status)
         isExecutionSucceed=$(echo "$ssidStatus_5" | grep "Execution succeed")
         if [ "$isExecutionSucceed" != "" ]; then
@@ -3293,25 +3297,13 @@ if ([ "$SELFHEAL_TYPE" = "BASE" ] || [ "$WiFi_Flag" = "false" ]) && [ "$MODEL_NU
 
     # Check the status if 2.4GHz Wifi SSID
     SSID_DISABLED_2G=0
+    RADIO_DISBLD_2G=0
     ssidEnable_2=$(dmcli eRT getv Device.WiFi.SSID.1.Enable)
     ssidExecution_2=$(echo "$ssidEnable_2" | grep "Execution succeed")
 
     if [ "$ssidExecution_2" != "" ]; then
         isEnabled_2=$(echo "$ssidEnable_2" | grep "false")
         if [ "$isEnabled_2" != "" ]; then
-            radioEnable_2=$(dmcli eRT getv Device.WiFi.Radio.1.Enable)
-            radioExecution_2=$(echo "$radioEnable_2" | grep "Execution succeed")
-            if [ "$radioExecution_2" != "" ]; then
-                isRadioEnabled_2=$(echo "$radioEnable_2" | grep "false")
-                if [ "$isRadioEnabled_2" != "" ]; then
-                    echo_t "[RDKB_SELFHEAL] : Both 2G Radio(Radio 1) and 2G Private SSID are in DISABLED state"
-                else
-                    echo_t "[RDKB_SELFHEAL] : 2G Radio(Radio 1) is Enabled, only 2G Private SSID is DISABLED"
-                fi
-             else
-                echo_t "[RDKB_PLATFORM_ERROR] : Something went wrong while checking 2.4G Radio Enable"
-                echo $radioEnable_2
-            fi
             SSID_DISABLED_2G=1
             echo_t "[RDKB_SELFHEAL] : SSID 2.4GHZ is disabled"
             t2CountNotify "WIFI_INFO_2G_DISABLED"
@@ -3320,10 +3312,25 @@ if ([ "$SELFHEAL_TYPE" = "BASE" ] || [ "$WiFi_Flag" = "false" ]) && [ "$MODEL_NU
         echo_t "[RDKB_PLATFORM_ERROR] : Something went wrong while checking 2.4G Enable"
         echo "$ssidEnable_2"
     fi
+    radioEnable_2=$(dmcli eRT getv Device.WiFi.Radio.1.Enable)
+    radioExecution_2=$(echo "$radioEnable_2" | grep "Execution succeed")
+
+    if [ "$radioExecution_2" != "" ]; then
+        isRadioEnabled_2=$(echo "$radioEnable_2" | grep "false")
+        if [ "$isRadioEnabled_2" != "" ]; then
+            RADIO_DISBLD_2G=1
+            echo_t "[RDKB_SELFHEAL] : 2G Radio(Radio 1) is Disabled"
+        else
+            echo_t "[RDKB_SELFHEAL] : 2G Radio(Radio 1) is Enabled"
+        fi
+        else
+        echo_t "[RDKB_PLATFORM_ERROR] : Something went wrong while checking 2.4G Radio Enable"
+        echo $radioEnable_2
+    fi
 
     # If bridge mode is not set and WiFI is not disabled by user,
     # check the status of SSID
-    if [ $BR_MODE -eq 0 ] && [ $SSID_DISABLED_2G -eq 0 ]; then
+    if [ $BR_MODE -eq 0 ] && [ $SSID_DISABLED_2G -eq 0 ] && [ $RADIO_DISBLD_2G -eq 0 ]; then
         ssidStatus_2=$(dmcli eRT getv Device.WiFi.SSID.1.Status)
         isExecutionSucceed_2=$(echo "$ssidStatus_2" | grep "Execution succeed")
         if [ "$isExecutionSucceed_2" != "" ]; then
