@@ -29,6 +29,8 @@
 #define DEFAULT_CPU_THRESHOLD       100 /* in percentage */
 #define DEFAULT_MEMORY_THRESHOLD    100 /* in percentage */
 
+extern int g_boot_cron_mode;
+
 /***********************************************************************
 
  APIs for Object:
@@ -146,24 +148,22 @@ BOOL SelfHeal_SetParamBoolValue
     )
 {
     PCOSA_DATAMODEL_SELFHEAL            pMyObject    = (PCOSA_DATAMODEL_SELFHEAL)g_pCosaBEManager->hSelfHeal;
-    char buf[128] = {0};
+    
     if (strcmp(ParamName, "X_RDKCENTRAL-COM_Enable") == 0)
     {
         if( pMyObject->Enable == bValue )
         {
             return TRUE;
-	}
+	    }
 
         if (syscfg_set_commit(NULL, "selfheal_enable", bValue ? "true" : "false") != 0)
         {
-	    CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
-	    return FALSE;
+	        CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
+	        return FALSE;
         }
-        else 
+        else
         {
-	        syscfg_get( NULL, "SelfHealCronEnable", buf, sizeof(buf));
-            CcspTraceInfo(("SelfHealCronEnable value is %s\n", buf));
-            if( strcmp(buf, "true") != 0)
+	        if(g_boot_cron_mode == 0)
 	        {
                 CcspTraceInfo(("%s : SelfHealCronEnable is disabled, running as background process\n", __FUNCTION__));
                 if ( bValue == TRUE )
@@ -179,18 +179,13 @@ BOOL SelfHeal_SetParamBoolValue
 	        }
             else
             {
-                if ( bValue == TRUE )
-                {
-			        manage_self_heal_cron_state(true);
-	            }
-                else
-	            {
-			        manage_self_heal_cron_state(false);
-	            }
-
+                // Stop any background processes of selfheal
+                stop_self_heal_scripts();
+                // Let the Cron Manager handle the crontab based on bValue
+                manage_self_heal_cron_state(bValue);
             }
-	    pMyObject->Enable = bValue;
-	}
+	        pMyObject->Enable = bValue;
+	    }
         return TRUE;
     }
 
@@ -844,7 +839,6 @@ ConnectivityTest_SetParamUlongValue
             return  TRUE;
         }
 
-        char buf[32] = {0};
 	    char currentValue[16] = {0};
         ULONG currentInterval = 0;
 
@@ -869,9 +863,7 @@ ConnectivityTest_SetParamUlongValue
 		    CcspTraceWarning(("%s syscfg set failed for ConnTest_PingInterval\n",__FUNCTION__));
 		    return FALSE;
 	    }
-        syscfg_get( NULL, "SelfHealCronEnable", buf, sizeof(buf));
-        CcspTraceInfo(("SelfHealCronEnable value is %s\n", buf));
-        if( strcmp(buf, "true") == 0 )
+        if(g_boot_cron_mode == 1)
         {
             CcspTraceInfo(("Connectivity ping Interval updated from %lu to %lu minutes\n", currentInterval, uValue));
             // First, remove old cron entry
@@ -1639,11 +1631,8 @@ ResourceMonitor_SetParamUlongValue
 	        CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
 	        return FALSE;
         }
-    
-        char temp[16];
-        syscfg_get( NULL, "SelfHealCronEnable", temp, sizeof(temp));
-        CcspTraceInfo(("SelfHealCronEnable value is %s\n", temp));
-        if( strcmp(temp, "true") == 0 )
+
+        if(g_boot_cron_mode == 1)
         {
             CcspTraceInfo(("resource monitor Interval updated to %lu minutes\n", uValue));
             // First, remove old cron entry
