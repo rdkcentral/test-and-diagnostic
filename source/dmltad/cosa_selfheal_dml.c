@@ -29,11 +29,10 @@
 #define DEFAULT_CPU_THRESHOLD       100 /* in percentage */
 #define DEFAULT_MEMORY_THRESHOLD    100 /* in percentage */
 
-extern int g_boot_cron_mode;
-
 /***********************************************************************
 
  APIs for Object:
+
     SelfHeal.
 
     *  SelfHeal_GetParamBoolValue
@@ -148,44 +147,71 @@ BOOL SelfHeal_SetParamBoolValue
     )
 {
     PCOSA_DATAMODEL_SELFHEAL            pMyObject    = (PCOSA_DATAMODEL_SELFHEAL)g_pCosaBEManager->hSelfHeal;
-    
+    char buf[128] = {0};
+    FILE *fp;
     if (strcmp(ParamName, "X_RDKCENTRAL-COM_Enable") == 0)
     {
         if( pMyObject->Enable == bValue )
         {
             return TRUE;
-	    }
+	}
 
         if (syscfg_set_commit(NULL, "selfheal_enable", bValue ? "true" : "false") != 0)
         {
-	        CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
-	        return FALSE;
+	    CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
+	    return FALSE;
         }
-        else
+        else 
         {
-	        if(g_boot_cron_mode == 0)
+	    syscfg_get( NULL, "SelfHealCronEnable", buf, sizeof(buf));
+            CcspTraceInfo(("SelfHealCronEnable value is %s\n", buf));
+
+	    if( strcmp(buf, "false") == 0 )
 	        {
                 CcspTraceInfo(("%s : SelfHealCronEnable is disabled, running as background process\n", __FUNCTION__));
                 if ( bValue == TRUE )
-                {
-                    CcspTraceInfo(("SelfHeal cron is disabled, starting selfheal scripts as process\n"));
-			        start_self_heal_scripts();
-	            }
-                else
-	            {
-                    CcspTraceInfo(("SelfHeal cron and selfheal is disabled, stopping selfheal scripts process\n"));
-			        stop_self_heal_scripts();
-	            }
+	        {
+                    v_secure_system("/usr/ccsp/tad/self_heal_connectivity_test.sh &"); 
+
+                    v_secure_system("/usr/ccsp/tad/selfheal_aggressive.sh &");
 	        }
-            else
-            {
-                // Stop any background processes of selfheal
-                stop_self_heal_scripts();
-                // Let the Cron Manager handle the crontab based on bValue
-                manage_self_heal_cron_state(bValue);
-            }
-	        pMyObject->Enable = bValue;
+               else
+	       {
+                fp = v_secure_popen("r", "busybox pidof self_heal_connectivity_test.sh");
+                copy_command_output(fp, buf, sizeof(buf));
+                v_secure_pclose(fp);
+
+                if (!strcmp(buf, "")) {
+	            CcspTraceWarning(("%s: SelfHeal Monitor script is not running\n", __FUNCTION__));
+                } else {    
+	            CcspTraceWarning(("%s: Stop SelfHeal Monitor script\n", __FUNCTION__));
+                    v_secure_system("kill -9 %s", buf);
+                }
+    
+                /*fp = v_secure_popen("r", "busybox pidof resource_monitor.sh");
+                copy_command_output(fp, buf, sizeof(buf));
+                v_secure_pclose(fp);
+
+                if (!strcmp(buf, "")) {
+	            CcspTraceWarning(("%s: Resource Monitor script is not running\n", __FUNCTION__));
+                } else {    
+	            CcspTraceWarning(("%s: Stop Resource Monitor script\n", __FUNCTION__));
+                    v_secure_system("kill -9 %s", buf);
+                }   
+       */
+                fp = v_secure_popen("r", "busybox pidof selfheal_aggressive.sh");
+                copy_command_output(fp, buf, sizeof(buf));
+                v_secure_pclose(fp);
+
+                if (!strcmp(buf, "")) {
+	            CcspTraceWarning(("%s: Aggressive self heal script is not running\n", __FUNCTION__));
+                } else {
+	            CcspTraceWarning(("%s: Aggressive self heal script\n", __FUNCTION__));
+                    v_secure_system("kill -9 %s", buf);
+                }
 	    }
+	    pMyObject->Enable = bValue;
+	}
         return TRUE;
     }
 
@@ -838,40 +864,18 @@ ConnectivityTest_SetParamUlongValue
         {
             return  TRUE;
         }
-
-	    char currentValue[16] = {0};
-        ULONG currentInterval = 0;
-
-        if (syscfg_get(NULL, "ConnTest_PingInterval", currentValue, sizeof(currentValue)) == 0)
-        {
-            currentInterval = atol(currentValue);
-            if (currentInterval == uValue)
-            {
-                CcspTraceInfo(("Conn Ping Interval value unchanged (%lu), skipping update\n", uValue));
-                return TRUE;
-            }
-        }
-
-        if ( uValue < 15 || uValue > 1440 )
-	    {
-		    CcspTraceWarning(("%s PingInterval value passed is not in range\n",__FUNCTION__));
-		    return FALSE;
-	    }
+        
+		if ( uValue < 15 || uValue > 1440 )
+		{
+			CcspTraceWarning(("%s PingInterval value passed is not in range\n",__FUNCTION__));
+			return FALSE;
+		}
         /* save update to backup */
-	    if (syscfg_set_u_commit(NULL, "ConnTest_PingInterval", uValue) != 0)
-	    {
-		    CcspTraceWarning(("%s syscfg set failed for ConnTest_PingInterval\n",__FUNCTION__));
-		    return FALSE;
-	    }
-        if(g_boot_cron_mode == 1)
-        {
-            CcspTraceInfo(("Connectivity ping Interval updated from %lu to %lu minutes\n", currentInterval, uValue));
-            // First, remove old cron entry
-            v_secure_system("crontab -l 2>/dev/null | sed '/self_heal_connectivity_test.sh/d' | crontab -");
-            // Then, add new cron entry with updated interval
-            v_secure_system("(crontab -l 2>/dev/null; echo \"*/%lu * * * * /usr/ccsp/tad/self_heal_connectivity_test.sh\") | crontab -", uValue);
-            CcspTraceInfo(("Selfheal connectivity cron job restarted with interval: %lu minutes\n", uValue));
-        }
+		if (syscfg_set_u_commit(NULL, "ConnTest_PingInterval", uValue) != 0)
+		{
+			CcspTraceWarning(("%s syscfg set failed for ConnTest_PingInterval\n",__FUNCTION__));
+			return FALSE;
+		}
         pMyObject->pConnTest->PingInterval = uValue;
         return TRUE;
     }
@@ -1595,54 +1599,30 @@ ResourceMonitor_SetParamUlongValue
 (defined(_XB6_PRODUCT_REQ_) && defined(_COSA_BCM_ARM_))
         char buf[8];
         errno_t rc = -1;
-	    ULONG aggressive_interval;
-
-	    char currentValue[16] = {0};
-        ULONG currentInterval = 0;
-
-        if (syscfg_get(NULL, "resource_monitor_interval", currentValue, sizeof(currentValue)) == 0)
-        {
-            currentInterval = atol(currentValue);
-            if (currentInterval == uValue)
-            {
-                CcspTraceInfo(("Resource Monitor Interval value unchanged (%lu), skipping update\n", uValue));
-                return TRUE;
-            }
-        }
-
+	ULONG aggressive_interval;
         rc = memset_s(buf, sizeof(buf), 0, sizeof(buf));
         ERR_CHK(rc);
 
-	    if (syscfg_get( NULL, "AggressiveInterval", buf, sizeof(buf)) != 0)
-	    {
-	        AnscTraceWarning(("syscfg_get failed for AggressiveInterval !\n"));
-	        return FALSE;
-	    }
-	    aggressive_interval = atol(buf);
-	    if (uValue <= aggressive_interval)
-	    {
-	        CcspTraceWarning(("resource_monitor_interval should be greater than AggressiveInterval \n"));
-	        return FALSE;
-	    }
+	if (syscfg_get( NULL, "AggressiveInterval", buf, sizeof(buf)) != 0)
+	{
+	    AnscTraceWarning(("syscfg_get failed for AggressiveInterval !\n"));
+	    return FALSE;
+	}
+	aggressive_interval = atol(buf);
+	if (uValue <= aggressive_interval)
+	{
+	    CcspTraceWarning(("resource_monitor_interval should be greater than AggressiveInterval \n"));
+	    return FALSE;
+	}
 #endif
 
         if (syscfg_set_u_commit(NULL, "resource_monitor_interval", uValue) != 0)
         {
-	        CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
-	        return FALSE;
+	    CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
+	    return FALSE;
         }
-
-        if(g_boot_cron_mode == 1)
-        {
-            CcspTraceInfo(("resource monitor Interval updated to %lu minutes\n", uValue));
-            // First, remove old cron entry
-            v_secure_system("crontab -l 2>/dev/null | sed '/resource_monitor.sh/d' | crontab -");
-            // Then, add new cron entry with updated interval
-            v_secure_system("(crontab -l 2>/dev/null; echo \"*/%lu * * * * /usr/ccsp/tad/resource_monitor.sh\") | crontab -", uValue);
-            CcspTraceInfo(("resource monitor cron job restarted with interval: %lu minutes\n", uValue));
-        }
-	    pRescMonitor->MonIntervalTime = uValue;
-	    return TRUE;
+	pRescMonitor->MonIntervalTime = uValue;
+	return TRUE;
     }
 
     if (strcmp(ParamName, "X_RDKCENTRAL-COM_AvgCPUThreshold") == 0)
