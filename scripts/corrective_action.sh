@@ -24,7 +24,8 @@ if [ -f /etc/device.properties ]; then
 fi
 
 source /lib/rdk/t2Shared_api.sh
-
+TAD_PATH="/usr/ccsp/tad/"
+source $TAD_PATH/boot_mode.sh
 # use SELFHEAL_TYPE to handle various code paths below (BOX_TYPE is set in device.properties)
 case $BOX_TYPE in
     "XB3") SELFHEAL_TYPE="BASE";;
@@ -46,7 +47,6 @@ case $BOX_TYPE in
 esac
 
 
-TAD_PATH="/usr/ccsp/tad/"
 UTOPIA_PATH="/etc/utopia/service.d"
 RDKLOGGER_PATH="/rdklogger"
 VERSION_FILE="/version.txt"
@@ -874,8 +874,7 @@ resetNeeded()
 
             elif [ "$SELFHEAL_TYPE" = "BASE" -o "$SELFHEAL_TYPE" = "TCCBR" ] && [ "$ProcessName" = "CcspTandDSsp" ]; then
                 echo_t "RDKB_SELFHEAL : Resetting process $ProcessName"
-                CRON_ENABLED=$(syscfg get SelfHealCronEnable)
-                if [ "$CRON_ENABLED" != "true" ]; then
+               if [ "$SELFHEAL_EXECUTION_MODE" != "CRON" ]; then
                     SelfHealScript_PID=$(busybox pidof self_heal_connectivity_test.sh)
                     if [ "$SelfHealScript_PID" != "" ]; then
                         kill -9 "$SelfHealScript_PID"

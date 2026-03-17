@@ -509,6 +509,7 @@ BOOT_TASK_FLAG="/tmp/.boot_healthcheck_done"
 
 cron_mode()
 {
+    acquire_lock "resource_monitor" "resource_monitor.sh"
 	echo_t "[RDKB_RES_SELFHEAL] : Cron job is enabled"
 	# Skip during boot (first 15 minutes)
     if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
@@ -552,8 +553,8 @@ process_mode()
         done
 }
 
-if [ "$CRON_ENABLED" = "true" ]; then
-	cron_mode
+if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
+    cron_mode
 else
-	process_mode
+    process_mode
 fi
