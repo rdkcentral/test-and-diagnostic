@@ -73,8 +73,8 @@ update_cron_after_random_sleep()
         INTERVAL=`syscfg get ConnTest_PingInterval`
         [ -z "$INTERVAL" ] && INTERVAL=60
 
-        crontab -l | grep -v "self_heal_connectivity_test.sh" | crontab -
-        (crontab -l 2>/dev/null; echo "*/$INTERVAL * * * * /usr/ccsp/tad/self_heal_connectivity_test.sh") | crontab -
+        (crontab -l 2>/dev/null | grep -v "self_heal_connectivity_test.sh"; \
+ echo "*/$INTERVAL * * * * /usr/ccsp/tad/self_heal_connectivity_test.sh") | crontab -
     fi
 }
 
