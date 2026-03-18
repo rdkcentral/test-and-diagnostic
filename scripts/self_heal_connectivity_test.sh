@@ -74,7 +74,7 @@ update_cron_after_random_sleep()
         [ -z "$INTERVAL" ] && INTERVAL=60
 
         (crontab -l 2>/dev/null | grep -v "self_heal_connectivity_test.sh"; \
- echo "*/$INTERVAL * * * * /usr/ccsp/tad/self_heal_connectivity_test.sh") | crontab -
+		echo "*/$INTERVAL * * * * /usr/ccsp/tad/self_heal_connectivity_test.sh") | crontab -
     fi
 }
 
