@@ -38,15 +38,22 @@ ping6_success=0
 ping4_failed=0
 ping6_failed=0
 
+SELFHEAL_CONN_TMP_DIR="/tmp/.selfheal_conn"
+UPLOAD_SCHEDULE_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_schedule.log"
+DELAY_COUNTDOWN_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_delay_countdown"
+MODE_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_mode"
+
+if [ ! -d "$SELFHEAL_CONN_TMP_DIR" ]; then
+    mkdir -p "$SELFHEAL_CONN_TMP_DIR"
+fi
 
 getCorrectiveActionState() {
     Corrective_Action=`syscfg get ConnTest_CorrectiveAction`
     echo "$Corrective_Action"
 }
 
-calcRandTimetoStartPing()
+generate_random_sleep()
 {
-
     rand_min=0
     rand_sec=0
 
@@ -58,8 +65,61 @@ calcRandTimetoStartPing()
 
     sec_to_sleep=$(($rand_min*60 + $rand_sec))
     echo_t "self_heal_connectivity_test is going into sleep for $sec_to_sleep sec"
-    sleep $sec_to_sleep;
-        
+}
+
+update_cron_after_random_sleep()
+{
+    if [ "$CRON_MODE" = "1" ]; then
+        INTERVAL=`syscfg get ConnTest_PingInterval`
+        [ -z "$INTERVAL" ] && INTERVAL=60
+
+        crontab -l | grep -v "self_heal_connectivity_test.sh" | crontab -
+        (crontab -l 2>/dev/null; echo "*/$INTERVAL * * * * /usr/ccsp/tad/self_heal_connectivity_test.sh") | crontab -
+    fi
+}
+
+calcRandTimetoStartPing()
+{
+    if [ "$CRON_MODE" = "1" ]; then
+        if [ ! -f "$DELAY_COUNTDOWN_FILE" ] && [ ! -f "$MODE_FILE" ]; then
+            generate_random_sleep
+            remaining=$((sec_to_sleep - 600))
+            [ "$remaining" -lt 0 ] && remaining="$sec_to_sleep"
+            echo "$remaining" > "$DELAY_COUNTDOWN_FILE"
+            echo_t "RDKB_SELF_HEAL_CONN: Initial random delay stored: $sec_to_sleep seconds" >> "$UPLOAD_SCHEDULE_FILE"
+            echo "DELAY" > "$MODE_FILE"
+            echo_t "RDKB_SELF_HEAL_CONN: Remaining delay: $remaining sec" >> "$UPLOAD_SCHEDULE_FILE"
+            exit 0
+        fi
+
+        MODE=$(cat "$MODE_FILE" 2>/dev/null)
+
+        if [ "$MODE" = "DELAY" ]; then
+            remaining=$(cat "$DELAY_COUNTDOWN_FILE" 2>/dev/null)
+            [ -z "$remaining" ] && remaining=0
+
+            if [ "$remaining" -le 600 ]; then
+                echo_t "Final delay sleep: $remaining sec" >> "$UPLOAD_SCHEDULE_FILE"
+                [ "$remaining" -gt 0 ] && sleep "$remaining"
+
+                rm -f "$DELAY_COUNTDOWN_FILE"
+                echo "NORMAL" > "$MODE_FILE"
+
+                echo_t "Delay complete -> NORMAL mode" >> "$UPLOAD_SCHEDULE_FILE"
+                update_cron_after_random_sleep
+            else
+                remaining=$((remaining - 600))
+                echo "$remaining" > "$DELAY_COUNTDOWN_FILE"
+
+                echo_t "Remaining delay: $remaining sec" >> "$UPLOAD_SCHEDULE_FILE"
+                exit 0
+            fi
+        fi
+    else
+        generate_random_sleep
+        echo_t "RDKB_SELF_HEAL_CONN: Sleeping for $sec_to_sleep seconds" >> "$UPLOAD_SCHEDULE_FILE"
+        sleep $sec_to_sleep;
+    fi
 }
 
 # A generic function which can be used for any URL parsing
@@ -609,16 +669,26 @@ cron_mode()
 {
     acquire_lock "self_heal_connectivity_test" "self_heal_connectivity_test.sh"
     echo_t "RDKB_CONN_SELFHEAL : Cron job is enabled"
+
     if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
-            echo_t "[RDKB_CONN_SELFHEAL] : Still booting, skipping"
-            exit 0
-        fi
-	if [ "$SELFHEAL_ENABLE" != "true" ]; then
-            echo_t "[RDKB_CONN_SELFHEAL] : selfheal_enable != true, exiting"
-            exit 0
-        fi
-        run_connectivity_test
+        echo_t "[RDKB_CONN_SELFHEAL] : Still booting, skipping"
         exit 0
+    fi
+
+    if [ "$SELFHEAL_ENABLE" != "true" ]; then
+        echo_t "[RDKB_CONN_SELFHEAL] : selfheal_enable != true, exiting"
+        exit 0
+    fi
+
+    calcRandTimetoStartPing
+
+    MODE=$(cat "$MODE_FILE" 2>/dev/null)
+    if [ "$MODE" = "DELAY" ]; then
+        exit 0
+    fi
+
+    run_connectivity_test
+    exit 0
 }
 
 process_mode()
@@ -641,7 +711,9 @@ process_mode()
 }
 
 if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
+    CRON_MODE=1
     cron_mode
 else
+    CRON_MODE=0
     process_mode
 fi
