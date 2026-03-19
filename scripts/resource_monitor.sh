@@ -503,7 +503,6 @@ Bootup_HealthCheck()
     fi
 }
 
-CRON_ENABLED=$(syscfg get SelfHealCronEnable)
 BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
 BOOT_TASK_FLAG="/tmp/.boot_healthcheck_done"
 

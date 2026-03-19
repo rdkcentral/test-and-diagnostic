@@ -18,8 +18,22 @@
 # limitations under the License.
 #######################################################################################
 
-MODE_FILE="/tmp/boot_check_cron.mode"
+MODE_FILE="/tmp/.boot_check_cron.mode"
+RDKLOG_FILE="/rdklogs/logs/Consolelog.txt.0"
 
+#waiting for syscfg to initialize
+RETRIES=0
+MAX_RETRIES=30
+while [ ! -f /tmp/syscfg.db ] && [ $RETRIES -lt $MAX_RETRIES ]; do
+    echo_t "Waiting for syscfg initialization... ($RETRIES)" >> "$RDKLOG_FILE"
+    sleep 2
+    RETRIES=$((RETRIES + 1))
+done
+
+# Double check the status of the daemon if necessary
+if [ "$RETRIES" -eq "$MAX_RETRIES" ]; then
+    echo_t "Error: syscfg timed out. Proceeding with default." >> "$RDKLOG_FILE"
+fi
 # INTERNAL BOOT-CHECK: 
 # If the .mode file doesn't exist, this is the FIRST run since reboot.
 if [ ! -f "$MODE_FILE" ]; then
@@ -64,5 +78,4 @@ acquire_lock() {
         echo "$$" > "$PIDFILE"
         trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
     fi
-    echo_t "$SCRIPT_NAME lock acquired (pid=$$)"
 }
