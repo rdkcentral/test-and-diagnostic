@@ -22,6 +22,7 @@ UTOPIA_PATH="/etc/utopia/service.d"
 source /etc/waninfo.sh
 
 source $TAD_PATH/corrective_action.sh
+source $TAD_PATH/boot_mode.sh
 
 exec 3>&1 4>&2 >>$SELFHEALFILE 2>&1
 rand_num_old=""
