@@ -553,6 +553,7 @@ process_mode()
         done
 }
 
+echo_t "[RDKB_RES_SELFHEAL] : SelfHealCronEnable is set to $CRON_ENABLED"
 if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
     cron_mode
 else

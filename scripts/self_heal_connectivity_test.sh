@@ -640,6 +640,7 @@ process_mode()
 	 done
 }
 
+echo_t "RDKB_CONN_SELFHEAL : cron execution mode is $SELFHEAL_EXECUTION_MODE"
 if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
     cron_mode
 else

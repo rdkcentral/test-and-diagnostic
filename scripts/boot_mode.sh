@@ -19,27 +19,26 @@
 #######################################################################################
 
 MODE_FILE="/tmp/.boot_check_cron.mode"
+RDKLOG_FILE="/rdklogs/logs/Consolelog.txt.0"
 
+echo_t "Entering to check cron mode at boot time" >> "$RDKLOG_FILE"
 # INTERNAL BOOT-CHECK: 
 # If the .mode file doesn't exist, this is the FIRST run since reboot.
 if [ ! -f "$MODE_FILE" ]; then
+    echo_t "First run since reboot; determining execution mode" >> "$RDKLOG_FILE"
     CRON_ENABLED=$(syscfg get SelfHealCronEnable)
-    SYSCFG_RC=$?   # capture exit code immediately
-
-    if [ $SYSCFG_RC -ne 0 ]; then
-        echo "syscfg get failed with exit code $SYSCFG_RC" >> /tmp/selfheal.log
-        # optional: fallback mode
-        echo "PROCESS" > "$MODE_FILE"
-    else
-
+    echo_t "SelfHealCronEnable is set to: $CRON_ENABLED" >> "$RDKLOG_FILE"
         if [ "$CRON_ENABLED" = "true" ]; then
+            echo_t "Cron is enabled; setting mode to CRON" >> "$RDKLOG_FILE"
             echo "CRON" > "$MODE_FILE"
         else
+            echo_t "Cron is disabled; setting mode to PROCESS" >> "$RDKLOG_FILE"
             echo "PROCESS" > "$MODE_FILE"
         fi
     fi
 fi
 SELFHEAL_EXECUTION_MODE=$(cat "$MODE_FILE")
+echo_t "Current execution mode: $SELFHEAL_EXECUTION_MODE" >> "$RDKLOG_FILE"
 
 # Usage: acquire_lock "LOCK_NAME" "SCRIPT_FILENAME"
 acquire_lock() {
