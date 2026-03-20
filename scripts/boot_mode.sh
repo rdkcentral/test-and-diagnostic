@@ -18,7 +18,7 @@
 # limitations under the License.
 #######################################################################################
 
-MODE_FILE="/tmp/boot_check_cron.mode"
+MODE_FILE="/tmp/.boot_check_cron.mode"
 
 # INTERNAL BOOT-CHECK: 
 # If the .mode file doesn't exist, this is the FIRST run since reboot.
