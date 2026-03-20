@@ -23,6 +23,7 @@ TAD_PATH="/usr/ccsp/tad"
 source $TAD_PATH/corrective_action.sh
 source /etc/waninfo.sh
 source /etc/utopia/service.d/event_handler_functions.sh
+source $TAD_PATH/boot_mode.sh
 DIBBLER_SERVER_CONF="/etc/dibbler/server.conf"
 
 
