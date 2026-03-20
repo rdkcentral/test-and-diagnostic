@@ -706,13 +706,10 @@ cron_mode()
     fi
 
     if ready_to_ping_test; then
-        echo_t "[RDKB_CONN_SELFHEAL] : Running connectivity test" >> "$UPLOAD_SCHEDULE_FILE"
+        echo_t "[RDKB_CONN_SELFHEAL] : Running connectivity test"
 
         run_connectivity_test
         date +%s > "$LAST_EXECUTION_FILE"
-        echo_t "[RDKB_CONN_SELFHEAL] : Updated last execution time AFTER ping" >> "$UPLOAD_SCHEDULE_FILE"
-    else
-        echo_t "[RDKB_CONN_SELFHEAL] : Not time yet" >> "$UPLOAD_SCHEDULE_FILE"
     fi
     exit 0
 }
