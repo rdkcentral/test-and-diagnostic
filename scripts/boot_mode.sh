@@ -64,5 +64,4 @@ acquire_lock() {
         echo "$$" > "$PIDFILE"
         trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
     fi
-    echo_t "$SCRIPT_NAME lock acquired (pid=$$)"
 }
