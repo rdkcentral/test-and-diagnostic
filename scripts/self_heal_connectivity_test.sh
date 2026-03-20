@@ -78,7 +78,6 @@ ready_to_ping_test()
     current_time=$(date +%s)
 
     if [ ! -f "$LAST_EXECUTION_FILE" ]; then
-	    echo_t "First execution allowed" >> "$UPLOAD_SCHEDULE_FILE"
 		return 0
     fi
 
@@ -87,15 +86,14 @@ ready_to_ping_test()
     remaining=$((INTERVAL_SEC - diff))
 
     if [ "$diff" -ge "$INTERVAL_SEC" ]; then
-        echo_t "Interval met ($diff >= $INTERVAL_SEC)" >> "$UPLOAD_SCHEDULE_FILE"
+        echo_t "Interval met ($diff >= $INTERVAL_SEC)" 
         return 0
     elif [ "$remaining" -le 600 ]; then
-        echo_t "Interval almost met, sleeping $remaining sec to align exact run" >> "$UPLOAD_SCHEDULE_FILE"
+        echo_t "Interval almost met, sleeping $remaining sec to align exact run" 
         sleep "$remaining"
-        echo_t "Interval met after sleep, running ping now" >> "$UPLOAD_SCHEDULE_FILE"
+        echo_t "Interval met after sleep, running ping now" 
         return 0
     else
-        echo_t "Skipping: only $diff sec elapsed" >> "$UPLOAD_SCHEDULE_FILE"
         return 1
     fi
 }
@@ -108,9 +106,9 @@ calcRandTimetoStartPing()
             remaining=$((sec_to_sleep - 600))
             [ "$remaining" -lt 0 ] && remaining="$sec_to_sleep"
             echo "$remaining" > "$DELAY_COUNTDOWN_FILE"
-            echo_t "RDKB_SELF_HEAL_CONN: Initial random delay stored: $sec_to_sleep seconds" >> "$UPLOAD_SCHEDULE_FILE"
+            echo_t "RDKB_SELF_HEAL_CONN: Initial random delay stored: $sec_to_sleep seconds" 
             echo "DELAY" > "$MODE_FILE"
-            echo_t "RDKB_SELF_HEAL_CONN: Remaining delay: $remaining sec" >> "$UPLOAD_SCHEDULE_FILE"
+            echo_t "RDKB_SELF_HEAL_CONN: Remaining delay: $remaining sec"
             exit 0
         fi
 
@@ -121,24 +119,23 @@ calcRandTimetoStartPing()
             [ -z "$remaining" ] && remaining=0
 
             if [ "$remaining" -le 600 ]; then
-                echo_t "Final delay sleep: $remaining sec" >> "$UPLOAD_SCHEDULE_FILE"
+                echo_t "Final delay sleep: $remaining sec" 
                 [ "$remaining" -gt 0 ] && sleep "$remaining"
 
                 rm -f "$DELAY_COUNTDOWN_FILE"
                 echo "NORMAL" > "$MODE_FILE"
 
-                echo_t "Delay complete -> NORMAL mode" >> "$UPLOAD_SCHEDULE_FILE"
+                echo_t "Delay complete -> NORMAL mode" 
             else
                 remaining=$((remaining - 600))
                 echo "$remaining" > "$DELAY_COUNTDOWN_FILE"
 
-                echo_t "Remaining delay: $remaining sec" >> "$UPLOAD_SCHEDULE_FILE"
                 exit 0
             fi
         fi
     else
         generate_random_sleep
-        echo_t "RDKB_SELF_HEAL_CONN: Sleeping for $sec_to_sleep seconds" >> "$UPLOAD_SCHEDULE_FILE"
+        echo_t "RDKB_SELF_HEAL_CONN: Sleeping for $sec_to_sleep seconds" 
         sleep $sec_to_sleep;
     fi
 }
