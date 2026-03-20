@@ -24,10 +24,19 @@ MODE_FILE="/tmp/boot_check_cron.mode"
 # If the .mode file doesn't exist, this is the FIRST run since reboot.
 if [ ! -f "$MODE_FILE" ]; then
     CRON_ENABLED=$(syscfg get SelfHealCronEnable)
-    if [ "$CRON_ENABLED" = "true" ]; then
-        echo "CRON" > "$MODE_FILE"
-    else
+    SYSCFG_RC=$?   # capture exit code immediately
+
+    if [ $SYSCFG_RC -ne 0 ]; then
+        echo "syscfg get failed with exit code $SYSCFG_RC" >> /tmp/selfheal.log
+        # optional: fallback mode
         echo "PROCESS" > "$MODE_FILE"
+    else
+
+        if [ "$CRON_ENABLED" = "true" ]; then
+            echo "CRON" > "$MODE_FILE"
+        else
+            echo "PROCESS" > "$MODE_FILE"
+        fi
     fi
 fi
 SELFHEAL_EXECUTION_MODE=$(cat "$MODE_FILE")
