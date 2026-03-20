@@ -42,6 +42,7 @@ SELFHEAL_CONN_TMP_DIR="/tmp/.selfheal_conn"
 UPLOAD_SCHEDULE_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_schedule.log"
 DELAY_COUNTDOWN_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_delay_countdown"
 MODE_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_mode"
+LAST_EXEC_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_last_exec"
 
 if [ ! -d "$SELFHEAL_CONN_TMP_DIR" ]; then
     mkdir -p "$SELFHEAL_CONN_TMP_DIR"
@@ -67,14 +68,28 @@ generate_random_sleep()
     echo_t "self_heal_connectivity_test is going into sleep for $sec_to_sleep sec"
 }
 
-update_cron_after_random_sleep()
+ready_to_ping_test()
 {
-    if [ "$CRON_MODE" = "1" ]; then
-        INTERVAL=`syscfg get ConnTest_PingInterval`
-        [ -z "$INTERVAL" ] && INTERVAL=60
+    INTERVAL_MIN=`syscfg get ConnTest_PingInterval`
+    [ -z "$INTERVAL_MIN" ] && INTERVAL_MIN=60
 
-        (crontab -l 2>/dev/null | grep -v "self_heal_connectivity_test.sh"; \
-		echo "*/$INTERVAL * * * * /usr/ccsp/tad/self_heal_connectivity_test.sh") | crontab -
+    INTERVAL_SEC=$((INTERVAL_MIN * 60))
+    current_time=$(date +%s)
+
+    if [ ! -f "$LAST_EXECUTION_FILE" ]; then
+	    echo_t "First execution allowed" >> "$UPLOAD_SCHEDULE_FILE"
+		return 0
+    fi
+
+    last_time=$(cat "$LAST_EXECUTION_FILE")
+    diff=$((current_time - last_time))
+
+    if [ "$diff" -ge "$INTERVAL_SEC" ]; then
+        echo_t "Interval met ($diff >= $INTERVAL_SEC)" >> "$UPLOAD_SCHEDULE_FILE"
+        return 0
+    else
+        echo_t "Skipping: only $diff sec elapsed" >> "$UPLOAD_SCHEDULE_FILE"
+        return 1
     fi
 }
 
@@ -106,7 +121,6 @@ calcRandTimetoStartPing()
                 echo "NORMAL" > "$MODE_FILE"
 
                 echo_t "Delay complete -> NORMAL mode" >> "$UPLOAD_SCHEDULE_FILE"
-                update_cron_after_random_sleep
             else
                 remaining=$((remaining - 600))
                 echo "$remaining" > "$DELAY_COUNTDOWN_FILE"
@@ -687,7 +701,15 @@ cron_mode()
         exit 0
     fi
 
-    run_connectivity_test
+    if ready_to_ping_test; then
+        echo_t "[RDKB_CONN_SELFHEAL] : Running connectivity test" >> "$UPLOAD_SCHEDULE_FILE"
+
+        run_connectivity_test
+        date +%s > "$LAST_EXECUTION_FILE"
+        echo_t "[RDKB_CONN_SELFHEAL] : Updated last execution time AFTER ping" >> "$UPLOAD_SCHEDULE_FILE"
+    else
+        echo_t "[RDKB_CONN_SELFHEAL] : Not time yet" >> "$UPLOAD_SCHEDULE_FILE"
+    fi
     exit 0
 }
 
