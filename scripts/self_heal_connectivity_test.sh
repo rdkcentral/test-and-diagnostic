@@ -42,7 +42,7 @@ SELFHEAL_CONN_TMP_DIR="/tmp/.selfheal_conn"
 UPLOAD_SCHEDULE_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_schedule.log"
 DELAY_COUNTDOWN_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_delay_countdown"
 MODE_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_mode"
-LAST_EXEC_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_last_exec"
+LAST_EXECUTION_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_last_exec"
 
 if [ ! -d "$SELFHEAL_CONN_TMP_DIR" ]; then
     mkdir -p "$SELFHEAL_CONN_TMP_DIR"
