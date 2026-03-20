@@ -21,6 +21,7 @@
 TAD_PATH="/usr/ccsp/tad/"
 
 source $TAD_PATH/corrective_action.sh
+source $TAD_PATH/boot_mode.sh
 source /etc/waninfo.sh
 
 exec 3>&1 4>&2 >>$SELFHEALFILE 2>&1
