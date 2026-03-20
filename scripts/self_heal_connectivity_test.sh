@@ -83,9 +83,15 @@ ready_to_ping_test()
 
     last_time=$(cat "$LAST_EXECUTION_FILE")
     diff=$((current_time - last_time))
+    remaining=$((INTERVAL_SEC - diff))
 
     if [ "$diff" -ge "$INTERVAL_SEC" ]; then
         echo_t "Interval met ($diff >= $INTERVAL_SEC)" >> "$UPLOAD_SCHEDULE_FILE"
+        return 0
+    elif [ "$remaining" -le 600 ]; then
+        echo_t "Interval almost met, sleeping $remaining sec to align exact run" >> "$UPLOAD_SCHEDULE_FILE"
+        sleep "$remaining"
+        echo_t "Interval met after sleep, running ping now" >> "$UPLOAD_SCHEDULE_FILE"
         return 0
     else
         echo_t "Skipping: only $diff sec elapsed" >> "$UPLOAD_SCHEDULE_FILE"
