@@ -48,7 +48,6 @@ if [ ! -f "$MODE_FILE" ]; then
             echo_t "Cron is disabled; setting mode to PROCESS" >> "$RDKLOG_FILE"
             echo "PROCESS" > "$MODE_FILE"
         fi
-    fi
 fi
 SELFHEAL_EXECUTION_MODE=$(cat "$MODE_FILE")
 echo_t "Current execution mode: $SELFHEAL_EXECUTION_MODE" >> "$RDKLOG_FILE"
