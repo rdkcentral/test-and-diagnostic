@@ -418,8 +418,7 @@ static char *read_pipe_data(FILE *pipe) {
 static cJSON *Load_WebcfgDB_Array(void) {
     CcspTraceInfo(("Executing: webcfg_decoder -m /nvram/webconfig_db.bin\n"));
 
-    char *decoder_argv[] = { "webcfg_decoder", "-m", "/nvram/webconfig_db.bin", NULL };
-    FILE *pipe = v_secure_popen("r", "webcfg_decoder", decoder_argv);
+    FILE *pipe = v_secure_popen("r", "webcfg_decoder -m /nvram/webconfig_db.bin");
     if (!pipe) {
         CcspTraceError(("v_secure_popen failed\n"));
         return NULL;
