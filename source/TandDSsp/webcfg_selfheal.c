@@ -339,7 +339,7 @@ static int is_ignored_subdoc(const char *name) {
             !strcmp(name, "privatessid"));
 }
 
-static int Get_Component_Version(const char *subdoc, int *ver_out) {
+static int Get_Component_Version(const char *subdoc, long long *ver_out) {
     char key[128], val[64] = {0};
 
     snprintf(key, sizeof(key), "%s_version", subdoc);
@@ -349,9 +349,17 @@ static int Get_Component_Version(const char *subdoc, int *ver_out) {
         CcspTraceError(("Get_Component_Version: syscfg_get failed or empty for '%s'\n", key));
         return -1;
     }
+    char *endptr = NULL;
+    errno = 0;
+    long long v = strtoll(val, &endptr, 10);
 
-    *ver_out = atoi(val);
-    CcspTraceInfo(("Get_Component_Version: subdoc='%s', value='%s', ver_out=%d\n",
+    if (errno != 0 || *endptr != '\0') {
+        CcspTraceError(("Invalid numeric value for %s_version: %s\n", subdoc, val));
+        return -1;
+    }
+
+    *ver_out = v;
+    CcspTraceInfo(("Get_Component_Version: subdoc='%s', value='%s', ver_out=%lld\n",
                    subdoc, val, *ver_out));
     return 0;
 }
@@ -492,10 +500,10 @@ void webcfg_subdoc_mismatch_boot_check(void) {
             continue;
         }
 
-        int comp_ver = -1;
+        long long comp_ver = -1;
         if (Get_Component_Version(subdoc, &comp_ver) != 0) continue;
 
-        if (comp_ver != db_ver) {
+        if ((long long)db_ver != comp_ver)
             CcspTraceInfo(("MISMATCH %s: DB=%d COMP=%d\n", subdoc, db_ver, comp_ver));
             count++;
             
@@ -519,10 +527,10 @@ void webcfg_subdoc_mismatch_boot_check(void) {
         CcspTraceInfo(("FORCE RESET: %s (%d subdocs)\n", reset_list, count));
         Set_Webcfg_ForceReset(reset_list);
     } else {
-        CcspTraceInfo(("No mismatches - system healthy\n"));
+        CcspTraceInfo(("No subdoc version mismatches detected\n"));
     }
 
     free(reset_list);
     cJSON_Delete(arr);
-    CcspTraceInfo(("Selfheal complete\n"));
+    CcspTraceInfo(("=== Webconfig Selfheal Completed ===\n"));
 }
