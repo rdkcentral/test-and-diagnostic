@@ -253,6 +253,10 @@ void supplementaryDocs(void) {
     char *docs = getsupplementaryDocs();
     if (docs != NULL) {
         char *docs_var = strndup(docs, strlen(docs));
+        if (docs_var == NULL) {
+            CcspTraceError(("supplementaryDocs: strndup failed\n"));
+            return;
+        }
         char *token = strtok(docs_var, ",");
 
         while (token != NULL) {
