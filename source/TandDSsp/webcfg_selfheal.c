@@ -34,7 +34,7 @@
 **********************************************************************/
 
 #include "webcfg_selfheal.h"
-
+#include "secure_wrapper.h"
 static char *supported_bits = NULL;
 static char *supported_version = NULL;
 static char *supplementary_docs = NULL;
