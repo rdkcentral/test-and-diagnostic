@@ -30,6 +30,7 @@ AtomHighLoadCountThreshold=0
 snmp_cm_agent_count=0
 source $UTOPIA_PATH/log_env_var.sh
 source $TAD_PATH/corrective_action.sh
+source $TAD_PATH/boot_mode.sh
 #source /etc/device.properties
 source /etc/log_timestamp.sh
 Last_reboot_reason="`syscfg get X_RDKCENTRAL-COM_LastRebootReason`"
@@ -503,12 +504,12 @@ Bootup_HealthCheck()
     fi
 }
 
-CRON_ENABLED=$(syscfg get SelfHealCronEnable)
 BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
 BOOT_TASK_FLAG="/tmp/.boot_healthcheck_done"
 
 cron_mode()
 {
+    acquire_lock "resource_monitor" "resource_monitor.sh"
 	echo_t "[RDKB_RES_SELFHEAL] : Cron job is enabled"
 	# Skip during boot (first 15 minutes)
     if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
@@ -552,8 +553,8 @@ process_mode()
         done
 }
 
-if [ "$CRON_ENABLED" = "true" ]; then
-	cron_mode
+if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
+    cron_mode
 else
-	process_mode
+    process_mode
 fi
