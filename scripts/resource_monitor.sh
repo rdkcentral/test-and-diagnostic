@@ -30,6 +30,7 @@ AtomHighLoadCountThreshold=0
 snmp_cm_agent_count=0
 source $UTOPIA_PATH/log_env_var.sh
 source $TAD_PATH/corrective_action.sh
+source $TAD_PATH/boot_mode.sh
 #source /etc/device.properties
 source /etc/log_timestamp.sh
 Last_reboot_reason="`syscfg get X_RDKCENTRAL-COM_LastRebootReason`"
@@ -503,7 +504,6 @@ Bootup_HealthCheck()
     fi
 }
 
-CRON_ENABLED=$(syscfg get SelfHealCronEnable)
 BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
 BOOT_TASK_FLAG="/tmp/.boot_healthcheck_done"
 
