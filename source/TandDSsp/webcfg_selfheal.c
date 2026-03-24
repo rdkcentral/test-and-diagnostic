@@ -491,7 +491,7 @@ void webcfg_subdoc_mismatch_boot_check(void) {
         if (!cJSON_IsString(name) || !cJSON_IsNumber(ver)) continue;
 
         const char *subdoc = name->valuestring;
-        int db_ver = ver->valueint;
+        long long db_ver = (long long)ver->valuedouble;
 
         if (is_ignored_subdoc(subdoc)) continue;
         if (isSubDocSupported((char*)subdoc) != WEBCFG_SUCCESS)
@@ -503,8 +503,8 @@ void webcfg_subdoc_mismatch_boot_check(void) {
         long long comp_ver = -1;
         if (Get_Component_Version(subdoc, &comp_ver) != 0) continue;
 
-        if ((long long)db_ver != comp_ver) {
-            CcspTraceInfo(("MISMATCH %s: DB=%d COMP=%lld\n", subdoc, db_ver, comp_ver));
+        if (db_ver != comp_ver) {
+            CcspTraceInfo(("MISMATCH %s: DB=%lld COMP=%lld\n", subdoc, db_ver, comp_ver));
             count++;
             
             size_t name_len = strlen(subdoc);
