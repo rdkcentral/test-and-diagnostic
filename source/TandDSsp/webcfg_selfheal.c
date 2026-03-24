@@ -503,7 +503,7 @@ void webcfg_subdoc_mismatch_boot_check(void) {
         long long comp_ver = -1;
         if (Get_Component_Version(subdoc, &comp_ver) != 0) continue;
 
-        if ((long long)db_ver != comp_ver)
+        if ((long long)db_ver != comp_ver) {
             CcspTraceInfo(("MISMATCH %s: DB=%d COMP=%d\n", subdoc, db_ver, comp_ver));
             count++;
             
