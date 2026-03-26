@@ -197,7 +197,7 @@ void PopulateParameters()
     {
         xle_log("CCSP_Message_Bus_Init failed for component %s: %d\n", component_id, ret);
         bus_handle = NULL;
-        exit(1);
+        //exit(1);
     }
     int retPsmGet = PSM_Get_Record_Value2(bus_handle,g_Subsystem, "dmsb.Mesh.WAN.Interface.Name", NULL, &paramValue);
     if (retPsmGet == CCSP_SUCCESS)
