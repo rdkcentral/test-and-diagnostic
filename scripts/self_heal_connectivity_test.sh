@@ -304,7 +304,18 @@ runPingTest()
 	   then
 	      erouterIP6=`ifconfig $WAN_INTERFACE | grep inet6 | grep Link | head -n1 | awk '{print $(NF-1)}' | cut -f1 -d:`
 	      routeEntry=`ip -6 neigh show | grep $WAN_INTERFACE | grep $erouterIP6`
-              IPv6_Gateway_addr=`echo "$routeEntry" | grep lladdr |cut -f1 -d ' '` 	
+	      echo "routeEntry_ori=ip -6 neigh show | grep $WAN_INTERFACE | grep $erouterIP6" >> /tmp/RDKBDEV-3398.txt
+
+              if [ "$routeEntry" != "" ]
+              then
+                 IPv6_Gateway_addr=`echo "$routeEntry" | grep lladdr |cut -f1 -d ' '`
+              else
+                 routeEntry=`route -A inet6 | grep -w $WAN_INTERFACE | grep $erouterIP6 | cut -d'/' -f1 | tail -1`
+                 IPv6_Gateway_addr=`echo $routeEntry | sed 's/ *$//g'`
+              fi
+	      echo "routeEntry=$routeEntry" >> /tmp/RDKBDEV-3398.txt
+	      echo "routeEntry=$IPv6_Gateway_addr" >> /tmp/RDKBDEV-3398.txt
+
     	   fi
 	fi	
 	fi #LTE-133 ping to ipv6 not needed for xle.
