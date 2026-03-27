@@ -199,13 +199,13 @@ void PopulateParameters()
 #ifdef CORE_NET_LIB
         int status;
         libnet_status result;
-        result = interface_status(current_wan_ifname, &status);
+        result = interface_status(default_wan_ifname, &status);
         if (result == CNL_STATUS_SUCCESS) {
              xle_log(" interface_status successfully retrieved\n");
         }
         if ( status == 1 )
 #else
-        sprintf(comp_status_cmd,"ifconfig %s | grep UP",current_wan_ifname);
+        sprintf(comp_status_cmd,"ifconfig %s | grep UP",default_wan_ifname);
         memset(InterfaceStatus, 0, sizeof(InterfaceStatus));
         GetInterfaceStatus( InterfaceStatus, comp_status_cmd, sizeof(comp_status_cmd) );
         if ( InterfaceStatus[0] != '\0' )
