@@ -113,7 +113,7 @@ TEST_F(CcspTandD_XLE_SelfHealTest, test_PopulateParameters)
 
     EXPECT_CALL(*g_messagebusMock, CCSP_Message_Bus_Init(_, _, _, _, _))
         .Times(testing::AtLeast(1))
-        .WillOnce(testing::Return(0));
+        .WillOnce(testing::Return(CCSP_SUCCESS));
 
     EXPECT_CALL(*g_baseapiMock, CcspBaseIf_getParameterValues(_, _, _, _, _, _, _)).Times(1)
         .WillOnce(testing::DoAll(
