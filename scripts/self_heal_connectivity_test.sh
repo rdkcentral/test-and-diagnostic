@@ -40,7 +40,6 @@ ping4_failed=0
 ping6_failed=0
 
 SELFHEAL_CONN_TMP_DIR="/tmp/.selfheal_conn"
-UPLOAD_SCHEDULE_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_schedule.log"
 DELAY_COUNTDOWN_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_delay_countdown"
 MODE_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_mode"
 LAST_EXECUTION_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_last_exec"
@@ -105,10 +104,8 @@ calcRandTimetoStartPing()
             generate_random_sleep
             remaining=$((sec_to_sleep - 600))
             [ "$remaining" -lt 0 ] && remaining="$sec_to_sleep"
-            echo "$remaining" > "$DELAY_COUNTDOWN_FILE"
-            echo_t "RDKB_SELF_HEAL_CONN: Initial random delay stored: $sec_to_sleep seconds" 
+            echo "$remaining" > "$DELAY_COUNTDOWN_FILE" 
             echo "DELAY" > "$MODE_FILE"
-            echo_t "RDKB_SELF_HEAL_CONN: Remaining delay: $remaining sec"
             exit 0
         fi
 
@@ -119,7 +116,6 @@ calcRandTimetoStartPing()
             [ -z "$remaining" ] && remaining=0
 
             if [ "$remaining" -le 600 ]; then
-                echo_t "Final delay sleep: $remaining sec" 
                 [ "$remaining" -gt 0 ] && sleep "$remaining"
 
                 rm -f "$DELAY_COUNTDOWN_FILE"
@@ -135,7 +131,6 @@ calcRandTimetoStartPing()
         fi
     else
         generate_random_sleep
-        echo_t "RDKB_SELF_HEAL_CONN: Sleeping for $sec_to_sleep seconds" 
         sleep $sec_to_sleep;
     fi
 }
