@@ -626,16 +626,23 @@ self_heal_interfaces()
     esac
 
     WAN_INTERFACE=$(getWanInterfaceName)
-    Check_If_Erouter_Exists=$(ifconfig -a | grep "$WAN_INTERFACE")
-    ifconfig $WAN_INTERFACE > /dev/null
-    wan_exists=$?
-    if [ "$Check_If_Erouter_Exists" = "" ] && [ $wan_exists -ne 0 ]; then
-        echo_t "RDKB_REBOOT : Erouter0 interface is not up ,Rebooting device"
-        echo_t "Setting Last reboot reason Erouter_Down"
-        t2CountNotify "SYS_ERROR_ErouterDown_reboot"
-        reason="Erouter_Down"
-        rebootCount=1
-        rebootNeeded RM "" $reason $rebootCount
+    if [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$BOX_TYPE" = "TCCBR" ]; then
+        # This section handles the scenario where the erouter0 interface fails to come up during bootup on certain models.
+        # It checks if the erouter0 interface is present and reboots the device if it is not.
+        # Note: This logic applies only to devices that use erouter0 as a Linux bridge for WAN connectivity.
+        # For devices using VLAN or dynamic interfaces, the WAN interface is deleted on disconnect and recreated on reconnect,
+        # so this recovery mechanism is not applicable to those configurations. 
+        Check_If_Erouter_Exists=$(ifconfig -a | grep "$WAN_INTERFACE")
+        ifconfig $WAN_INTERFACE > /dev/null
+        wan_exists=$?
+        if [ "$Check_If_Erouter_Exists" = "" ] && [ $wan_exists -ne 0 ]; then
+            echo_t "RDKB_REBOOT : Erouter0 interface is not up ,Rebooting device"
+            echo_t "Setting Last reboot reason Erouter_Down"
+            t2CountNotify "SYS_ERROR_ErouterDown_reboot"
+            reason="Erouter_Down"
+            rebootCount=1
+            rebootNeeded RM "" $reason $rebootCount
+        fi
     fi
 
     UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
