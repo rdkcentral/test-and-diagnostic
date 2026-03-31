@@ -1604,7 +1604,14 @@ self_heal_idm ()
         return
     fi
 
-    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: MAC $mac_upper confirmed in assoclist, restarting RdkInterDeviceManager"
+    # Check if GatewayManagement Failover is enabled
+    failover=$(dmcli eRT retv Device.X_RDK_GatewayManagement.Failover 2>/dev/null)
+    if [ "$failover" != "true" ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: Device.X_RDK_GatewayManagement.Failover is not true ($failover), skipping restart"
+        return
+    fi
+
+    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: MAC $mac_upper confirmed in assoclist and Failover=true, restarting RdkInterDeviceManager"
     t2CountNotify "SYS_SH_IDM_restart"
     systemctl restart RdkInterDeviceManager.service
     if [ $? -eq 0 ]; then
