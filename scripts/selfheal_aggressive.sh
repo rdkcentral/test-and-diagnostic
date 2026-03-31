@@ -1576,24 +1576,19 @@ self_heal_idm ()
     # Check if GatewayManagement Failover is enabled (int: 1=enabled, 0=disabled)
     failover=$(dmcli eRT getv Device.X_RDK_GatewayManagement.Failover.Enable 2>/dev/null | grep "value:" | awk '{print $NF}')
     if [ "$failover" != "1" ]; then
-        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: Device.X_RDK_GatewayManagement.Failover.Enable is not 1 ($failover), skipping"
         return
     fi
 
     # Check if a WNXL11BWL device has a MAC address entry in the dnsmasq lease file
     wnxl_mac=$(grep "WNXL11BWL" "$DNSMASQ_LEASE_FILE" 2>/dev/null | awk '{print $2}' | grep -E '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$')
     if [ -z "$wnxl_mac" ]; then
-        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL not found in lease file, skipping restart"
         return
     fi
-
-    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL MAC $wnxl_mac found in lease file"
 
     # Check if the MAC is associated on any hotspot radio interface
     mac_upper=$(echo "$wnxl_mac" | tr 'a-z' 'A-Z')
     wl_assoc=$(wl -i wl0.7 assoclist 2>/dev/null; wl -i wl1.7 assoclist 2>/dev/null)
     if ! echo "$wl_assoc" | grep -qi "$mac_upper"; then
-        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: MAC $mac_upper not in wl0.7/wl1.7 assoclist, skipping restart"
         return
     fi
 
@@ -1601,24 +1596,21 @@ self_heal_idm ()
     # An empty/failed dmcli response is also treated as a problem - proceed with restart
     remote_status=$(dmcli eRT getv Device.X_RDK_Remote.Device.2.Status 2>/dev/null | grep "value:" | awk '{print $NF}')
     if [ -n "$remote_status" ] && [ "$remote_status" -ge 3 ]; then
-        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: Device.X_RDK_Remote.Device.2.Status is $remote_status (>= 3), skipping restart"
         return
     fi
-    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: Device.X_RDK_Remote.Device.2.Status is ${remote_status:-empty}, proceeding"
 
     # All conditions met - increment cycle counter and restart every 3rd cycle
     idm_cycle=$(cat "$IDM_CYCLE_FILE" 2>/dev/null || echo 0)
     idm_cycle=$((idm_cycle + 1))
     echo "$idm_cycle" > "$IDM_CYCLE_FILE"
     if [ "$idm_cycle" -lt 3 ]; then
-        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal cycle $idm_cycle/3, conditions met but deferring restart"
         return
     fi
 
     # Reset counter for the next 3-cycle window
     echo 0 > "$IDM_CYCLE_FILE"
 
-    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: MAC $mac_upper confirmed in assoclist and Failover.Enable=1, restarting RdkInterDeviceManager"
+    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL MAC $mac_upper in assoclist, Remote.Status=${remote_status:-empty}, restarting RdkInterDeviceManager"
     t2CountNotify "SYS_SH_IDM_restart"
     systemctl restart RdkInterDeviceManager.service
     if [ $? -eq 0 ]; then
