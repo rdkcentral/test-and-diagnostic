@@ -1574,7 +1574,7 @@ self_heal_idm ()
     DNSMASQ_LEASE_FILE="/tmp/dnsmasq.lease"
 
     # Check if GatewayManagement Failover is enabled (int: 1=enabled, 0=disabled)
-    failover=$(dmcli eRT retv Device.X_RDK_GatewayManagement.Failover.Enable 2>/dev/null)
+    failover=$(dmcli eRT getv Device.X_RDK_GatewayManagement.Failover.Enable 2>/dev/null | grep "value:" | awk '{print $NF}')
     if [ "$failover" != "1" ]; then
         echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: Device.X_RDK_GatewayManagement.Failover.Enable is not 1 ($failover), skipping"
         return
