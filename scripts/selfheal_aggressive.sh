@@ -1622,7 +1622,6 @@ self_heal_idm ()
     checkMaintenanceWindow
     idm_restart_count=$(cat "$IDM_RESTART_COUNT_FILE" 2>/dev/null || echo 0)
     if [ "$reb_window" -eq 1 ]; then
-        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: maintenance window - resetting daily restart count"
         idm_restart_count=0
         echo 0 > "$IDM_RESTART_COUNT_FILE"
     fi
