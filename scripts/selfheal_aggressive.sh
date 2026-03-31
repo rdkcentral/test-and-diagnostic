@@ -1604,10 +1604,10 @@ self_heal_idm ()
         return
     fi
 
-    # Check if GatewayManagement Failover is enabled
-    failover=$(dmcli eRT retv Device.X_RDK_GatewayManagement.Failover 2>/dev/null)
-    if [ "$failover" != "true" ]; then
-        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: Device.X_RDK_GatewayManagement.Failover is not true ($failover), skipping restart"
+    # Check if GatewayManagement Failover is enabled (int: 1=enabled, 0=disabled)
+    failover=$(dmcli eRT retv Device.X_RDK_GatewayManagement.Failover.Enable 2>/dev/null)
+    if [ "$failover" != "1" ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: Device.X_RDK_GatewayManagement.Failover.Enable is not 1 ($failover), skipping restart"
         return
     fi
 
