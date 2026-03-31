@@ -1573,19 +1573,12 @@ self_heal_idm ()
     IDM_CYCLE_FILE="/tmp/idm_selfheal_cycle"
     DNSMASQ_LEASE_FILE="/tmp/dnsmasq.lease"
 
-    # Increment and persist cycle counter
-    idm_cycle=$(cat "$IDM_CYCLE_FILE" 2>/dev/null || echo 0)
-    idm_cycle=$((idm_cycle + 1))
-    echo "$idm_cycle" > "$IDM_CYCLE_FILE"
-
-    # Act only every 3rd aggressive cycle
-    if [ "$idm_cycle" -lt 3 ]; then
-        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal cycle $idm_cycle/3, skipping"
+    # Check if GatewayManagement Failover is enabled (int: 1=enabled, 0=disabled)
+    failover=$(dmcli eRT retv Device.X_RDK_GatewayManagement.Failover.Enable 2>/dev/null)
+    if [ "$failover" != "1" ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: Device.X_RDK_GatewayManagement.Failover.Enable is not 1 ($failover), skipping"
         return
     fi
-
-    # Reset counter for the next 3-cycle window
-    echo 0 > "$IDM_CYCLE_FILE"
 
     # Check if a WNXL11BWL device has a MAC address entry in the dnsmasq lease file
     wnxl_mac=$(grep "WNXL11BWL" "$DNSMASQ_LEASE_FILE" 2>/dev/null | awk '{print $2}' | grep -E '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$')
@@ -1604,14 +1597,19 @@ self_heal_idm ()
         return
     fi
 
-    # Check if GatewayManagement Failover is enabled (int: 1=enabled, 0=disabled)
-    failover=$(dmcli eRT retv Device.X_RDK_GatewayManagement.Failover.Enable 2>/dev/null)
-    if [ "$failover" != "1" ]; then
-        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: Device.X_RDK_GatewayManagement.Failover.Enable is not 1 ($failover), skipping restart"
+    # All conditions met - increment cycle counter and restart every 3rd cycle
+    idm_cycle=$(cat "$IDM_CYCLE_FILE" 2>/dev/null || echo 0)
+    idm_cycle=$((idm_cycle + 1))
+    echo "$idm_cycle" > "$IDM_CYCLE_FILE"
+    if [ "$idm_cycle" -lt 3 ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal cycle $idm_cycle/3, conditions met but deferring restart"
         return
     fi
 
-    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: MAC $mac_upper confirmed in assoclist and Failover=true, restarting RdkInterDeviceManager"
+    # Reset counter for the next 3-cycle window
+    echo 0 > "$IDM_CYCLE_FILE"
+
+    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: MAC $mac_upper confirmed in assoclist and Failover.Enable=1, restarting RdkInterDeviceManager"
     t2CountNotify "SYS_SH_IDM_restart"
     systemctl restart RdkInterDeviceManager.service
     if [ $? -eq 0 ]; then
