@@ -1594,7 +1594,17 @@ self_heal_idm ()
         return
     fi
 
-    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL MAC $wnxl_mac found in lease file, restarting RdkInterDeviceManager"
+    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL MAC $wnxl_mac found in lease file"
+
+    # Check if the MAC is associated on any hotspot radio interface
+    mac_upper=$(echo "$wnxl_mac" | tr 'a-z' 'A-Z')
+    wl_assoc=$(wl -i wl0.7 assoclist 2>/dev/null; wl -i wl1.7 assoclist 2>/dev/null)
+    if ! echo "$wl_assoc" | grep -qi "$mac_upper"; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: MAC $mac_upper not in wl0.7/wl1.7 assoclist, skipping restart"
+        return
+    fi
+
+    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: MAC $mac_upper confirmed in assoclist, restarting RdkInterDeviceManager"
     t2CountNotify "SYS_SH_IDM_restart"
     systemctl restart RdkInterDeviceManager.service
     if [ $? -eq 0 ]; then
