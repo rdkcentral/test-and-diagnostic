@@ -1568,6 +1568,41 @@ self_heal_dhcpmgr ()
     fi
 }
 
+self_heal_idm ()
+{
+    IDM_CYCLE_FILE="/tmp/idm_selfheal_cycle"
+    DNSMASQ_LEASE_FILE="/tmp/dnsmasq.lease"
+
+    # Increment and persist cycle counter
+    idm_cycle=$(cat "$IDM_CYCLE_FILE" 2>/dev/null || echo 0)
+    idm_cycle=$((idm_cycle + 1))
+    echo "$idm_cycle" > "$IDM_CYCLE_FILE"
+
+    # Act only every 3rd aggressive cycle
+    if [ "$idm_cycle" -lt 3 ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal cycle $idm_cycle/3, skipping"
+        return
+    fi
+
+    # Reset counter for the next 3-cycle window
+    echo 0 > "$IDM_CYCLE_FILE"
+
+    # Check if a WNXL11BWL device has a MAC address entry in the dnsmasq lease file
+    wnxl_mac=$(grep "WNXL11BWL" "$DNSMASQ_LEASE_FILE" 2>/dev/null | awk '{print $2}' | grep -E '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$')
+    if [ -z "$wnxl_mac" ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL not found in lease file, skipping restart"
+        return
+    fi
+
+    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL MAC $wnxl_mac found in lease file, restarting RdkInterDeviceManager"
+    t2CountNotify "SYS_SH_IDM_restart"
+    systemctl restart RdkInterDeviceManager.service
+    if [ $? -eq 0 ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: RdkInterDeviceManager restarted successfully"
+    else
+        echo_t "[RDKB_AGG_SELFHEAL]: Failed to restart RdkInterDeviceManager"
+    fi
+}
 wan_sysevents(){
     sysevent set wan_service-status
     sysevent set wan-restart
@@ -1759,6 +1794,7 @@ cron_mode()
     fi
         
     DHCP_Selfheal
+    self_heal_idm
     exit 0
 }
 
@@ -1772,6 +1808,7 @@ process_mode()
                 echo_t "[RDKB_AGG_SELFHEAL] : INTERVAL is: $INTERVAL"
                 sleep ${INTERVAL}m
                 DHCP_Selfheal
+                self_heal_idm
         done
 }
 
