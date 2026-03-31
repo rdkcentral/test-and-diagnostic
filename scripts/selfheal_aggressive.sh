@@ -1571,7 +1571,8 @@ self_heal_dhcpmgr ()
 self_heal_idm ()
 {
     IDM_CYCLE_FILE="/tmp/idm_selfheal_cycle"
-    DNSMASQ_LEASE_FILE="/tmp/dnsmasq.lease"
+    IDM_RESTART_COUNT_FILE="/tmp/idm_restart_count"
+    DNSMASQ_LEASE_FILE="/nvram/dnsmasq.leases"
 
     # Check if GatewayManagement Failover is enabled (int: 1=enabled, 0=disabled)
     failover=$(dmcli eRT getv Device.X_RDK_GatewayManagement.Failover.Enable 2>/dev/null | grep "value:" | awk '{print $NF}')
@@ -1579,23 +1580,30 @@ self_heal_idm ()
         return
     fi
 
-    # Check if a WNXL11BWL device has a MAC address entry in the dnsmasq lease file
-    wnxl_mac=$(grep "WNXL11BWL" "$DNSMASQ_LEASE_FILE" 2>/dev/null | awk '{print $2}' | grep -E '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$')
-    if [ -z "$wnxl_mac" ]; then
-        return
-    fi
-
-    # Check if the MAC is associated on any hotspot radio interface
-    mac_upper=$(echo "$wnxl_mac" | tr 'a-z' 'A-Z')
-    wl_assoc=$(wl -i wl0.7 assoclist 2>/dev/null; wl -i wl1.7 assoclist 2>/dev/null)
-    if ! echo "$wl_assoc" | grep -qi "$mac_upper"; then
-        return
-    fi
-
     # Check if remote device status is less than 3 (3 = fully connected/healthy)
     # An empty/failed dmcli response is also treated as a problem - proceed with restart
     remote_status=$(dmcli eRT getv Device.X_RDK_Remote.Device.2.Status 2>/dev/null | grep "value:" | awk '{print $NF}')
     if [ -n "$remote_status" ] && [ "$remote_status" -ge 3 ]; then
+        # Reset 3-cycle counter since device is healthy
+        echo 0 > "$IDM_CYCLE_FILE"
+        return
+    fi
+
+    # Check if any WNXL11BWL devices have IP entries in the dnsmasq lease file
+    wnxl_ips=$(grep "WNXL11BWL" "$DNSMASQ_LEASE_FILE" 2>/dev/null | awk '{print $3}')
+    if [ -z "$wnxl_ips" ]; then
+        return
+    fi
+
+    # Check if at least one WNXL11BWL device is reachable by ping
+    ping_success=""
+    for ip in $wnxl_ips; do
+        if ping -c 1 -W 1 "$ip" >/dev/null 2>&1; then
+            ping_success="$ip"
+            break
+        fi
+    done
+    if [ -z "$ping_success" ]; then
         return
     fi
 
@@ -1607,11 +1615,28 @@ self_heal_idm ()
         return
     fi
 
-    # Reset counter for the next 3-cycle window
+    # Reset 3-cycle counter for the next window
     echo 0 > "$IDM_CYCLE_FILE"
 
-    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL MAC $mac_upper in assoclist, Remote.Status=${remote_status:-empty}, restarting RdkInterDeviceManager"
-    t2CountNotify "SYS_SH_IDM_restart"
+    # Enforce max 3 IDM restarts per day; reset count at maintenance window
+    checkMaintenanceWindow
+    idm_restart_count=$(cat "$IDM_RESTART_COUNT_FILE" 2>/dev/null || echo 0)
+    if [ "$reb_window" -eq 1 ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: maintenance window - resetting daily restart count"
+        idm_restart_count=0
+        echo 0 > "$IDM_RESTART_COUNT_FILE"
+    fi
+    if [ "$idm_restart_count" -ge 3 ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: daily restart limit reached ($idm_restart_count/3), skipping"
+        return
+    fi
+
+    # Increment and persist the daily restart count
+    idm_restart_count=$((idm_restart_count + 1))
+    echo "$idm_restart_count" > "$IDM_RESTART_COUNT_FILE"
+
+    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL $ping_success reachable, Remote.Status=${remote_status:-empty}, restart $idm_restart_count/3 today, restarting RdkInterDeviceManager"
+    t2CountNotify "SYS_SH_REMOTE_DevMissing_IDMrestart"
     systemctl restart RdkInterDeviceManager.service
     if [ $? -eq 0 ]; then
         echo_t "[RDKB_AGG_SELFHEAL]: RdkInterDeviceManager restarted successfully"
