@@ -1597,6 +1597,13 @@ self_heal_idm ()
         return
     fi
 
+    # Check if remote device status is less than 3 (3 = fully connected/healthy)
+    remote_status=$(dmcli eRT getv Device.X_RDK_Remote.Device.2.Status 2>/dev/null | grep "value:" | awk '{print $NF}')
+    if [ -z "$remote_status" ] || [ "$remote_status" -ge 3 ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: Device.X_RDK_Remote.Device.2.Status is $remote_status (>= 3), skipping restart"
+        return
+    fi
+
     # All conditions met - increment cycle counter and restart every 3rd cycle
     idm_cycle=$(cat "$IDM_CYCLE_FILE" 2>/dev/null || echo 0)
     idm_cycle=$((idm_cycle + 1))
