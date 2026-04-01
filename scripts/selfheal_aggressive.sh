@@ -1570,40 +1570,44 @@ self_heal_dhcpmgr ()
 
 self_heal_idm ()
 {
-    IDM_CYCLE_FILE="/tmp/idm_selfheal_cycle"
-    IDM_RESTART_COUNT_FILE="/tmp/idm_restart_count"
-    DNSMASQ_LEASE_FILE="/nvram/dnsmasq.leases"
+    local IDM_CYCLE_FILE="/tmp/idm_selfheal_cycle"
+    local IDM_RESTART_COUNT_FILE="/tmp/idm_restart_count"
+    local IDM_WINDOW_RESET_FILE="/tmp/idm_restart_window_reset"
+    local DNSMASQ_LEASE_FILE="/nvram/dnsmasq.leases"
+    local idm_failover idm_remote_status idm_wnxl_ips idm_ping_success ip idm_cycle idm_restart_count
 
     # Check if GatewayManagement Failover is enabled (int: 1=enabled, 0=disabled)
-    failover=$(dmcli eRT getv Device.X_RDK_GatewayManagement.Failover.Enable 2>/dev/null | grep "value:" | awk '{print $NF}')
-    if [ "$failover" != "1" ]; then
+    idm_failover=$(dmcli eRT getv Device.X_RDK_GatewayManagement.Failover.Enable 2>/dev/null | grep "value:" | awk '{print $NF}')
+    if [ "$idm_failover" != "1" ]; then
         return
     fi
 
     # Check if remote device status is less than 3 (3 = fully connected/healthy)
     # An empty/failed dmcli response is also treated as a problem - proceed with restart
-    remote_status=$(dmcli eRT getv Device.X_RDK_Remote.Device.2.Status 2>/dev/null | grep "value:" | awk '{print $NF}')
-    if [ -n "$remote_status" ] && [ "$remote_status" -ge 3 ]; then
+    idm_remote_status=$(dmcli eRT getv Device.X_RDK_Remote.Device.2.Status 2>/dev/null | grep "value:" | awk '{print $NF}')
+    if [ -n "$idm_remote_status" ] && [ "$idm_remote_status" -ge 3 ]; then
         # Reset 3-cycle counter since device is healthy
         echo 0 > "$IDM_CYCLE_FILE"
         return
     fi
 
     # Check if any WNXL11BWL devices have IP entries in the dnsmasq lease file
-    wnxl_ips=$(grep "WNXL11BWL" "$DNSMASQ_LEASE_FILE" 2>/dev/null | awk '{print $3}')
-    if [ -z "$wnxl_ips" ]; then
+    idm_wnxl_ips=$(grep "WNXL11BWL" "$DNSMASQ_LEASE_FILE" 2>/dev/null | awk '{print $3}')
+    if [ -z "$idm_wnxl_ips" ]; then
+        # Device not on network - previous cycle counts are stale, reset to avoid false-positive restart on re-appearance
+        echo 0 > "$IDM_CYCLE_FILE"
         return
     fi
 
     # Check if at least one WNXL11BWL device is reachable by ping
-    ping_success=""
-    for ip in $wnxl_ips; do
+    idm_ping_success=""
+    for ip in $idm_wnxl_ips; do
         if ping -c 1 -W 1 "$ip" >/dev/null 2>&1; then
-            ping_success="$ip"
+            idm_ping_success="$ip"
             break
         fi
     done
-    if [ -z "$ping_success" ]; then
+    if [ -z "$idm_ping_success" ]; then
         return
     fi
 
@@ -1618,13 +1622,18 @@ self_heal_idm ()
     # Reset 3-cycle counter for the next window
     echo 0 > "$IDM_CYCLE_FILE"
 
-    # Enforce max 3 IDM restarts per day; reset count at maintenance window
+    # Enforce max 3 IDM restarts per day; reset count once on entering maintenance window
+    reb_window=0
     checkMaintenanceWindow
-    idm_restart_count=$(cat "$IDM_RESTART_COUNT_FILE" 2>/dev/null || echo 0)
     if [ "$reb_window" -eq 1 ]; then
-        idm_restart_count=0
-        echo 0 > "$IDM_RESTART_COUNT_FILE"
+        if [ ! -f "$IDM_WINDOW_RESET_FILE" ]; then
+            echo 0 > "$IDM_RESTART_COUNT_FILE"
+            touch "$IDM_WINDOW_RESET_FILE"
+        fi
+    else
+        rm -f "$IDM_WINDOW_RESET_FILE"
     fi
+    idm_restart_count=$(cat "$IDM_RESTART_COUNT_FILE" 2>/dev/null || echo 0)
     if [ "$idm_restart_count" -ge 3 ]; then
         echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: daily restart limit reached ($idm_restart_count/3), skipping"
         return
@@ -1634,7 +1643,7 @@ self_heal_idm ()
     idm_restart_count=$((idm_restart_count + 1))
     echo "$idm_restart_count" > "$IDM_RESTART_COUNT_FILE"
 
-    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL $ping_success reachable, Remote.Status=${remote_status:-empty}, restart $idm_restart_count/3 today, restarting RdkInterDeviceManager"
+    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL $idm_ping_success reachable, Remote.Status=${idm_remote_status:-empty}, restart $idm_restart_count/3 today, restarting RdkInterDeviceManager"
     t2CountNotify "SYS_SH_REMOTE_DevMissing_IDMrestart"
     systemctl restart RdkInterDeviceManager.service
     if [ $? -eq 0 ]; then
