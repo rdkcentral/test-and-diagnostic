@@ -1775,8 +1775,16 @@ process_mode()
         done
 }
 
+if [ -f "$TAD_PATH/run_memory_compaction.sh" ]; then
+        MemCompScript_PID=$(busybox pidof run_memory_compaction.sh)
+        if [ -z "$MemCompScript_PID" ]; then
+                $TAD_PATH/run_memory_compaction.sh &
+        fi
+fi
+
 if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
     cron_mode
 else
     process_mode
 fi
+
