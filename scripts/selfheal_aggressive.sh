@@ -1833,7 +1833,7 @@ cron_mode()
 	# skip during boot of first 5 minutes
 	BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
 	if [ "$BOOTUP_TIME_SEC" -le 300 ]; then
-            echo_t "[RDKB_AGG_SELFHEAL] : Still booting, skipping"
+            echo_t "[RDKB_AGG_SELFHEAL] : Selfheal aggressive script will start after 5 mins of Device uptime, skipping the run at $BOOTUP_TIME_SEC seconds"
             exit 0
     fi
 
