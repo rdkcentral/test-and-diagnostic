@@ -486,7 +486,7 @@ cron_mode()
     acquire_lock "self_heal_connectivity_test" "self_heal_connectivity_test.sh"
     echo_t "RDKB_CONN_SELFHEAL : Cron job is enabled"
     if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
-            echo_t "[RDKB_CONN_SELFHEAL] : Still booting, skipping"
+            echo_t "[RDKB_CONN_SELFHEAL] : Selfheal scripts will start after 15 mins of Device uptime, skipping the run at $BOOTUP_TIME_SEC seconds"
             exit 0
         fi
 	if [ "$SELFHEAL_ENABLE" != "true" ]; then
