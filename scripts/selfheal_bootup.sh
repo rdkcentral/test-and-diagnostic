@@ -504,8 +504,13 @@ fi
 
 # Check whether PSM process is running
 	# Checking PSM's PID
+	# PSM is now a oneshot service: it exits after SQLite init. If the ready
+	# flag exists the exit was intentional — skip ALL PSM health checks
+	# (both crash detection and hung-state dmcli checks).
 	PSM_PID=$(busybox pidof PsmSsp)
-	if [ "$PSM_PID" == "" ]; then
+	if [ -f /tmp/psm_sqlite_ready ]; then
+		: # PSM ran as oneshot and exited cleanly, no health check needed
+	elif [ "$PSM_PID" == "" ]; then
 
 		echo_t "RDKB_PROCESS_CRASHED : PSM_process is not running, need to reboot the unit"
 		echo_t "Setting Last reboot reason"
