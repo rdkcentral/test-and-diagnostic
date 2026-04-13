@@ -513,7 +513,7 @@ cron_mode()
 	echo_t "[RDKB_RES_SELFHEAL] : Cron job is enabled"
 	# Skip during boot (first 15 minutes)
     if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
-		echo_t "[RDKB_RES_SELFHEAL] : Still booting, skipping"
+		echo_t "[RDKB_RES_SELFHEAL] : Selfheal scripts will start after 15 mins of Device uptime, skipping the run at $BOOTUP_TIME_SEC seconds"
         exit 0
     fi
        
