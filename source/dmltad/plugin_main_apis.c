@@ -219,6 +219,8 @@ CosaBackEndManagerInitialize
         CcspTraceError(("Wan connectivity check initialization failed\n"));
     }
 
+    MemTraceRbusInit();
+
 #ifdef WAREHOUSE_DIAGNOSTICS
     warehousediag_start();
 #endif
