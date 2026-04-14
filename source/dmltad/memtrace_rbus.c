@@ -252,7 +252,8 @@ BOOL MemTrace_SetParamBoolValue
                 ret = v_secure_system("systemctl start memtraced");
                 if(ret != 0)
                 {
-                      CcspTraceWarning(("%s - Failed to start memtraced service\n",__FUNCTION__ ));
+                      CcspTraceWarning(("%s - Failed to start memtraced service\n", __FUNCTION__));
+                      return FALSE;
                 }
                 else
                 {
@@ -261,6 +262,7 @@ BOOL MemTrace_SetParamBoolValue
                         return FALSE;
                     }
                     CcspTraceInfo(("%s: memtraced service started\n", __FUNCTION__));
+                    return TRUE;
                 }
             }
         }
@@ -285,9 +287,10 @@ BOOL MemTrace_SetParamBoolValue
             }
 
             CcspTraceInfo(("%s: memtraced service stopped\n", __FUNCTION__));
+            return TRUE;
         }
     }
-    return TRUE;
+    return FALSE;
 }
 
 /**********************************************************************
@@ -517,7 +520,7 @@ rbusError_t MemTrace_GetBoolHandler(rbusHandle_t handle, rbusProperty_t property
 {
     (void)handle;
     (void)opts;
-    errno_t rc = 0;
+    BOOL rc = FALSE;
     char const* propName = rbusProperty_GetName(property);
     char* param = strdup(GetParamName(propName));
     BOOL value = FALSE;
@@ -532,7 +535,7 @@ rbusError_t MemTrace_GetBoolHandler(rbusHandle_t handle, rbusProperty_t property
     rbusValue_Init(&val);
     rc = MemTrace_GetParamBoolValue(NULL, param, &value);
     free(param);
-    if(rc != 0)
+    if(rc != TRUE)
     {
         rbusValue_Release(val);
         CcspTraceError(("[%s]: MemTrace_GetParamBoolValue failed\n", __FUNCTION__));
@@ -550,7 +553,7 @@ rbusError_t MemTrace_SetBoolHandler(rbusHandle_t handle, rbusProperty_t property
 {
     (void)handle;
     (void)opts;
-    errno_t rc = 0;
+    BOOL rc = FALSE;
     char const* propName = rbusProperty_GetName(property);
     char* param = strdup(GetParamName(propName));
     rbusValue_t val = rbusProperty_GetValue(property);
@@ -566,7 +569,7 @@ rbusError_t MemTrace_SetBoolHandler(rbusHandle_t handle, rbusProperty_t property
     bValue = rbusValue_GetBoolean(val) ? TRUE : FALSE;
     rc = MemTrace_SetParamBoolValue(NULL, param, bValue);
     free(param);
-    if(rc != 0)
+    if(rc != TRUE)
     {
         CcspTraceError(("[%s]: MemTrace_SetParamBoolValue failed\n", __FUNCTION__));
         return RBUS_ERROR_BUS_ERROR;
@@ -578,7 +581,7 @@ rbusError_t MemTrace_GetUlongHandler(rbusHandle_t handle, rbusProperty_t propert
 {
     (void)handle;
     (void)opts;
-    errno_t rc = 0;
+    BOOL rc = FALSE;
     char const* propName = rbusProperty_GetName(property);
     char* param = strdup(GetParamName(propName));
     ULONG value = 0;
@@ -593,7 +596,7 @@ rbusError_t MemTrace_GetUlongHandler(rbusHandle_t handle, rbusProperty_t propert
     rbusValue_Init(&val);
     rc = MemTrace_GetParamUlongValue(NULL, param, &value);
     free(param);
-    if(rc != 0)
+    if(rc != TRUE)
     {
         rbusValue_Release(val);
         CcspTraceError(("[%s]: MemTrace_GetParamUlongValue failed\n", __FUNCTION__));
@@ -611,7 +614,7 @@ rbusError_t MemTrace_SetUlongHandler(rbusHandle_t handle, rbusProperty_t propert
 {
     (void)handle;
     (void)opts;
-    errno_t rc = 0;
+    BOOL rc = FALSE;
     char const* propName = rbusProperty_GetName(property);
     char* param = strdup(GetParamName(propName));
     rbusValue_t val = rbusProperty_GetValue(property);
@@ -627,7 +630,7 @@ rbusError_t MemTrace_SetUlongHandler(rbusHandle_t handle, rbusProperty_t propert
     value = (ULONG)rbusValue_GetUInt32(val);
     rc = MemTrace_SetParamUlongValue(NULL, param, value);
     free(param);
-    if(rc != 0)
+    if(rc != TRUE)
     {
         CcspTraceError(("[%s]: MemTrace_SetParamUlongValue failed\n", __FUNCTION__));
         return RBUS_ERROR_BUS_ERROR;
