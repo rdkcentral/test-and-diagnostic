@@ -103,6 +103,8 @@
 #include "cosa_selfheal_apis.h"
 #include "cosa_wanconnectivity_apis.h"
 
+rbusError_t MemTraceRbusInit(void);
+
 #ifdef WAREHOUSE_DIAGNOSTICS
 #include "cosa_warehousediag_apis.h"
 #endif
