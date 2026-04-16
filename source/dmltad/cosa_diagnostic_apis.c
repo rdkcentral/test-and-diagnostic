@@ -73,6 +73,7 @@
 #include <syscfg/syscfg.h>
 #include <ccsp_psm_helper.h>
 #include "safec_lib_common.h"
+#include "rdk_otlp_instrumentation.h"
 
 static char * SpeedTestServerCapability= "eRT.com.cisco.spvtg.ccsp.tr181pa.Device.IP.Diagnostics.X_RDKCENTRAL-COM_SpeedTest.Server.Capability";
 
@@ -288,6 +289,7 @@ CosaDiagInitialize
     pMyObject->PreviousVisitTime  = 0;
 #endif
 
+	rdk_otlp_init("webpa_ctx", "1.0");
     /* Initialize speedtest enable */
     char buf[8]={0};
     if(syscfg_get( NULL, "enable_speedtest", buf, sizeof(buf)) == 0)
