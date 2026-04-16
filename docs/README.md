@@ -89,7 +89,7 @@ The Test and Diagnostic component follows a modular, event-driven architecture d
 
 The component's design integrates seamlessly with the RDK-B middleware ecosystem through standardized interfaces and messaging protocols. It leverages the RBus messaging framework for real-time event propagation, enabling other components to subscribe to health and diagnostic events. The TR-181 data model compliance ensures consistent parameter access patterns and remote management capabilities through standard CWMP protocols. The modular design allows individual diagnostic and monitoring functions to operate independently, providing fault isolation and enabling selective feature activation based on device capabilities and configuration requirements.
 
-The IPC mechanisms are strategically designed to minimize system overhead while ensuring reliable communication. The component uses RBus for high-frequency event publishing and parameter synchronization, POSIX message queues for inter-module communication within the component, and direct HAL API calls for hardware interactions. Data persistence is achieved through integration with CcspPsm for configuration parameters and local file-based storage for diagnostic logs and temporary data, ensuring data integrity across system reboots and component restarts.
+The IPC mechanisms are strategically designed to minimize system overhead while ensuring reliable communication. The component uses RBus for high-frequency event publishing and parameter synchronization, System V message queues for inter-module communication within parts of the component, and direct HAL API calls for hardware interactions. Data persistence is achieved through integration with CcspPsm for configuration parameters and local file-based storage for diagnostic logs and temporary data, ensuring data integrity across system reboots and component restarts.
 
 ```mermaid
 flowchart LR
@@ -211,7 +211,7 @@ class RCA recovery;
 
 - **RDK-B Components**: CcspCommonLibrary (message bus), CcspCr (component registry), CcspPsm (persistent storage), CcspPandM (provisioning)
 - **HAL Dependencies**: Platform HAL v2.0+, Network HAL, Thermal HAL (if thermal monitoring enabled)
-- **Systemd Services**: ccsp-msg-bus.service, ccsp-cr.service, ccsp-psm.service must be active before test-and-diagnostic.service
+- **Systemd Services**: ccsp-msg-bus.service, ccsp-cr.service, ccsp-psm.service must be active before `CcspTandDSsp` (on some platforms/packages, this TandD component may instead be installed as `test-and-diagnostic.service`)
 - **Message Bus**: RBus registration for "Device.SelfHeal.", "Device.IP.Diagnostics.", "Device.DeviceInfo.X_RDKCENTRAL-COM_xOpsDeviceMgmt." namespaces
 - **Configuration Files**: `/etc/ccsp_msg.cfg`, `/nvram/syscfg.db`, TR-181 data model XML configuration in `config/TestAndDiagnostic_arm.XML`
 - **Startup Order**: Initialize after message bus and component registry, before user-facing services like WiFi and WAN components
@@ -507,19 +507,19 @@ sequenceDiagram
 
 ### Major HAL APIs Integration
 
-The Test and Diagnostic component integrates with multiple HAL layers to access hardware-specific functionality and system resources. These integrations provide the foundation for accurate system monitoring and hardware-aware diagnostic capabilities.
+The Test and Diagnostic component may interact with platform-specific HAL layers to access hardware-specific functionality and system resources in deployed integrations. However, the HAL symbols and paths are platform-dependent and are not defined in this repository as direct, repo-verified implementations.
 
-**Core HAL APIs:**
+**External / platform-provided HAL examples (illustrative, not in-tree implementation mappings):**
 
-| HAL API | Purpose | Implementation File |
-|---------|---------|-------------------|
-| `platform_hal_GetMemoryStatus()` | Retrieves system memory statistics including total, free, and usage percentages | `source/dmltad/cosa_deviceinfo_util_priv.c` |
-| `platform_hal_GetCPUTemperature()` | Gets current CPU temperature for thermal monitoring and protection | `source/ThermalCtrl/thermal_monitor.c` |
-| `nethal_getInterfaceStats()` | Collects network interface statistics for connectivity analysis | `source/dmltad/cosa_ip_dml.c` |
-| `nethal_configureInterface()` | Configures network interfaces during recovery procedures | `source/dmltad/cosa_wanconnectivity_apis.c` |
-| `thermal_hal_getCurrentTemperature()` | Monitors system thermal conditions across multiple sensors | `source/ThermalCtrl/thermal_control.c` |
-| `thermal_hal_setFanSpeed()` | Controls thermal management through fan speed adjustment | `source/ThermalCtrl/thermal_control.c` |
-| `platform_hal_getSystemUptime()` | Gets system uptime for health calculations and boot diagnostics | `source/dmltad/cosa_diagnostic_apis.c` |
+| HAL API | Purpose | Provider / Notes |
+|---------|---------|------------------|
+| `platform_hal_GetMemoryStatus()` | Example platform API for retrieving system memory statistics including total, free, and usage percentages | Platform/vendor HAL; not mapped here to an in-tree source file |
+| `platform_hal_GetCPUTemperature()` | Example platform API for obtaining CPU temperature for thermal monitoring | Platform/vendor HAL; not mapped here to an in-tree source file |
+| `nethal_getInterfaceStats()` | Example network HAL API for collecting interface statistics for connectivity analysis | Platform/vendor HAL; not mapped here to an in-tree source file |
+| `nethal_configureInterface()` | Example network HAL API for configuring interfaces during recovery procedures | Platform/vendor HAL; not mapped here to an in-tree source file |
+| `thermal_hal_getCurrentTemperature()` | Example thermal HAL API for monitoring current thermal conditions | Platform/vendor HAL; not mapped here to an in-tree source file |
+| `thermal_hal_setFanSpeed()` | Example thermal HAL API for controlling fan speed where supported | Platform/vendor HAL; not mapped here to an in-tree source file |
+| `platform_hal_getSystemUptime()` | Example platform API for obtaining system uptime for health calculations and boot diagnostics | Platform/vendor HAL; not mapped here to an in-tree source file |
 
 ### Key Implementation Logic
 
@@ -549,5 +549,4 @@ The Test and Diagnostic component integrates with multiple HAL layers to access 
 |--------------------|---------|--------------------|
 | `/nvram/syscfg.db` | Persistent system configuration managed by CcspPsm | `syscfg set/get` commands, factory reset procedures |
 | `config/TestAndDiagnostic_arm.XML` | TR-181 data model definitions and parameter mappings | Component rebuild required for structural changes |
-| `/tmp/selfheal.txt` | Runtime self-healing configuration and temporary state | Script-based updates, manual editing for debugging |
 | `/etc/ccsp_msg.cfg` | Message bus configuration for RBus communication | Service restart required after modifications |
