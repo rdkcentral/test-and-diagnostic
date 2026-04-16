@@ -64,13 +64,13 @@ rbusHandle_t g_rbusHandle;
 #define MT_NUM_OF_RBUS_PARAMS  sizeof(memtrace_RbusDataElements)/sizeof(memtrace_RbusDataElements[0])
 
 rbusDataElement_t memtrace_RbusDataElements[] = {
-    {"Device.SelfHeal.MemTrace.Enable", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetBoolHandler, MemTrace_SetBoolHandler, NULL, NULL, NULL, NULL}},
-    {"Device.SelfHeal.MemTrace.Interval", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetUlongHandler, MemTrace_SetUlongHandler, NULL, NULL, NULL, NULL}},
-    {"Device.SelfHeal.MemTrace.RSSThreshold", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetUlongHandler, MemTrace_SetUlongHandler, NULL, NULL, NULL, NULL}},
-    {"Device.SelfHeal.MemTrace.InitialSnapshotUptime", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetUlongHandler, MemTrace_SetUlongHandler, NULL, NULL, NULL, NULL}},
-    {"Device.SelfHeal.MemTrace.ProcessesInCodeGreen", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetStringHandler, NULL, NULL, NULL, NULL, NULL}},
-    {"Device.SelfHeal.MemTrace.ProcessesInCodeYellow", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetStringHandler, NULL, NULL, NULL, NULL, NULL}},
-    {"Device.SelfHeal.MemTrace.ProcessesInCodeRed", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetStringHandler, NULL, NULL, NULL, NULL, NULL}},
+    {"Device.Diagnostics.MemTrace.Enable", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetBoolHandler, MemTrace_SetBoolHandler, NULL, NULL, NULL, NULL}},
+    {"Device.Diagnostics.MemTrace.Interval", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetUlongHandler, MemTrace_SetUlongHandler, NULL, NULL, NULL, NULL}},
+    {"Device.Diagnostics.MemTrace.RSSThreshold", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetUlongHandler, MemTrace_SetUlongHandler, NULL, NULL, NULL, NULL}},
+    {"Device.Diagnostics.MemTrace.InitialSnapshotUptime", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetUlongHandler, MemTrace_SetUlongHandler, NULL, NULL, NULL, NULL}},
+    {"Device.Diagnostics.MemTrace.ProcessesInCodeGreen", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetStringHandler, NULL, NULL, NULL, NULL, NULL}},
+    {"Device.Diagnostics.MemTrace.ProcessesInCodeYellow", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetStringHandler, NULL, NULL, NULL, NULL, NULL}},
+    {"Device.Diagnostics.MemTrace.ProcessesInCodeRed", RBUS_ELEMENT_TYPE_PROPERTY, {MemTrace_GetStringHandler, NULL, NULL, NULL, NULL, NULL}},
 };
 
 rbusError_t MemTraceRbusInit()
@@ -386,21 +386,23 @@ MemTrace_SetParamUlongValue
                 CcspTraceWarning(("%s: Failed to set MemTrace_Interval in syscfg db\n", __FUNCTION__));
                 return FALSE;
             }
-            CcspTraceInfo(("%s - ProcAnalyzer setting Interval of %s for MemTrace \n", __FUNCTION__, res));
+            CcspTraceInfo(("%s - setting Interval of %s seconds\n", __FUNCTION__, res));
+            v_secure_system("systemctl restart memtraced");
         }
         else if (strcmp(ParamName, "RSSThreshold") == 0) {
             if (syscfg_set_commit(NULL, "MemTrace_RSSThreshold", res) != 0) {
                 CcspTraceWarning(("%s: Failed to set MemTrace_RSSThreshold in syscfg db\n", __FUNCTION__));
                 return FALSE;
             }
-            CcspTraceInfo(("%s - ProcAnalyzer setting RSSThreshold of %s for MemTrace \n", __FUNCTION__, res));
+            CcspTraceInfo(("%s - setting RSSThreshold of %s kB\n", __FUNCTION__, res));
+            v_secure_system("systemctl restart memtraced");
         }
         else if (strcmp(ParamName, "InitialSnapshotUptime") == 0) {
             if (syscfg_set_commit(NULL, "MemTrace_InitialSnapshotUptime", res) != 0) {
                 CcspTraceWarning(("%s: Failed to set MemTrace_InitialSnapshotUptime in syscfg db\n", __FUNCTION__));
                 return FALSE;
             }
-            CcspTraceInfo(("%s - ProcAnalyzer setting InitialSnapshotUptime of %s for MemTrace \n", __FUNCTION__, res));
+            CcspTraceInfo(("%s - setting InitialSnapshotUptime of %s seconds\n", __FUNCTION__, res));
         }
     }
     else
