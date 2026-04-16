@@ -87,7 +87,7 @@
 #ifdef WAN_FAILOVER_SUPPORTED
 #include "sysevent/sysevent.h"
 #endif
-
+#include "rdk_otlp_instrumentation.h"
 #define REFRESH_INTERVAL 120
 #define SPEEDTEST_ARG_SIZE 4096
 #define TIME_NO_NEGATIVE(x) ((long)(x) < 0 ? 0 : (x))
@@ -6301,6 +6301,7 @@ SpeedTest_Commit
         ANSC_HANDLE                 hInsContext
     )
 {
+	rdk_otlp_start_child_span("webpa_ctx", "speedtest-run");
     char previous[8];
 
     syscfg_get(NULL, "enable_speedtest", previous, sizeof(previous));
@@ -6314,12 +6315,12 @@ SpeedTest_Commit
         }
     }
 
-    if ((g_enable_speedtest == TRUE) && (g_run_speedtest == TRUE))
+    if (g_enable_speedtest == TRUE)
     {
-        AnscTraceFlow(("Executing Speedtest..\n"));
-        v_secure_system("/usr/ccsp/tad/speedtest.sh &");
-        g_run_speedtest = FALSE;
+        AnscTraceFlow(("Executing Speedtest binary directly..\n"));
+        v_secure_system("nice -n 19 /usr/bin/speedtest-client &");
     }
+    rdk_otlp_finish_child_span();
 
     return 0;
 }
