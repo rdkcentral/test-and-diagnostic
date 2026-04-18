@@ -348,6 +348,29 @@ X_RDK_AutomationTest_SetParamStringValue
                     return FALSE;
                 }
             }
+            else if (strncasecmp(pString, "DevicePrioritization|", 20) == 0 ) {
+                int (*TriggerDevicePrioritizationTest)();
+                
+                // Get the function pointer
+                *(void **) (&TriggerDevicePrioritizationTest) = dlsym(handle, "TriggerDevicePrioritizationTest");
+                if ((error = dlerror()) != NULL)  {
+                    fprintf(stderr, "%s\n", error);
+                    dlclose(handle);
+                    return FALSE;
+                }
+                if( FALSE == is_test_running() ) {
+                    int status = TriggerDevicePrioritizationTest();
+                    if( status != 0 ) {
+                        AnscTraceWarning(("%s : Failed to start Device Prioritization test\n", __FUNCTION__));
+                        dlclose(handle);
+                        return FALSE;
+                    }
+                } else {
+                    AnscTraceWarning(("%s : Automation test is already running\n", __FUNCTION__));
+                    dlclose(handle);
+                    return FALSE;
+                }
+            }
             else if (strcasecmp(pString, "SpeedTestXLE") == 0 ) {
                 int (*Trigger_SpeedTestXLE)();
                 // Get the function pointer
