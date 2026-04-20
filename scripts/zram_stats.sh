@@ -34,12 +34,24 @@ echo_t() {
 }
 
 # ZRAM statistics
-zram_disk_size=$(cat /sys/block/zram0/disksize 2>/dev/null)
-mm_stat=$(cat /sys/block/zram0/mm_stat 2>/dev/null)
-mem_used_total="$(echo "$mm_stat" | awk '{print $3}')"
-orig_data_size="$(echo "$mm_stat" | awk '{print $1}')"
-compr_data_size="$(echo "$mm_stat" | awk '{print $2}')"
-echo_t "ZRAM stats - Disk Size: $zram_disk_size, Mem Used Total: $mem_used_total, Original Data Size: $orig_data_size, Compressed Data Size: $compr_data_size"
+zram_disksize_path="/sys/block/zram0/disksize"
+zram_mm_stat_path="/sys/block/zram0/mm_stat"
+zram_disk_size=0
+mem_used_total=0
+orig_data_size=0
+compr_data_size=0
+
+if [ -r "$zram_disksize_path" ] && [ -r "$zram_mm_stat_path" ]; then
+    zram_disk_size="$(cat "$zram_disksize_path" 2>/dev/null)"
+    mm_stat="$(cat "$zram_mm_stat_path" 2>/dev/null)"
+    mem_used_total="$(echo "$mm_stat" | awk '{print $3}')"
+    orig_data_size="$(echo "$mm_stat" | awk '{print $1}')"
+    compr_data_size="$(echo "$mm_stat" | awk '{print $2}')"
+    echo_t "ZRAM stats - Disk Size: $zram_disk_size, Mem Used Total: $mem_used_total, Original Data Size: $orig_data_size, Compressed Data Size: $compr_data_size"
+else
+    echo_t "ZRAM stats unavailable - $zram_disksize_path or $zram_mm_stat_path is missing/unreadable"
+    exit 1
+fi
 
 pswpin_prev=0
 if [ -f /tmp/pswpin_prev ]; then
@@ -59,8 +71,21 @@ echo_t "Swap stats - pswpin: $pswpin_current, pswpout: $pswpout_current, pswpin_
 zram_cur_used_mb=$((mem_used_total / 1024 / 1024))
 zram_original_data_size_mb=$((orig_data_size / 1024 / 1024))
 zram_compressed_mb=$((compr_data_size / 1024 / 1024))
-pswpin_delta=$((pswpin_current - pswpin_prev))
-pswpout_delta=$((pswpout_current - pswpout_prev))
+
+pswpin_delta=0
+if [ "$pswpin_current" -gt "$pswpin_prev" ]; then
+    pswpin_delta=$((pswpin_current - pswpin_prev))
+fi
+
+pswpout_delta=0
+if [ "$pswpout_current" -gt "$pswpout_prev" ]; then
+    pswpout_delta=$((pswpout_current - pswpout_prev))
+fi
+
 echo_t "Telemetry values - ZRAM Used MB: $zram_cur_used_mb, ZRAM Original Data Size MB: $zram_original_data_size_mb, ZRAM Compressed MB: $zram_compressed_mb, pswpin delta: $pswpin_delta, pswpout delta: $pswpout_delta"
 
 t2ValNotify "ZRAM_SWAP_split" "$zram_disk_size,$zram_cur_used_mb,$zram_original_data_size_mb,$zram_compressed_mb,$pswpin_delta,$pswpout_delta"
+
+# Save current pswpin and pswpout values for next run
+echo "$pswpin_current" >/tmp/pswpin_prev
+echo "$pswpout_current" >/tmp/pswpout_prev
