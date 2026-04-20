@@ -18,7 +18,7 @@
 # limitations under the License.
 #######################################################################################
 
-MEMSWAP_LOGFILE="/rdklogs/logs/memswap.log"
+ZRAM_LOGFILE="/rdklogs/logs/zram.log"
 T2_MSG_CLIENT="/usr/bin/telemetry2_0_client"
 
 t2ValNotify() {
@@ -30,7 +30,7 @@ t2ValNotify() {
 }
 
 echo_t() {
-    echo "$(date +"%y%m%d-%T.%6N") $1" >>$MEMSWAP_LOGFILE
+    echo "$(date +"%y%m%d-%T.%6N") $1" >>$ZRAM_LOGFILE
 }
 
 # ZRAM statistics
