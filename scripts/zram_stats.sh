@@ -68,6 +68,7 @@ pswpout_current="$(cat /proc/vmstat 2>/dev/null | grep "pswpout" | awk '{print $
 echo_t "Swap stats - pswpin: $pswpin_current, pswpout: $pswpout_current, pswpin_prev: $pswpin_prev, pswpout_prev: $pswpout_prev"
 
 # Calculate telemetry marker values
+zram_disk_size_mb=$((zram_disk_size / 1024 / 1024))
 zram_cur_used_mb=$((mem_used_total / 1024 / 1024))
 zram_original_data_size_mb=$((orig_data_size / 1024 / 1024))
 zram_compressed_mb=$((compr_data_size / 1024 / 1024))
@@ -82,9 +83,9 @@ if [ "$pswpout_current" -gt "$pswpout_prev" ]; then
     pswpout_delta=$((pswpout_current - pswpout_prev))
 fi
 
-echo_t "Telemetry values - ZRAM Used MB: $zram_cur_used_mb, ZRAM Original Data Size MB: $zram_original_data_size_mb, ZRAM Compressed MB: $zram_compressed_mb, pswpin delta: $pswpin_delta, pswpout delta: $pswpout_delta"
+echo_t "Telemetry values - ZRAM Disk Size MB: $zram_disk_size_mb, ZRAM Used MB: $zram_cur_used_mb, ZRAM Original Data Size MB: $zram_original_data_size_mb, ZRAM Compressed MB: $zram_compressed_mb, pswpin delta: $pswpin_delta, pswpout delta: $pswpout_delta"
 
-t2ValNotify "ZRAM_SWAP_split" "$zram_disk_size,$zram_cur_used_mb,$zram_original_data_size_mb,$zram_compressed_mb,$pswpin_delta,$pswpout_delta"
+t2ValNotify "ZRAM_SWAP_split" "$zram_disk_size_mb,$zram_cur_used_mb,$zram_original_data_size_mb,$zram_compressed_mb,$pswpin_delta,$pswpout_delta"
 
 # Save current pswpin and pswpout values for next run
 echo "$pswpin_current" >/tmp/pswpin_prev
