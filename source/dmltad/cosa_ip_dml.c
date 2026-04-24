@@ -6315,11 +6315,13 @@ SpeedTest_Commit
         }
     }
 
-    if (g_enable_speedtest == TRUE)
+	if ((g_enable_speedtest == TRUE) && (g_run_speedtest == TRUE))
     {
-        AnscTraceFlow(("Executing Speedtest binary directly..\n"));
-        v_secure_system("nice -n 19 /usr/bin/speedtest-client &");
+        AnscTraceFlow(("Executing Speedtest..\n"));
+        v_secure_system("/usr/ccsp/tad/speedtest.sh &");
+        g_run_speedtest = FALSE;
     }
+	
     rdk_otlp_finish_child_span();
 
     return 0;
