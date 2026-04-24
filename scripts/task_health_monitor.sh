@@ -38,36 +38,6 @@ HomeSecuritySupport=`sysevent get HomeSecuritySupport`
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
 
 DIBBLER_SERVER_CONF="/etc/dibbler/server.conf"
-
-
-# Global variable to indicate if any DHCPv6 client is enabled
-DHCPV6C_ENABLED=0
-
-# Function to check if any DHCPv6 client is enabled
-is_dhcpv6c_enabled() {
-    local num_entries i enabled alias
-    num_entries=$(dmcli eRT retv Device.DHCPv6.ClientNumberOfEntries 2>/dev/null)
-    if [[ -z "$num_entries" ]] || [[ $num_entries -eq 0 ]]; then
-        echo_t "no wan interface specified"
-        DHCPV6C_ENABLED=0
-        return
-    fi
-    for i in $(seq 1 "$num_entries"); do
-        alias=$(dmcli eRT retv Device.DHCPv6.Client.$i.Alias 2>/dev/null)
-        #We need to skip checking the status of DHCPv6 client for hotspot as it is used for hotspot clients, 
-        #and we have to define here if any other clients are added in future which are not used for wan connection .
-        if [ "$alias" = "HOTSPOT" ]; then
-            continue
-        fi
-        enabled=$(dmcli eRT retv Device.DHCPv6.Client.$i.Enable 2>/dev/null)
-        if [ "$enabled" = "true" ] || [ "$enabled" = "1" ]; then
-            DHCPV6C_ENABLED=1
-            return
-        fi
-    done
-    DHCPV6C_ENABLED=0
-}
-
 if [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "CGA4131COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "VTER11QEL" ]
 then
     DHCPV6_HANDLER="/usr/bin/service_dhcpv6_client"
@@ -3927,11 +3897,7 @@ if [ "$xle_device_mode" -ne "1" ]; then
     DIBBLER_PID=$(busybox pidof dibbler-server)
     if [ "$DIBBLER_PID" = "" ]; then
     #   IPV6_STATUS=`sysevent get ipv6-status`
-        if [ -f /tmp/dhcpmgr_initialized ]; then
-            is_dhcpv6c_enabled
-        else
-            DHCPV6C_ENABLED=$(sysevent get dhcpv6c_enabled)
-        fi
+        DHCPV6C_ENABLED=$(sysevent get dhcpv6c_enabled)
         routerMode="`syscfg get last_erouter_mode`"
 
     if [ "$BOX_TYPE" = "HUB4" ]; then
