@@ -444,26 +444,16 @@ self_heal_dual_cron()
 
 self_heal_sedaemon()
 {
-    if [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
+    if [ -f /tmp/started_ssad ] && [ "$kdftype" == "RSA" ]; then
          accessmgr=`pidof accessManager`
-
-         if [ "$kdftype" = "ECC" ]; then
-             ssadaemon=`pidof rdkssaecckdf`
-             daemon_service="rdkssaeccdaemon.service"
-             daemon_name="rdkssaecckdf"
-         else
-             ssadaemon=`pidof se05xd`
-             daemon_service="startse05xd.service"
-             daemon_name="se05xd"
-         fi
-
-         if [[ -z "$ssadaemon" ]] || [[ -z "$accessmgr" ]]; then
-               echo_t "[RDKB_SELFHEAL] : Restarting accessmanager and $daemon_name"
+         se05xd=`pidof se05xd`
+         if [[ -z "$se05xd" ]] || [[ -z "$accessmgr" ]]; then
+               echo_t "[RDKB_SELFHEAL] : Restarting accessmanager and se05xd"
                t2CountNotify "SYS_SH_SERestart"
-               systemctl stop $daemon_service
+               systemctl stop startse05xd.service
                systemctl stop accessmanager.service
                systemctl start accessmanager.service
-               systemctl start $daemon_service
+               systemctl start startse05xd.service
          fi
     fi
 }
