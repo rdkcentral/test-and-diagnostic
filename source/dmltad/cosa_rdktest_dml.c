@@ -420,29 +420,6 @@ X_RDK_AutomationTest_SetParamStringValue
                     return FALSE;
                 }
             }
-            else if (strncasecmp(pString, "Validate|", 9) == 0) {
-                int (*Trigger_executeFeature)(char*);
-                void *func_ptr = dlsym(handle, "Trigger_executeFeature");
-                Trigger_executeFeature = (int (*)(char*))func_ptr;
-
-                if ((error = dlerror()) != NULL)  {
-                    fprintf(stderr, "%s\n", error);
-                    dlclose(handle);
-                    return FALSE;
-                }
-                if (FALSE == is_test_running()) {
-                    char *input = pString + strlen("Validate|"); // "GFO" / "WFO" / "TEST" / "DEBUG"
-                    if (Trigger_executeFeature(input) != 0) {
-                        AnscTraceWarning(("%s : Validate failed\n", __FUNCTION__));
-                        dlclose(handle);
-                        return FALSE;
-                    }
-                } else {
-                    AnscTraceWarning(("%s : Automation test already running\n", __FUNCTION__));
-                    dlclose(handle);
-                    return FALSE;
-                }
-            }
             else {
                 AnscTraceWarning(("%s : Invalid test name '%s'\n", __FUNCTION__, pString));
                 dlclose(handle);
