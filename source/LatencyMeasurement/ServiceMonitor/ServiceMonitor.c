@@ -737,12 +737,17 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 					curr_wan_mode=atoi(value);
 				}
 			}
-			else if(strcmp(name,LATENCY_MEASUREMENT_DISABLE)==0)
-			{
-				CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n",__func__));
-				break;
-			}
+				else if(strcmp(name,LATENCY_MEASUREMENT_DISABLE)==0)
+				{
+					CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n",__func__));
+					break;
+				}
 		}
+	}
+	if(sysevent_fd >= 0)
+	{
+		sysevent_close(sysevent_fd, sysevent_token);
+		sysevent_fd = -1;
 	}
 	pthread_detach(tid[SYSEVENT_PTHREAD_ID]);
 	CcspTraceInfo(("pthread_detach SYSEVENT_PTHREAD_ID %s\n",__func__));
