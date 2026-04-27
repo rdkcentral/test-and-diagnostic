@@ -78,26 +78,31 @@ void* isMonitorService_thread_free(void *arg)
 	pthread_condattr_init(&SyncAttr);
 	pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
 	pthread_cond_init(&cond,&SyncAttr);
-	while(1)
-	{	
-		memset(&ts,0,sizeof(ts));
-		clock_gettime(CLOCK_MONOTONIC, &ts);
-		ts.tv_nsec = 0;
-		ts.tv_sec +=TIMER_VALUE;
-		pthread_mutex_lock(&lock);
-		Status=pthread_cond_timedwait(&cond,&lock,&ts);
-		if((Status != 0)&&(Status != ETIMEDOUT))
+	memset(&ts,0,sizeof(ts));
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	ts.tv_nsec = 0;
+	ts.tv_sec +=TIMER_VALUE;
+	pthread_mutex_lock(&lock);
+	{
+		bool bWaitComplete = false;
+		while(!bWaitComplete)
 		{
-			CcspTraceInfo(("%s pthread_cond_timedwait failed\n",__func__));
-			pthread_mutex_unlock(&lock);
-			continue;
+			Status=pthread_cond_timedwait(&cond,&lock,&ts);
+			if(Status == 0 || Status == ETIMEDOUT)
+			{
+				bWaitComplete = true;
+			}
+			else
+			{
+				CcspTraceInfo(("%s pthread_cond_timedwait failed with error %d\n",__func__, Status));
+				break;
+			}
 		}
-		pthread_mutex_unlock(&lock);
-		sleep(1);
-		UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
-		IsTR181_triger_at_PthreadisBusy=false;
-		break;
 	}
+	pthread_mutex_unlock(&lock);
+	sleep(1);
+	UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
+	IsTR181_triger_at_PthreadisBusy=false;
 	pthread_detach(tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID]);
 	CcspTraceInfo(("pthread_detach WAIT_FOR_MONITOR_FREE_PTHREAD_ID %s\n",__func__));
 	return NULL;
@@ -793,15 +798,27 @@ void* LatencyMeasurement_MonitorService(void *arg)
 	
 	while(1)
 	{	
+		bool bWaitComplete = false;
 		memset(&ts,0,sizeof(ts));
 		clock_gettime(CLOCK_MONOTONIC, &ts);
 		ts.tv_nsec = 0;
 		ts.tv_sec +=TIMERINTERVEL;		
 		pthread_mutex_lock(&lock);
-		Status=pthread_cond_timedwait(&Monitor_cond,&lock,&ts);
-		if((Status != 0)&&(Status != ETIMEDOUT))
+		while(!bWaitComplete)
 		{
-			CcspTraceInfo(("%s pthread_cond_timedwait failed\n",__func__));
+			Status=pthread_cond_timedwait(&Monitor_cond,&lock,&ts);
+			if(Status == 0 || Status == ETIMEDOUT)
+			{
+				bWaitComplete = true;
+			}
+			else
+			{
+				CcspTraceInfo(("%s pthread_cond_timedwait failed with error %d\n",__func__, Status));
+				break;
+			}
+		}
+		if(!bWaitComplete)
+		{
 			pthread_mutex_unlock(&lock);
 			continue;
 		}
