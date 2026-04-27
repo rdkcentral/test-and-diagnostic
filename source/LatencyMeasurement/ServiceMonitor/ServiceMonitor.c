@@ -78,6 +78,7 @@ void* isMonitorService_thread_free(void *arg)
 	pthread_condattr_init(&SyncAttr);
 	pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
 	pthread_cond_init(&cond,&SyncAttr);
+	pthread_condattr_destroy(&SyncAttr);
 	while(1)
 	{	
 		memset(&ts,0,sizeof(ts));
@@ -733,12 +734,17 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 					curr_wan_mode=atoi(value);
 				}
 			}
-			else if(strcmp(name,LATENCY_MEASUREMENT_DISABLE)==0)
+				else if(strcmp(name,LATENCY_MEASUREMENT_DISABLE)==0)
 			{
 				CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n",__func__));
 				break;
 			}
 		}
+	}
+	if(sysevent_fd >= 0)
+	{
+		sysevent_close(sysevent_fd, sysevent_token);
+		sysevent_fd = -1;
 	}
 	pthread_detach(tid[SYSEVENT_PTHREAD_ID]);
 	CcspTraceInfo(("pthread_detach SYSEVENT_PTHREAD_ID %s\n",__func__));
@@ -775,6 +781,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
 	pthread_condattr_init(&SyncAttr);
 	pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
 	pthread_cond_init(&Monitor_cond,&SyncAttr);
+	pthread_condattr_destroy(&SyncAttr);
 	LatencyMeasurementServiceInit();
 	sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_ifname", current_wan_ifname, sizeof(strValue));
 	sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_mode_update", strValue, sizeof(strValue));
@@ -823,6 +830,12 @@ void* LatencyMeasurement_MonitorService(void *arg)
 			break;
 		}
 	}
+	if(sysevent_fd_g >= 0)
+	{
+		sysevent_close(sysevent_fd_g, sysevent_token_g);
+		sysevent_fd_g = -1;
+	}
+	pthread_cond_destroy(&Monitor_cond);
 	pthread_detach(tid[MONITOR_PTHREAD_ID]);
 	CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n",__func__));
 	return NULL;
