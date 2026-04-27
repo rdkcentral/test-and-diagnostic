@@ -79,6 +79,7 @@ void* isMonitorService_thread_free(void *arg)
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&cond, &SyncAttr);
+    pthread_condattr_destroy(&SyncAttr);
     memset(&ts, 0, sizeof(ts));
     clock_gettime(CLOCK_MONOTONIC, &ts);
     ts.tv_nsec = 0;
@@ -104,8 +105,7 @@ void* isMonitorService_thread_free(void *arg)
     UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
     pthread_detach(tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID]);
     CcspTraceInfo(("pthread_detach WAIT_FOR_MONITOR_FREE_PTHREAD_ID %s\n", __func__));
-    return NULL;
-}
+    return NULL;}
 int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 {
 	char new_val_buf[20];
@@ -737,12 +737,17 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 					curr_wan_mode=atoi(value);
 				}
 			}
-			else if(strcmp(name,LATENCY_MEASUREMENT_DISABLE)==0)
+				else if(strcmp(name,LATENCY_MEASUREMENT_DISABLE)==0)
 			{
 				CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n",__func__));
 				break;
 			}
 		}
+	}
+	if(sysevent_fd >= 0)
+	{
+		sysevent_close(sysevent_fd, sysevent_token);
+		sysevent_fd = -1;
 	}
 	pthread_detach(tid[SYSEVENT_PTHREAD_ID]);
 	CcspTraceInfo(("pthread_detach SYSEVENT_PTHREAD_ID %s\n",__func__));
@@ -833,10 +838,15 @@ void* LatencyMeasurement_MonitorService(void *arg)
             break;
         }
     }
+    if(sysevent_fd_g >= 0)
+    {
+        sysevent_close(sysevent_fd_g, sysevent_token_g);
+        sysevent_fd_g = -1;
+    }
+    pthread_cond_destroy(&Monitor_cond);
     pthread_detach(tid[MONITOR_PTHREAD_ID]);
     CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
-    return NULL;
-}
+    return NULL;}
 /*****************************************************************************
 	LatencyMeasurement_Config_Init() is used for Xnet services configuration initialization
 ******************************************************************************/
