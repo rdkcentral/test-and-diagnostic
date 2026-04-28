@@ -218,11 +218,11 @@ checkIPv6ConnectivityRdisc6() {
         RDISC_OUTPUT=`rdisc6 -$i -w $((3000 + i * 2000)) $wan_interface 2>/dev/null`
         RDISC_RESULT=$?
         if [ $RDISC_RESULT -eq 0 ] && [ "$RDISC_OUTPUT" != "" ]; then
-            return 1  # Success
+            return 0  # Success
         fi
         sleep 5
     done
-    return 0  # Failed
+    return 1  # Failed
 }
 
 runPingTest()
@@ -302,7 +302,7 @@ runPingTest()
                   echo "IPv6 default route $IPv6_Gateway_addr"
 
 		  routeEntry_global=`ip -6 route list | grep $WAN_INTERFACE | grep $erouterIP6`
-		  IPv6_Gateway_addr_global=`echo "$routeEntry_global" | cut -f1 -d\/`
+		  IPv6_Gateway_addr_global=`echo "$routeEntry_global" | grep -v '\/' | cut -f1 -d' '`
 
 		  # If we don't get the Network prefix we need this additional check to
 		  # retrieve the IPv6 GW Addr , here route entry and IPv6_Gateway_addr_global(which is retrived from above execution)
@@ -382,7 +382,7 @@ runPingTest()
 			checkIPv6ConnectivityRdisc6 "$WAN_INTERFACE"
 			ipv6_connectivity_result=$?
 
-			if [ $ipv6_connectivity_result -eq 1 ]; then
+			if [ $ipv6_connectivity_result -eq 0 ]; then
 				ping6_success=1
 				ping6_failed=0
 				echo_t "RDKB_SELFHEAL : IPv6 connectivity test successful"
@@ -429,8 +429,8 @@ runPingTest()
 				echo_t "RDKB_SELFHEAL : No IPv6 Gateway Address detected"
 				t2CountNotify "SYS_INFO_NoIPv6_Address"
 			else
-				echo_t "RDKB_SELFHEAL : Ping to IPv6 Gateway Address are failed."
-				t2CountNotify "RF_ERROR_IPV6PingFailed"
+				echo_t "RDKB_SELFHEAL : IPv6 connectivity test failed."
+				t2CountNotify "RF_ERROR_IPV6ConnectivityFailed"
 				echo_t "PING_FAILED:$IPv6_Gateway_addr"
 			fi
 		fi #LTE-1335 Ping to ipv6 not needed for xle.
@@ -476,8 +476,8 @@ runPingTest()
 	then
 		if [ "$IPv6_Gateway_addr" != "" ] || [ "$IPv6_Gateway_addr_global" != "" ]
 		then
-			echo_t "RDKB_SELFHEAL : Ping to IPv6 Gateway Address are failed."
-			t2CountNotify "RF_ERROR_IPV6PingFailed"
+			echo_t "RDKB_SELFHEAL : IPv6 connectivity test failed."
+			t2CountNotify "RF_ERROR_IPV6ConnectivityFailed"
 			echo_t "PING_FAILED:$IPv6_Gateway_addr"
 		elif [[ $last_erouter_mode -gt 1 ]]
 		then
