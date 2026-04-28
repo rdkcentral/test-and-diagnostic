@@ -78,31 +78,36 @@ void* isMonitorService_thread_free(void *arg)
 	pthread_condattr_init(&SyncAttr);
 	pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
 	pthread_cond_init(&cond,&SyncAttr);
-	memset(&ts,0,sizeof(ts));
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	ts.tv_nsec = 0;
-	ts.tv_sec +=TIMER_VALUE;
-	pthread_mutex_lock(&lock);
+	while(1)
 	{
-		bool bWaitComplete = false;
-		while(!bWaitComplete)
+		bool bWaitDone = false;
+		memset(&ts,0,sizeof(ts));
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		ts.tv_nsec = 0;
+		ts.tv_sec +=TIMER_VALUE;
+		pthread_mutex_lock(&lock);
+		/* FIX: wrap in predicate loop for BAD_CHECK_OF_WAIT_COND */
+		while(!bWaitDone)
 		{
 			Status=pthread_cond_timedwait(&cond,&lock,&ts);
-			if(Status == 0 || Status == ETIMEDOUT)
+			if((Status != 0)&&(Status != ETIMEDOUT))
 			{
-				bWaitComplete = true;
-			}
-			else
-			{
-				CcspTraceInfo(("%s pthread_cond_timedwait failed with error %d\n",__func__, Status));
+				CcspTraceInfo(("%s pthread_cond_timedwait failed\n",__func__));
 				break;
 			}
+			bWaitDone = true;
 		}
+		if(!bWaitDone)
+		{
+			pthread_mutex_unlock(&lock);
+			continue;
+		}
+		pthread_mutex_unlock(&lock);
+		sleep(1);
+		UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
+		IsTR181_triger_at_PthreadisBusy=false;
+		break;
 	}
-	pthread_mutex_unlock(&lock);
-	sleep(1);
-	UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
-	IsTR181_triger_at_PthreadisBusy=false;
 	pthread_detach(tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID]);
 	CcspTraceInfo(("pthread_detach WAIT_FOR_MONITOR_FREE_PTHREAD_ID %s\n",__func__));
 	return NULL;
@@ -757,7 +762,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
 	//UNREFERENCED_PARAMETER(arg);
 	char strValue[64] = {0};
 	int Status=0;
-	struct timespec ts; 
+	struct timespec ts;
 	pthread_condattr_t SyncAttr;
 	int Error=0;
 	struct sysinfo s_info;
@@ -795,29 +800,27 @@ void* LatencyMeasurement_MonitorService(void *arg)
 		pthread_cond_signal(&cond);
 	}
 	IsTR181_triger_at_PthreadisBusy=false;
-	
+
 	while(1)
-	{	
-		bool bWaitComplete = false;
+	{
+		bool bWaitDone = false;
 		memset(&ts,0,sizeof(ts));
 		clock_gettime(CLOCK_MONOTONIC, &ts);
 		ts.tv_nsec = 0;
-		ts.tv_sec +=TIMERINTERVEL;		
+		ts.tv_sec +=TIMERINTERVEL;
 		pthread_mutex_lock(&lock);
-		while(!bWaitComplete)
+		/* FIX: wrap in predicate loop for BAD_CHECK_OF_WAIT_COND */
+		while(!bWaitDone)
 		{
 			Status=pthread_cond_timedwait(&Monitor_cond,&lock,&ts);
-			if(Status == 0 || Status == ETIMEDOUT)
+			if((Status != 0)&&(Status != ETIMEDOUT))
 			{
-				bWaitComplete = true;
-			}
-			else
-			{
-				CcspTraceInfo(("%s pthread_cond_timedwait failed with error %d\n",__func__, Status));
+				CcspTraceInfo(("%s pthread_cond_timedwait failed\n",__func__));
 				break;
 			}
+			bWaitDone = true;
 		}
-		if(!bWaitComplete)
+		if(!bWaitDone)
 		{
 			pthread_mutex_unlock(&lock);
 			continue;
