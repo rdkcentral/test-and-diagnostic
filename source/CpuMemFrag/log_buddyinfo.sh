@@ -94,10 +94,22 @@ parse_buddyinfo()
      then
         syscfg set CpuMemFrag_Host_Dma32 $data
         echo_t "PROC_BUDDYINFO_HOST:CPU_MEM_FRAG-DMA32,$data" >> $LOG_FILE
+        OutputData=`MemFrag_Calc $data`
+        OverallFragPercentage=`echo $OutputData | cut -d' ' -f1`
+        FragPercentage=`echo $OutputData | cut -d' ' -f2`
+        syscfg set CpuMemFrag_Host_Percentage $FragPercentage
+        echo_t "PROC_BUDDYINFO_HOST:CPU_MEM_FRAG_PERCENTAGE-DMA32,$FragPercentage" >> $LOG_FILE
+        echo_t "PROC_BUDDYINFO_HOST:CPU_MEM_FRAG_OVERALL_PERCENTAGE-DMA32,$OverallFragPercentage" >> $LOG_FILE
      elif [ "$2" = "peer" ]
      then
         syscfg set CpuMemFrag_Peer_Dma32 $data
         echo_t "PROC_BUDDYINFO_PEER:CPU_MEM_FRAG-DMA32,$data" >> $LOG_FILE
+        OutputData=`MemFrag_Calc $data`
+        OverallFragPercentage=`echo $OutputData | cut -d' ' -f1`
+        FragPercentage=`echo $OutputData | cut -d' ' -f2`
+        syscfg set CpuMemFrag_Peer_Percentage $FragPercentage
+        echo_t "PROC_BUDDYINFO_PEER:CPU_MEM_FRAG_PERCENTAGE-DMA32,$FragPercentage" >> $LOG_FILE
+        echo_t "PROC_BUDDYINFO_PEER:CPU_MEM_FRAG_OVERALL_PERCENTAGE-DMA32,$OverallFragPercentage" >> $LOG_FILE
      fi
   elif [ "`echo $1 | grep -i HighMem`" != "" ]
   then
@@ -120,10 +132,21 @@ parse_buddyinfo()
 }
 
 # Call parser function for each line found in /proc/buddyinfo of host processor
+# when we have more than one zone, keep the max frag in CpuMemFrag_Host_Percentage
+MaxMemFrag=""
 for line in $host_buddyinfo;
 do
   parse_buddyinfo $line "host"
+  CurrMemFrag=`syscfg get CpuMemFrag_Host_Percentage`
+  if [ -z "$MaxMemFrag" ]; then
+      MaxMemFrag=$CurrMemFrag
+  else
+      if [ "$CurrMemFrag" -gt "$MaxMemFrag" ];then
+          MaxMemFrag=$CurrMemFrag
+      fi
+  fi
 done
+syscfg set CpuMemFrag_Host_Percentage $MaxMemFrag
 
 # Check if we need to collect peer buddyinfo, then do rpcclient 
 if [ "$CR_IN_PEER" = "yes" ]

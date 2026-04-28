@@ -21,6 +21,7 @@
 TAD_PATH="/usr/ccsp/tad/"
 
 source $TAD_PATH/corrective_action.sh
+source $TAD_PATH/boot_mode.sh
 source /etc/waninfo.sh
 
 exec 3>&1 4>&2 >>$SELFHEALFILE 2>&1
@@ -38,15 +39,23 @@ ping6_success=0
 ping4_failed=0
 ping6_failed=0
 
+SELFHEAL_CONN_TMP_DIR="/tmp/.selfheal_conn"
+UPLOAD_SCHEDULE_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_schedule.log"
+DELAY_COUNTDOWN_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_delay_countdown"
+MODE_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_mode"
+LAST_EXECUTION_FILE="$SELFHEAL_CONN_TMP_DIR/.selfheal_last_exec"
+
+if [ ! -d "$SELFHEAL_CONN_TMP_DIR" ]; then
+    mkdir -p "$SELFHEAL_CONN_TMP_DIR"
+fi
 
 getCorrectiveActionState() {
     Corrective_Action=`syscfg get ConnTest_CorrectiveAction`
     echo "$Corrective_Action"
 }
 
-calcRandTimetoStartPing()
+generate_random_sleep()
 {
-
     rand_min=0
     rand_sec=0
 
@@ -58,8 +67,77 @@ calcRandTimetoStartPing()
 
     sec_to_sleep=$(($rand_min*60 + $rand_sec))
     echo_t "self_heal_connectivity_test is going into sleep for $sec_to_sleep sec"
-    sleep $sec_to_sleep; 
-        
+}
+
+ready_to_ping_test()
+{
+    INTERVAL_MIN=`syscfg get ConnTest_PingInterval`
+    [ -z "$INTERVAL_MIN" ] && INTERVAL_MIN=60
+
+    INTERVAL_SEC=$((INTERVAL_MIN * 60))
+    current_time=$(date +%s)
+
+    if [ ! -f "$LAST_EXECUTION_FILE" ]; then
+		return 0
+    fi
+
+    last_time=$(cat "$LAST_EXECUTION_FILE")
+    diff=$((current_time - last_time))
+    remaining=$((INTERVAL_SEC - diff))
+
+    if [ "$diff" -ge "$INTERVAL_SEC" ]; then
+        echo_t "Interval met ($diff >= $INTERVAL_SEC)" 
+        return 0
+    elif [ "$remaining" -le 600 ]; then
+        echo_t "Interval almost met, sleeping $remaining sec to align exact run" 
+        sleep "$remaining"
+        echo_t "Interval met after sleep, running ping now" 
+        return 0
+    else
+        return 1
+    fi
+}
+
+calcRandTimetoStartPing()
+{
+    if [ "$CRON_MODE" = "1" ]; then
+        if [ ! -f "$DELAY_COUNTDOWN_FILE" ] && [ ! -f "$MODE_FILE" ]; then
+            generate_random_sleep
+            remaining=$((sec_to_sleep - 600))
+            [ "$remaining" -lt 0 ] && remaining="$sec_to_sleep"
+            echo "$remaining" > "$DELAY_COUNTDOWN_FILE"
+            echo_t "RDKB_SELF_HEAL_CONN: Initial random delay stored: $sec_to_sleep seconds" 
+            echo "DELAY" > "$MODE_FILE"
+            echo_t "RDKB_SELF_HEAL_CONN: Remaining delay: $remaining sec"
+            exit 0
+        fi
+
+        MODE=$(cat "$MODE_FILE" 2>/dev/null)
+
+        if [ "$MODE" = "DELAY" ]; then
+            remaining=$(cat "$DELAY_COUNTDOWN_FILE" 2>/dev/null)
+            [ -z "$remaining" ] && remaining=0
+
+            if [ "$remaining" -le 600 ]; then
+                echo_t "Final delay sleep: $remaining sec" 
+                [ "$remaining" -gt 0 ] && sleep "$remaining"
+
+                rm -f "$DELAY_COUNTDOWN_FILE"
+                echo "NORMAL" > "$MODE_FILE"
+
+                echo_t "Delay complete -> NORMAL mode" 
+            else
+                remaining=$((remaining - 600))
+                echo "$remaining" > "$DELAY_COUNTDOWN_FILE"
+
+                exit 0
+            fi
+        fi
+    else
+        generate_random_sleep
+        echo_t "RDKB_SELF_HEAL_CONN: Sleeping for $sec_to_sleep seconds" 
+        sleep $sec_to_sleep;
+    fi
 }
 
 # A generic function which can be used for any URL parsing
@@ -565,56 +643,93 @@ runPingTest()
 
 }
 
-SELFHEAL_ENABLE=`syscfg get selfheal_enable`
+SELFHEAL_ENABLE=$(syscfg get selfheal_enable)
+BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
 
-while [ $SELFHEAL_ENABLE = "true" ]
-do
+run_connectivity_test() {
+    WAN_INTERFACE=$(getWanInterfaceName)
+    wan_status=$(sysevent get wan-status)
 
-	if [ "$calcRandom" -eq 1 ] 
-	then
+    if [ -z "$wan_status" ] || [ "$wan_status" = "stopped" ]; then
+        echo_t "RDKB_SELFHEAL : WAN is not up, bypassing connectivity test"
+        return
+    fi
 
-		calcRandTimetoStartPing
-		calcRandom=0
-	else
-		INTERVAL=`syscfg get ConnTest_PingInterval`
+    MAPT_CONFIG=$(sysevent get mapt_config_flag)
+    if [ "$MAPT_CONFIG" = "set" ]; then
+        WAN_INTERFACE_IPV4="map0"
+    fi
 
-		if [ "$INTERVAL" = "" ] 
-		then
-			INTERVAL=60
-		fi
-                INTERVAL=$(($INTERVAL*60))
-		sleep $INTERVAL
-	fi
+    #LTE-1335 runPingTest needs to be run only in extender mode for xle.
+    if [ "$BOX_TYPE" = "WNXL11BWL" ]
+    then
+        xle_device_mode=`syscfg get Device_Mode`
+        if [ "$xle_device_mode" -eq "1" ]; then
+            echo_t "RDKB_SELFHEAL : Device is in Extender mode, calling runPingTest."
+            runPingTest
+        else
+            echo_t "RDKB_SELFHEAL : Device is in Gateway mode, runPingTest is not needed."
+        fi
+    else
+        runPingTest
+    fi
+    runDNSPingTest
+}
 
-	WAN_INTERFACE=$(getWanInterfaceName)
-	wan_status=`sysevent get wan-status`
-	if [ "$wan_status" = "" ] || [ "$wan_status" = "stopped" ]
-	then
-		echo_t "RDKB_SELFHEAL : WAN is not up, bypassing ping test"
-	else
-		MAPT_CONFIG=`sysevent get mapt_config_flag`
-		if [ "$MAPT_CONFIG" == "set" ]
-		then
-			WAN_INTERFACE_IPV4="map0"
-		fi
-		
-		#LTE-1335 runPingTest needs to be run only in extender mode for xle.
-		if [ "$BOX_TYPE" = "WNXL11BWL" ]
-		then
-			xle_device_mode=`syscfg get Device_Mode`
-			if [ "$xle_device_mode" -eq "1" ]; then
-				echo_t "RDKB_SELFHEAL : Device is in Extender mode, calling runPingTest."
-				runPingTest
-			else
-				echo_t "RDKB_SELFHEAL : Device is in Gateway mode, runPingTest is not needed."
-			fi
-		else
-			runPingTest
-		fi
-		runDNSPingTest
-	fi
+cron_mode()
+{
+    acquire_lock "self_heal_connectivity_test" "self_heal_connectivity_test.sh"
+    echo_t "RDKB_CONN_SELFHEAL : Cron job is enabled"
 
-	SELFHEAL_ENABLE=`syscfg get selfheal_enable`
-	# ping -I $WAN_INTERFACE -c $PINGCOUNT 
-		
-done
+    if [ "$BOOTUP_TIME_SEC" -le 900 ]; then
+        echo_t "[RDKB_CONN_SELFHEAL] : Selfheal scripts will start after 15 mins of Device uptime, skipping the run at $BOOTUP_TIME_SEC seconds"
+        exit 0
+    fi
+
+    if [ "$SELFHEAL_ENABLE" != "true" ]; then
+        echo_t "[RDKB_CONN_SELFHEAL] : selfheal_enable != true, exiting"
+        exit 0
+    fi
+
+    calcRandTimetoStartPing
+
+    MODE=$(cat "$MODE_FILE" 2>/dev/null)
+    if [ "$MODE" = "DELAY" ]; then
+        exit 0
+    fi
+
+    if ready_to_ping_test; then
+        echo_t "[RDKB_CONN_SELFHEAL] : Running connectivity test"
+
+        run_connectivity_test
+        date +%s > "$LAST_EXECUTION_FILE"
+    fi
+    exit 0
+}
+
+process_mode()
+{
+	echo_t "RDKB_CONN_SELFHEAL : Self Heal Cron is disabled "
+	while [ $SELFHEAL_ENABLE = "true" ]
+        do
+            if [ "$calcRandom" -eq 1 ]
+            then
+                    calcRandTimetoStartPing
+                    calcRandom=0
+            else
+                    INTERVAL=`syscfg get ConnTest_PingInterval`
+		            [ -z "$INTERVAL" ] && INTERVAL=60
+                    INTERVAL=$(($INTERVAL*60))
+                    sleep $INTERVAL
+            fi
+            run_connectivity_test
+	 done
+}
+
+if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
+    CRON_MODE=1
+    cron_mode
+else
+    CRON_MODE=0
+    process_mode
+fi

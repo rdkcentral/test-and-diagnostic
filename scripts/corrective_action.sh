@@ -45,7 +45,6 @@ case $BOX_TYPE in
         SELFHEAL_TYPE="BASE";;
 esac
 
-
 TAD_PATH="/usr/ccsp/tad/"
 UTOPIA_PATH="/etc/utopia/service.d"
 RDKLOGGER_PATH="/rdklogger"
@@ -874,14 +873,17 @@ resetNeeded()
 
             elif [ "$SELFHEAL_TYPE" = "BASE" -o "$SELFHEAL_TYPE" = "TCCBR" ] && [ "$ProcessName" = "CcspTandDSsp" ]; then
                 echo_t "RDKB_SELFHEAL : Resetting process $ProcessName"
-                SelfHealScript_PID=$(busybox pidof self_heal_connectivity_test.sh)
-                if [ "$SelfHealScript_PID" != "" ]; then
-                    kill -9 "$SelfHealScript_PID"
-                fi
+                source $TAD_PATH/boot_mode.sh
+               if [ "$SELFHEAL_EXECUTION_MODE" != "CRON" ]; then
+                    SelfHealScript_PID=$(busybox pidof self_heal_connectivity_test.sh)
+                    if [ "$SelfHealScript_PID" != "" ]; then
+                        kill -9 "$SelfHealScript_PID"
+                    fi
 
-                SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
-                if [ "$SelfHealScript_PID" != "" ]; then
-                    kill -9 "$SelfHealScript_PID"
+                    SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
+                    if [ "$SelfHealScript_PID" != "" ]; then
+                        kill -9 "$SelfHealScript_PID"
+                    fi
                 fi
 
                 cd /usr/ccsp/tad

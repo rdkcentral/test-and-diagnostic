@@ -18,11 +18,42 @@
 # limitations under the License.
 #######################################################################################
 
+
 TAD_PATH="/usr/ccsp/tad"
 source $TAD_PATH/corrective_action.sh
 source /etc/waninfo.sh
 source /etc/utopia/service.d/event_handler_functions.sh
+source $TAD_PATH/boot_mode.sh
 DIBBLER_SERVER_CONF="/etc/dibbler/server.conf"
+
+
+# Global variable to indicate if any DHCPv6 client is enabled
+DHCPV6C_ENABLED=0
+
+# Function to check if any DHCPv6 client is enabled
+is_dhcpv6c_enabled() {
+    local num_entries i enabled alias
+    num_entries=$(dmcli eRT retv Device.DHCPv6.ClientNumberOfEntries 2>/dev/null)
+    if [[ -z "$num_entries" ]] || [[ $num_entries -eq 0 ]]; then
+        echo_t "no wan interface specified"
+        DHCPV6C_ENABLED=0
+        return
+    fi
+    for i in $(seq 1 "$num_entries"); do
+         #We need to skip checking the status of DHCPv6 client for hotspot as it is used for hotspot clients, 
+        #and we have to define here if any other clients are added in future which are not used for wan connection.
+        alias=$(dmcli eRT retv Device.DHCPv6.Client.$i.Alias 2>/dev/null)
+        if [ "$alias" = "HOTSPOT" ]; then
+            continue
+        fi
+        enabled=$(dmcli eRT retv Device.DHCPv6.Client.$i.Enable 2>/dev/null)
+        if [ "$enabled" = "true" ] || [ "$enabled" = "1" ]; then
+            DHCPV6C_ENABLED=1
+            return
+        fi
+    done
+    DHCPV6C_ENABLED=0
+}
 
 SelfHeal_Support=`sysevent get SelfhelpWANConnectionDiagSupport`
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
@@ -595,16 +626,23 @@ self_heal_interfaces()
     esac
 
     WAN_INTERFACE=$(getWanInterfaceName)
-    Check_If_Erouter_Exists=$(ifconfig -a | grep "$WAN_INTERFACE")
-    ifconfig $WAN_INTERFACE > /dev/null
-    wan_exists=$?
-    if [ "$Check_If_Erouter_Exists" = "" ] && [ $wan_exists -ne 0 ]; then
-        echo_t "RDKB_REBOOT : Erouter0 interface is not up ,Rebooting device"
-        echo_t "Setting Last reboot reason Erouter_Down"
-        t2CountNotify "SYS_ERROR_ErouterDown_reboot"
-        reason="Erouter_Down"
-        rebootCount=1
-        rebootNeeded RM "" $reason $rebootCount
+    if [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$BOX_TYPE" = "TCCBR" ]; then
+        # This section handles the scenario where the erouter0 interface fails to come up during bootup on certain models.
+        # It checks if the erouter0 interface is present and reboots the device if it is not.
+        # Note: This logic applies only to devices that use erouter0 as a Linux bridge for WAN connectivity.
+        # For devices using VLAN or dynamic interfaces, the WAN interface is deleted on disconnect and recreated on reconnect,
+        # so this recovery mechanism is not applicable to those configurations. 
+        Check_If_Erouter_Exists=$(ifconfig -a | grep "$WAN_INTERFACE")
+        ifconfig $WAN_INTERFACE > /dev/null
+        wan_exists=$?
+        if [ "$Check_If_Erouter_Exists" = "" ] && [ $wan_exists -ne 0 ]; then
+            echo_t "RDKB_REBOOT : Erouter0 interface is not up ,Rebooting device"
+            echo_t "Setting Last reboot reason Erouter_Down"
+            t2CountNotify "SYS_ERROR_ErouterDown_reboot"
+            reason="Erouter_Down"
+            rebootCount=1
+            rebootNeeded RM "" $reason $rebootCount
+        fi
     fi
 
     UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
@@ -671,7 +709,11 @@ self_heal_dibbler_server()
 #       IPV6_STATUS=$(sysevent get ipv6-status)
         DHCPv6_ServerType="`syscfg get dhcpv6s00::servertype`"
         routerMode="`syscfg get last_erouter_mode`"
-        DHCPV6C_ENABLED=$(sysevent get dhcpv6c_enabled)
+        if [ -f /tmp/dhcpmgr_initialized ]; then
+            is_dhcpv6c_enabled
+        else
+            DHCPV6C_ENABLED=$(sysevent get dhcpv6c_enabled)
+        fi
         if [ $BR_MODE -eq 0 ] && [ "$DHCPV6C_ENABLED" = "1" ]; then
             Sizeof_ServerConf=`stat -c %s $DIBBLER_SERVER_CONF`
             case $SELFHEAL_TYPE in
@@ -1533,6 +1575,90 @@ self_heal_dhcpmgr ()
     fi
 }
 
+self_heal_idm ()
+{
+    local IDM_CYCLE_FILE="/tmp/idm_selfheal_cycle"
+    local IDM_RESTART_COUNT_FILE="/tmp/idm_restart_count"
+    local IDM_WINDOW_RESET_FILE="/tmp/idm_restart_window_reset"
+    local DNSMASQ_LEASE_FILE="/nvram/dnsmasq.leases"
+    local idm_failover idm_remote_status idm_wnxl_ips idm_ping_success ip idm_cycle idm_restart_count
+
+    # Check if GatewayManagement Failover is enabled (int: 1=enabled, 0=disabled)
+    idm_failover=$(dmcli eRT getv Device.X_RDK_GatewayManagement.Failover.Enable 2>/dev/null | grep "value:" | awk '{print $NF}')
+    if [ "$idm_failover" != "1" ]; then
+        return
+    fi
+
+    # Check if remote device status is less than 3 (3 = fully connected/healthy)
+    # An empty/failed dmcli response is also treated as a problem - proceed with restart
+    idm_remote_status=$(dmcli eRT getv Device.X_RDK_Remote.Device.2.Status 2>/dev/null | grep "value:" | awk '{print $NF}')
+    if [ -n "$idm_remote_status" ] && [ "$idm_remote_status" -ge 3 ]; then
+        # Reset 3-cycle counter since device is healthy
+        echo 0 > "$IDM_CYCLE_FILE"
+        return
+    fi
+
+    # Check if any WNXL11BWL devices have IP entries in the dnsmasq lease file
+    idm_wnxl_ips=$(grep "WNXL11BWL" "$DNSMASQ_LEASE_FILE" 2>/dev/null | awk '{print $3}')
+    if [ -z "$idm_wnxl_ips" ]; then
+        # Device not on network - previous cycle counts are stale, reset to avoid false-positive restart on re-appearance
+        echo 0 > "$IDM_CYCLE_FILE"
+        return
+    fi
+
+    # Check if at least one WNXL11BWL device is reachable by ping
+    idm_ping_success=""
+    for ip in $idm_wnxl_ips; do
+        if ping -c 1 -W 1 "$ip" >/dev/null 2>&1; then
+            idm_ping_success="$ip"
+            break
+        fi
+    done
+    if [ -z "$idm_ping_success" ]; then
+        return
+    fi
+
+    # All conditions met - increment cycle counter and restart every 3rd cycle
+    idm_cycle=$(cat "$IDM_CYCLE_FILE" 2>/dev/null || echo 0)
+    idm_cycle=$((idm_cycle + 1))
+    echo "$idm_cycle" > "$IDM_CYCLE_FILE"
+    if [ "$idm_cycle" -lt 3 ]; then
+        return
+    fi
+
+    # Reset 3-cycle counter for the next window
+    echo 0 > "$IDM_CYCLE_FILE"
+
+    # Enforce max 3 IDM restarts per day; reset count once on entering maintenance window
+    reb_window=0
+    checkMaintenanceWindow
+    if [ "$reb_window" -eq 1 ]; then
+        if [ ! -f "$IDM_WINDOW_RESET_FILE" ]; then
+            echo 0 > "$IDM_RESTART_COUNT_FILE"
+            touch "$IDM_WINDOW_RESET_FILE"
+        fi
+    else
+        rm -f "$IDM_WINDOW_RESET_FILE"
+    fi
+    idm_restart_count=$(cat "$IDM_RESTART_COUNT_FILE" 2>/dev/null || echo 0)
+    if [ "$idm_restart_count" -ge 3 ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: daily restart limit reached ($idm_restart_count/3), skipping"
+        return
+    fi
+
+    # Increment and persist the daily restart count
+    idm_restart_count=$((idm_restart_count + 1))
+    echo "$idm_restart_count" > "$IDM_RESTART_COUNT_FILE"
+
+    echo_t "[RDKB_AGG_SELFHEAL]: IDM selfheal: WNXL11BWL $idm_ping_success reachable, Remote.Status=${idm_remote_status:-empty}, restart $idm_restart_count/3 today, restarting RdkInterDeviceManager"
+    t2CountNotify "SYS_SH_REMOTE_DevMissing_IDMrestart"
+    systemctl restart RdkInterDeviceManager.service
+    if [ $? -eq 0 ]; then
+        echo_t "[RDKB_AGG_SELFHEAL]: RdkInterDeviceManager restarted successfully"
+    else
+        echo_t "[RDKB_AGG_SELFHEAL]: Failed to restart RdkInterDeviceManager"
+    fi
+}
 wan_sysevents(){
     sysevent set wan_service-status
     sysevent set wan-restart
@@ -1645,19 +1771,8 @@ then
     exit
 fi
 
-while [ $(syscfg get selfheal_enable) = "true" ]
-do
-    INTERVAL=$(syscfg get AggressiveInterval)
-
-    if [ "$INTERVAL" = "" ]
-    then
-        INTERVAL=5
-    fi
-    echo_t "[RDKB_AGG_SELFHEAL] : INTERVAL is: $INTERVAL"
-    sleep ${INTERVAL}m
-    
+DHCP_Selfheal() {
     WAN_INTERFACE=$(getWanInterfaceName)
-
     BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     # This Feature is only enabled on devices that have Comcast Product Requirement to be up[ WEB PA Up] within 3:00
     if [ ! -f /tmp/selfheal_bootup_completed ] && [ $BOOTUP_TIME_SEC -lt 180 ] ; then
@@ -1716,4 +1831,53 @@ do
     STOP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
     TOTAL_TIME_SEC=$((STOP_TIME_SEC-START_TIME_SEC))
     echo_t "[RDKB_AGG_SELFHEAL]: Total execution time: $TOTAL_TIME_SEC sec"
-done
+}
+
+cron_mode()
+{   
+    acquire_lock "selfheal_aggressive" "selfheal_aggressive.sh"
+	echo_t "[RDKB_AGG_SELFHEAL] : Cron job is enabled"
+	# skip during boot of first 5 minutes
+	BOOTUP_TIME_SEC=$(cut -d. -f1 /proc/uptime)
+	if [ "$BOOTUP_TIME_SEC" -le 300 ]; then
+            echo_t "[RDKB_AGG_SELFHEAL] : Selfheal aggressive script will start after 5 mins of Device uptime, skipping the run at $BOOTUP_TIME_SEC seconds"
+            exit 0
+    fi
+
+	if [ "$(syscfg get selfheal_enable)" != "true" ]; then
+            echo_t "[RDKB_SELFHEAL] : selfheal_enable != true, exiting"
+            exit 0
+    fi
+        
+    DHCP_Selfheal
+    self_heal_idm
+    exit 0
+}
+
+process_mode()
+{
+	echo_t "[RDKB_AGG_SELFHEAL] : Cron not enabled, running as a process"
+	while [ $(syscfg get selfheal_enable) = "true" ]
+        do
+		INTERVAL=$(syscfg get AggressiveInterval)
+		[ -z "$INTERVAL" ] && INTERVAL=5
+                echo_t "[RDKB_AGG_SELFHEAL] : INTERVAL is: $INTERVAL"
+                sleep ${INTERVAL}m
+                DHCP_Selfheal
+                self_heal_idm
+        done
+}
+
+if [ -f "$TAD_PATH/run_memory_compaction.sh" ]; then
+        MemCompScript_PID=$(busybox pidof run_memory_compaction.sh)
+        if [ -z "$MemCompScript_PID" ]; then
+                $TAD_PATH/run_memory_compaction.sh &
+        fi
+fi
+
+if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
+    cron_mode
+else
+    process_mode
+fi
+
