@@ -201,28 +201,19 @@ runDNSPingTest()
 	fi
 }
 
-checkIPv6ConnectivityRdisc6() {
+# Get ULA (Unique Local Address - fd00::) IPv6 gateway address
+getULAIPv6GatewayAddr() {
     local wan_interface="$1"
 
-    echo_t "RDKB_SELFHEAL : Starting IPv6 connectivity check using rdisc6"
+    # Extract fd00:: prefix from routing table
+    local fd00_prefix=`ip -6 route list | grep $wan_interface | grep fd00 | cut -f1 -d\/ | cut -f1 -d ' ' | head -n1`
 
-    if ! command -v rdisc6 >/dev/null 2>&1; then
-        echo_t "RDKB_SELFHEAL : rdisc6 not available"
-        return 0
+    if [ "$fd00_prefix" != "" ]; then
+        # Strip any trailing colons to avoid fd00::::1 format
+        fd00_prefix=`echo "$fd00_prefix" | sed 's/:*$//'`
+        # Append ::1 to get gateway address
+        echo "${fd00_prefix}::1"
     fi
-
-    # Try rdisc6 with increasing attempts
-    for i in 1 2 3; do
-        echo_t "RDKB_SELFHEAL : Connectivity attempt $i of 3"
-
-        RDISC_OUTPUT=`rdisc6 -$i -w $((3000 + i * 2000)) $wan_interface 2>/dev/null`
-        RDISC_RESULT=$?
-        if [ $RDISC_RESULT -eq 0 ] && [ "$RDISC_OUTPUT" != "" ]; then
-            return 1  # Success
-        fi
-        sleep 5
-    done
-    return 0  # Failed
 }
 
 runPingTest()
@@ -302,7 +293,8 @@ runPingTest()
                   echo "IPv6 default route $IPv6_Gateway_addr"
 
 		  routeEntry_global=`ip -6 route list | grep $WAN_INTERFACE | grep $erouterIP6`
-		  IPv6_Gateway_addr_global=`echo "$routeEntry_global" | cut -f1 -d\/`
+		  # Extract address before the / prefix length (e.g., fd00::/64 -> fd00::)
+		  IPv6_Gateway_addr_global=`echo "$routeEntry_global" | cut -f1 -d\/ | cut -f1 -d' '`
 
 		  # If we don't get the Network prefix we need this additional check to
 		  # retrieve the IPv6 GW Addr , here route entry and IPv6_Gateway_addr_global(which is retrived from above execution)
@@ -374,21 +366,90 @@ runPingTest()
     	#LTE-1335 ping to ipv6 not needed for xle.
 	if [ "$BOX_TYPE" != "WNXL11BWL" ]
 	then
-		if [ "$IPv6_Gateway_addr" != "" ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$UseLANIFIPV6" != "true" ]
+		# Decouple ULA test from IPv6_Gateway_addr check - ULA should work even if LL detection fails
+		if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$UseLANIFIPV6" != "true" ]
 		then
 			echo_t "RDKB_SELFHEAL : Testing IPv6 connectivity on $WAN_INTERFACE"
 
-			# Use the compact IPv6 connectivity check with rdisc6
-			checkIPv6ConnectivityRdisc6 "$WAN_INTERFACE"
-			ipv6_connectivity_result=$?
+			# Check for ULA (fd00::) address first - used in vCMTS environments where LL pings are blocked by SAV
+			# Currently available on TXB7 and TXB8 platforms
+			ula_gw=`getULAIPv6GatewayAddr "$WAN_INTERFACE"`
 
-			if [ $ipv6_connectivity_result -eq 1 ]; then
-				ping6_success=1
-				ping6_failed=0
-				echo_t "RDKB_SELFHEAL : IPv6 connectivity test successful"
+			if [ "$ula_gw" != "" ]; then
+				# Platform HAS ULA - perform ULA ping test (preferred method)
+				echo_t "RDKB_SELFHEAL : ULA (fd00::) detected. Testing with ULA gateway address: $ula_gw"
+				PING_OUTPUT=`ping6 -I $WAN_INTERFACE -c $PINGCOUNT -w $RESWAITTIME -s $PING_PACKET_SIZE $ula_gw 2>/dev/null`
+				CHECK_PACKET_RECEIVED=`echo $PING_OUTPUT | grep "packet loss" | cut -d"%" -f1 | awk '{print $NF}'`
+
+				if [ "$CHECK_PACKET_RECEIVED" != "" ] && [ "$CHECK_PACKET_RECEIVED" -ne 100 ]; then
+					ping6_success=1
+					ping6_failed=0
+					# Keep standard telemetry key for backward compatibility
+					PING_LATENCY="PING_LATENCY_GWIPv6:"
+					PING_LATENCY_VAL=`echo $PING_OUTPUT | awk 'BEGIN {FS="ms"} { for(i=1;i<=NF;i++) print $i}' | grep "time=" | cut -d"=" -f4`
+					PING_LATENCY_VAL=${PING_LATENCY_VAL%?};
+					echo $PING_LATENCY$PING_LATENCY_VAL|sed 's/ /,/g'
+					echo_t "RDKB_SELFHEAL : IPv6 connectivity test successful using ULA address"
+				else
+					# ULA ping failed - this is a real failure
+					ping6_failed=1
+					echo_t "RDKB_SELFHEAL : ULA IPv6 ping failed"
+				fi
+			elif [ "$IPv6_Gateway_addr" != "" ]; then
+				# No ULA available - fallback to standard Link-Local gateway ping
+				echo_t "RDKB_SELFHEAL : No ULA detected. Falling back to Link-Local gateway ping."
+				for IPv6_Gateway_addr in $IPv6_Gateway_addr
+				do
+					PING_OUTPUT=`ping6 -I $WAN_INTERFACE -c $PINGCOUNT -w $RESWAITTIME -s $PING_PACKET_SIZE $IPv6_Gateway_addr 2>/dev/null`
+					CHECK_PACKET_RECEIVED=`echo $PING_OUTPUT | grep "packet loss" | cut -d"%" -f1 | awk '{print $NF}'`
+
+					if [ "$CHECK_PACKET_RECEIVED" != "" ]
+					then
+						if [ "$CHECK_PACKET_RECEIVED" -ne 100 ]
+						then
+							ping6_success=1
+							ping6_failed=0
+							PING_LATENCY="PING_LATENCY_GWIPv6:"
+							PING_LATENCY_VAL=`echo $PING_OUTPUT | awk 'BEGIN {FS="ms"} { for(i=1;i<=NF;i++) print $i}' | grep "time=" | cut -d"=" -f4`
+							PING_LATENCY_VAL=${PING_LATENCY_VAL%?};
+							echo $PING_LATENCY$PING_LATENCY_VAL|sed 's/ /,/g'
+							break
+						else
+							ping6_failed=1
+						fi
+					else
+						ping6_failed=1
+					fi
+				done
+
+				# If Link-Local ping failed, try global gateway address
+				if [ "$ping6_failed" -eq 1 ] && [ "$IPv6_Gateway_addr_global" != "" ]; then
+					echo_t "RDKB_SELFHEAL : Trying global IPv6 gateway address: $IPv6_Gateway_addr_global"
+					PING_OUTPUT=`ping6 -I $WAN_INTERFACE -c $PINGCOUNT -w $RESWAITTIME -s $PING_PACKET_SIZE $IPv6_Gateway_addr_global 2>/dev/null`
+					CHECK_PACKET_RECEIVED=`echo $PING_OUTPUT | grep "packet loss" | cut -d"%" -f1 | awk '{print $NF}'`
+
+					if [ "$CHECK_PACKET_RECEIVED" != "" ]
+					then
+						if [ "$CHECK_PACKET_RECEIVED" -ne 100 ]
+						then
+							ping6_success=1
+							ping6_failed=0
+							PING_LATENCY="PING_LATENCY_GWIPv6:"
+							PING_LATENCY_VAL=`echo $PING_OUTPUT | awk 'BEGIN {FS="ms"} { for(i=1;i<=NF;i++) print $i}' | grep "time=" | cut -d"=" -f4`
+							PING_LATENCY_VAL=${PING_LATENCY_VAL%?};
+							echo $PING_LATENCY$PING_LATENCY_VAL|sed 's/ /,/g'
+						else
+							ping6_failed=1
+						fi
+					else
+						ping6_failed=1
+					fi
+				fi
 			else
+				# No ULA and no Link-Local gateway detected
+				echo_t "RDKB_SELFHEAL : No IPv6 gateway addresses detected (neither ULA nor Link-Local)"
+				ping6_success=0
 				ping6_failed=1
-				echo_t "RDKB_SELFHEAL : IPv6 connectivity test failed"
 			fi
 		fi
 
@@ -429,9 +490,22 @@ runPingTest()
 				echo_t "RDKB_SELFHEAL : No IPv6 Gateway Address detected"
 				t2CountNotify "SYS_INFO_NoIPv6_Address"
 			else
-				echo_t "RDKB_SELFHEAL : Ping to IPv6 Gateway Address are failed."
-				t2CountNotify "RF_ERROR_IPV6PingFailed"
-				echo_t "PING_FAILED:$IPv6_Gateway_addr"
+				# Check if ULA was available for this platform (reuse ula_gw from earlier)
+				if [ "$ula_gw" != "" ]; then
+					# Platform has ULA and ping failed - real connectivity failure
+					echo_t "RDKB_SELFHEAL : Ping to ULA IPv6 Gateway Address failed."
+					t2CountNotify "RF_ERROR_IPV6PingFailed"
+					echo_t "PING_FAILED:$ula_gw"
+				elif [ "$IPv6_Gateway_addr" != "" ] || [ "$IPv6_Gateway_addr_global" != "" ]; then
+					# Had Link-Local or global addresses but ping failed
+					echo_t "RDKB_SELFHEAL : Ping to IPv6 Gateway Address failed."
+					t2CountNotify "RF_ERROR_IPV6PingFailed"
+					echo_t "PING_FAILED:$IPv6_Gateway_addr"
+				else
+					# No IPv6 addresses available at all
+					echo_t "RDKB_SELFHEAL : No IPv6 Gateway Address detected"
+					t2CountNotify "SYS_INFO_NoIPv6_Address"
+				fi
 			fi
 		fi #LTE-1335 Ping to ipv6 not needed for xle.
 	 				
@@ -474,17 +548,27 @@ runPingTest()
 	#LTE-1335 ping to ipv6 not needed for xle.
 	elif [ "$ping6_success" -ne 1 ] && [ "$BOX_TYPE" != "WNXL11BWL" ]
 	then
-		if [ "$IPv6_Gateway_addr" != "" ] || [ "$IPv6_Gateway_addr_global" != "" ]
+		# Initialize last_erouter_mode for IPv6-only failure path
+		last_erouter_mode=$(sysevent get last_erouter_mode)
+		if [ "$last_erouter_mode" == "" ]
 		then
-			echo_t "RDKB_SELFHEAL : Ping to IPv6 Gateway Address are failed."
+			echo_t "RDKB_SELFHEAL : erouter mode is null, fetch from syscfg."
+			last_erouter_mode=$(syscfg get last_erouter_mode)
+		fi
+
+		# Handle different IPv6 failure scenarios
+		if [ "$IPv6_Gateway_addr" != "" ] || [ "$IPv6_Gateway_addr_global" != "" ]; then
+			# Had IPv6 gateway addresses but ping failed
+			echo_t "RDKB_SELFHEAL : Ping to IPv6 Gateway Address failed."
 			t2CountNotify "RF_ERROR_IPV6PingFailed"
 			echo_t "PING_FAILED:$IPv6_Gateway_addr"
-		elif [[ $last_erouter_mode -gt 1 ]]
-		then
-            echo_t "RDKB_SELFHEAL : No IPv6 Gateway Address detected"
-		    t2CountNotify "SYS_INFO_NoIPv6_Address"
-        fi
-		
+		elif [ -n "$last_erouter_mode" ] && [ "$last_erouter_mode" -gt 1 ]; then
+			# No IPv6 gateway address detected at all
+			echo_t "RDKB_SELFHEAL : No IPv6 Gateway Address detected"
+			t2CountNotify "SYS_INFO_NoIPv6_Address"
+		fi
+
+		# Take corrective action for actual ping failures
 		if [ `getCorrectiveActionState` = "true" ]
 		then
 			echo_t "RDKB_SELFHEAL : Taking corrective action"
@@ -495,9 +579,15 @@ runPingTest()
 		echo_t "[RDKB_SELFHEAL] : IPv4 GW  Address is:$IPv4_Gateway_addr"
 		#LTE-1335  Ping to ipv6 not needed for xle.
 		if [ "$BOX_TYPE" != "WNXL11BWL" ]
-		then		
-		echo_t "[RDKB_SELFHEAL] : IPv6 GW  Address is:$IPv6_Gateway_addr"
-		echo_t "[RDKB_SELFHEAL] : IPv6 GW global Address is:$IPv6_Gateway_addr_global"
+		then
+			# Log ULA if it was used (reuse ula_gw from earlier in this function)
+			if [ "$ula_gw" != "" ]; then
+				echo_t "[RDKB_SELFHEAL] : IPv6 ULA GW Address is:$ula_gw"
+			fi
+			if [ "$IPv6_Gateway_addr" != "" ] || [ "$IPv6_Gateway_addr_global" != "" ]; then
+				echo_t "[RDKB_SELFHEAL] : IPv6 GW  Address is:$IPv6_Gateway_addr"
+				echo_t "[RDKB_SELFHEAL] : IPv6 GW global Address is:$IPv6_Gateway_addr_global"
+			fi
 		fi
 	fi	
 
