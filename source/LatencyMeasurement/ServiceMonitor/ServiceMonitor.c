@@ -68,49 +68,47 @@ root@xer10:~# sysevent get ipv6_prefix
 
 #endif
 /**************************************************************************/	
+/**************************************************************************/
 void* isMonitorService_thread_free(void *arg)
 {
-	UNREFERENCED_PARAMETER(arg);
-	struct timespec ts;
-	int Status=0;
-	//pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
-	pthread_condattr_t SyncAttr;
-	pthread_condattr_init(&SyncAttr);
-	pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
-	pthread_cond_init(&cond,&SyncAttr);
-	while(1)
-	{
-		bool bWaitDone = false;
-		memset(&ts,0,sizeof(ts));
-		clock_gettime(CLOCK_MONOTONIC, &ts);
-		ts.tv_nsec = 0;
-		ts.tv_sec +=TIMER_VALUE;
-		pthread_mutex_lock(&lock);
-		/* FIX: wrap in predicate loop for BAD_CHECK_OF_WAIT_COND */
-		while(!bWaitDone)
-		{
-			Status=pthread_cond_timedwait(&cond,&lock,&ts);
-			if((Status != 0)&&(Status != ETIMEDOUT))
-			{
-				CcspTraceInfo(("%s pthread_cond_timedwait failed\n",__func__));
-				break;
-			}
-			bWaitDone = true;
-		}
-		if(!bWaitDone)
-		{
-			pthread_mutex_unlock(&lock);
-			continue;
-		}
-		pthread_mutex_unlock(&lock);
-		sleep(1);
-		UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
-		IsTR181_triger_at_PthreadisBusy=false;
-		break;
-	}
-	pthread_detach(tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID]);
-	CcspTraceInfo(("pthread_detach WAIT_FOR_MONITOR_FREE_PTHREAD_ID %s\n",__func__));
-	return NULL;
+    UNREFERENCED_PARAMETER(arg);
+    struct timespec ts;
+    int Status = 0;
+    //pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+    pthread_condattr_t SyncAttr;
+    pthread_condattr_init(&SyncAttr);
+    pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
+    pthread_cond_init(&cond, &SyncAttr);
+    while(1)
+    {
+        memset(&ts, 0, sizeof(ts));
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        ts.tv_nsec = 0;
+        ts.tv_sec += TIMER_VALUE;
+        pthread_mutex_lock(&lock);
+        /* FIX: predicate-guarded wait */
+        while(!IsTR181_triger_at_PthreadisBusy)
+        {
+            Status = pthread_cond_timedwait(&cond, &lock, &ts);
+            if(Status == ETIMEDOUT)
+            {
+                break;
+            }
+            if((Status != 0) && (Status != ETIMEDOUT))
+            {
+                CcspTraceInfo(("%s pthread_cond_timedwait failed\n", __func__));
+            }
+        }
+        /* Predicate reset under lock */
+        IsTR181_triger_at_PthreadisBusy = false;
+        pthread_mutex_unlock(&lock);
+        sleep(1);
+        UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
+        break;
+    }
+    pthread_detach(tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID]);
+    CcspTraceInfo(("pthread_detach WAIT_FOR_MONITOR_FREE_PTHREAD_ID %s\n", __func__));
+    return NULL;
 }
 int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 {
@@ -759,93 +757,89 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 *********************************************************************************************/
 void* LatencyMeasurement_MonitorService(void *arg)
 {
-	//UNREFERENCED_PARAMETER(arg);
-	char strValue[64] = {0};
-	int Status=0;
-	struct timespec ts;
-	pthread_condattr_t SyncAttr;
-	int Error=0;
-	struct sysinfo s_info;
-	sysinfo(&s_info);
-	while(s_info.uptime < 900)// 900 this wait for device boot up then only monitor services will run
-	{
-		sysinfo(&s_info);
-		sleep(60);//60sec
-	}
-	CcspTraceInfo(("%s : Device uptime is more than 15 mins \n",__func__));
-	pthread_mutex_lock(&lock);
-	Error=pthread_create(&tid[SYSEVENT_PTHREAD_ID],NULL,SysEventHandlerThrd_for_Monitorservice,NULL);
-	if (Error)
-	{
-		CcspTraceInfo(("%s Failed create SysEventHandlerThrd_for_Monitorservice thread. Error num:%d\n",__func__,Error));
-	}
-	else{
-		CcspTraceInfo(("%s Successfully created SysEventHandlerThrd_for_Monitorservice thread \n",__func__));
-	}
-	pthread_condattr_init(&SyncAttr);
-	pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
-	pthread_cond_init(&Monitor_cond,&SyncAttr);
-	LatencyMeasurementServiceInit();
-	sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_ifname", current_wan_ifname, sizeof(strValue));
-	sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_mode_update", strValue, sizeof(strValue));
-	curr_wan_mode=atoi(strValue);
-	if(Get_Status_of_bridge_mode()==ROUTER_MODE)
-	{
-		MonitorLatencyMeasurementServices();
-	}
-	pthread_mutex_unlock(&lock);
-	if(IsTR181_triger_at_PthreadisBusy==true)
-	{
-		sleep(1);
-		pthread_cond_signal(&cond);
-	}
-	IsTR181_triger_at_PthreadisBusy=false;
-
-	while(1)
-	{
-		bool bWaitDone = false;
-		memset(&ts,0,sizeof(ts));
-		clock_gettime(CLOCK_MONOTONIC, &ts);
-		ts.tv_nsec = 0;
-		ts.tv_sec +=TIMERINTERVEL;
-		pthread_mutex_lock(&lock);
-		/* FIX: wrap in predicate loop for BAD_CHECK_OF_WAIT_COND */
-		while(!bWaitDone)
-		{
-			Status=pthread_cond_timedwait(&Monitor_cond,&lock,&ts);
-			if((Status != 0)&&(Status != ETIMEDOUT))
-			{
-				CcspTraceInfo(("%s pthread_cond_timedwait failed\n",__func__));
-				break;
-			}
-			bWaitDone = true;
-		}
-		if(!bWaitDone)
-		{
-			pthread_mutex_unlock(&lock);
-			continue;
-		}
-		if(ROUTER_MODE == Get_Status_of_bridge_mode())
-		{
-			MonitorLatencyMeasurementServices();
-		}
-		pthread_mutex_unlock(&lock);
-		if(IsTR181_triger_at_PthreadisBusy==true)
-		{
-			sleep(1);
-			pthread_cond_signal(&cond);
-		}
-		IsTR181_triger_at_PthreadisBusy=false;
-
-		if(latencyMeasurementCount==0)
-		{
-			CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n",__func__));
-			break;
-		}
-	}
-	pthread_detach(tid[MONITOR_PTHREAD_ID]);
-	CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n",__func__));
-	return NULL;
+    //UNREFERENCED_PARAMETER(arg);
+    char strValue[64] = {0};
+    int Status = 0;
+    struct timespec ts;
+    pthread_condattr_t SyncAttr;
+    int Error = 0;
+    struct sysinfo s_info;
+    sysinfo(&s_info);
+    while(s_info.uptime < 900) // 900 this wait for device boot up then only monitor services will run
+    {
+        sysinfo(&s_info);
+        sleep(60); //60sec
+    }
+    CcspTraceInfo(("%s : Device uptime is more than 15 mins \n", __func__));
+    pthread_mutex_lock(&lock);
+    Error = pthread_create(&tid[SYSEVENT_PTHREAD_ID], NULL, SysEventHandlerThrd_for_Monitorservice, NULL);
+    if (Error)
+    {
+        CcspTraceInfo(("%s Failed create SysEventHandlerThrd_for_Monitorservice thread. Error num:%d\n", __func__, Error));
+    }
+    else
+    {
+        CcspTraceInfo(("%s Successfully created SysEventHandlerThrd_for_Monitorservice thread \n", __func__));
+    }
+    pthread_condattr_init(&SyncAttr);
+    pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
+    pthread_cond_init(&Monitor_cond, &SyncAttr);
+    LatencyMeasurementServiceInit();
+    sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_ifname", current_wan_ifname, sizeof(strValue));
+    sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_mode_update", strValue, sizeof(strValue));
+    curr_wan_mode = atoi(strValue);
+    if(Get_Status_of_bridge_mode() == ROUTER_MODE)
+    {
+        MonitorLatencyMeasurementServices();
+    }
+    pthread_mutex_unlock(&lock);
+    if(IsTR181_triger_at_PthreadisBusy == true)
+    {
+        sleep(1);
+        pthread_cond_signal(&cond);
+    }
+    IsTR181_triger_at_PthreadisBusy = false;
+    while(1)
+    {
+        memset(&ts, 0, sizeof(ts));
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        ts.tv_nsec = 0;
+        ts.tv_sec += TIMERINTERVEL;
+        pthread_mutex_lock(&lock);
+        /* FIX: predicate-guarded timed wait */
+        while(!IsTR181_triger_at_PthreadisBusy)
+        {
+            Status = pthread_cond_timedwait(&Monitor_cond, &lock, &ts);
+            if(Status == ETIMEDOUT)
+            {
+                break;
+            }
+            if((Status != 0) && (Status != ETIMEDOUT))
+            {
+                CcspTraceInfo(("%s pthread_cond_timedwait failed\n", __func__));
+            }
+        }
+        IsTR181_triger_at_PthreadisBusy = false;
+        pthread_mutex_unlock(&lock);
+        if(ROUTER_MODE == Get_Status_of_bridge_mode())
+        {
+            MonitorLatencyMeasurementServices();
+        }
+        if(IsTR181_triger_at_PthreadisBusy == true)
+        {
+            sleep(1);
+            pthread_cond_signal(&cond);
+        }
+        IsTR181_triger_at_PthreadisBusy = false;
+        if(latencyMeasurementCount == 0)
+        {
+            CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n", __func__));
+            break;
+        }
+    }
+    pthread_detach(tid[MONITOR_PTHREAD_ID]);
+    CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
+    return NULL;
 }
 /*****************************************************************************
 	LatencyMeasurement_Config_Init() is used for Xnet services configuration initialization
