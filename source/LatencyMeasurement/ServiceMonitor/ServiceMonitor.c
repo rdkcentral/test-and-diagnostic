@@ -79,33 +79,29 @@ void* isMonitorService_thread_free(void *arg)
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&cond, &SyncAttr);
-    while(1)
+    memset(&ts, 0, sizeof(ts));
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ts.tv_nsec = 0;
+    ts.tv_sec += TIMER_VALUE;
+    pthread_mutex_lock(&lock);
+    /* FIX: predicate-guarded wait */
+    while(!IsTR181_triger_at_PthreadisBusy)
     {
-        memset(&ts, 0, sizeof(ts));
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        ts.tv_nsec = 0;
-        ts.tv_sec += TIMER_VALUE;
-        pthread_mutex_lock(&lock);
-        /* FIX: predicate-guarded wait */
-        while(!IsTR181_triger_at_PthreadisBusy)
+        Status = pthread_cond_timedwait(&cond, &lock, &ts);
+        if(Status == ETIMEDOUT)
         {
-            Status = pthread_cond_timedwait(&cond, &lock, &ts);
-            if(Status == ETIMEDOUT)
-            {
-                break;
-            }
-            if((Status != 0) && (Status != ETIMEDOUT))
-            {
-                CcspTraceInfo(("%s pthread_cond_timedwait failed\n", __func__));
-            }
+            break;
         }
-        /* Predicate reset under lock */
-        IsTR181_triger_at_PthreadisBusy = false;
-        pthread_mutex_unlock(&lock);
-        sleep(1);
-        UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
-        break;
+        if((Status != 0) && (Status != ETIMEDOUT))
+        {
+            CcspTraceInfo(("%s pthread_cond_timedwait failed\n", __func__));
+        }
     }
+    /* Predicate reset under lock */
+    IsTR181_triger_at_PthreadisBusy = false;
+    pthread_mutex_unlock(&lock);
+    sleep(1);
+    UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
     pthread_detach(tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID]);
     CcspTraceInfo(("pthread_detach WAIT_FOR_MONITOR_FREE_PTHREAD_ID %s\n", __func__));
     return NULL;
