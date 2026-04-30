@@ -2267,11 +2267,14 @@ BbhmDiagipSetDiagParams
     )
 {
     PBBHM_DIAG_IP_PING_OBJECT       pMyObject    = (PBBHM_DIAG_IP_PING_OBJECT     )hThisObject;
-    PDSLH_PING_INFO                 pDiagInfo    = (PDSLH_PING_INFO               )pMyObject->hDslhDiagInfo;
+    PDSLH_PING_INFO                 pDiagInfo    = NULL;
     PDSLH_PING_INFO                 pNewDiagInfo = (PDSLH_PING_INFO               )hDslhDiagInfo;
     errno_t                         rc           = -1;
 
     AnscAcquireLock(&pMyObject->AccessLock);
+
+    /* Read shared member AFTER acquiring lock to avoid lock evasion */
+    pDiagInfo = (PDSLH_PING_INFO)pMyObject->hDslhDiagInfo;
 
     if ( pDiagInfo == NULL )
     {

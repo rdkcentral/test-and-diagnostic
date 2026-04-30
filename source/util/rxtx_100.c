@@ -1020,6 +1020,7 @@ static int read_from_file(char *filename,char *bridge_name,uint64_t *rx_bytes,ui
     }
     else
     {
+        v_secure_pclose(fp);
         return FAILURE;
     }
 

@@ -2204,11 +2204,14 @@ BbhmDiagitSetDiagParams
     )
 {
     PBBHM_DIAG_IP_TRACEROUTE_OBJECT pMyObject    = (PBBHM_DIAG_IP_TRACEROUTE_OBJECT)hThisObject;
-    PDSLH_TRACEROUTE_INFO           pDiagInfo    = (PDSLH_TRACEROUTE_INFO          )pMyObject->hDslhDiagInfo;
+    PDSLH_TRACEROUTE_INFO           pDiagInfo    = NULL;
     PDSLH_TRACEROUTE_INFO           pNewDiagInfo = (PDSLH_TRACEROUTE_INFO          )hDslhDiagInfo;
     errno_t                         rc           = -1;
 
     AnscAcquireLock(&pMyObject->AccessLock);
+
+    /* Read shared member AFTER acquiring lock to avoid lock evasion */
+    pDiagInfo = (PDSLH_TRACEROUTE_INFO)pMyObject->hDslhDiagInfo;
 
     if ( pDiagInfo == NULL )
     {
