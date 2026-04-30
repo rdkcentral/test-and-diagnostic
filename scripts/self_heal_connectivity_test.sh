@@ -201,12 +201,36 @@ runDNSPingTest()
 	fi
 }
 
+checkIPv6ConnectivityRdisc6() {
+    local wan_interface="$1"
+
+    echo_t "RDKB_SELFHEAL : Starting IPv6 connectivity check using rdisc6"
+
+    if ! command -v rdisc6 >/dev/null 2>&1; then
+        echo_t "RDKB_SELFHEAL : rdisc6 not available"
+        return 0
+    fi
+
+    # Try rdisc6 with increasing attempts
+    for i in 1 2 3; do
+        echo_t "RDKB_SELFHEAL : Connectivity attempt $i of 3"
+
+        RDISC_OUTPUT=`rdisc6 -$i -w $((3000 + i * 2000)) $wan_interface 2>/dev/null`
+        RDISC_RESULT=$?
+        if [ $RDISC_RESULT -eq 0 ] && [ "$RDISC_OUTPUT" != "" ]; then
+            return 0  # Success
+        fi
+        sleep 5
+    done
+    return 1  # Failed
+}
+
 runPingTest()
 {
-        #BCOMB-1120 getWanInterfaceName returning NULL at the start of device.So calling here if value is NULL
-        if [[ "x$WAN_INTERFACE" = "x" ]];then
-            WAN_INTERFACE=$(getWanInterfaceName)
-        fi
+	#BCOMB-1120 getWanInterfaceName returning NULL at the start of device.So calling here if value is NULL
+	if [[ "x$WAN_INTERFACE" = "x" ]];then
+		WAN_INTERFACE=$(getWanInterfaceName)
+	fi
 	PING_PACKET_SIZE=`syscfg get selfheal_ping_DataBlockSize`
 	PINGCOUNT=`syscfg get ConnTest_NumPingsPerServer`
 
@@ -278,7 +302,7 @@ runPingTest()
                   echo "IPv6 default route $IPv6_Gateway_addr"
 
 		  routeEntry_global=`ip -6 route list | grep $WAN_INTERFACE | grep $erouterIP6`
-		  IPv6_Gateway_addr_global=`echo "$routeEntry_global" | cut -f1 -d\/`
+		  IPv6_Gateway_addr_global=`echo "$routeEntry_global" | grep -v '\/' | cut -f1 -d' '`
 
 		  # If we don't get the Network prefix we need this additional check to
 		  # retrieve the IPv6 GW Addr , here route entry and IPv6_Gateway_addr_global(which is retrived from above execution)
@@ -350,54 +374,24 @@ runPingTest()
     	#LTE-1335 ping to ipv6 not needed for xle.
 	if [ "$BOX_TYPE" != "WNXL11BWL" ]
 	then
-	if [ "$IPv6_Gateway_addr" != "" ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$UseLANIFIPV6" != "true" ]
-	then
-		for IPv6_Gateway_addr in $IPv6_Gateway_addr
-		do
-			PING_OUTPUT=`ping6 -I $WAN_INTERFACE -c $PINGCOUNT -w $RESWAITTIME -s $PING_PACKET_SIZE $IPv6_Gateway_addr`
-			CHECK_PACKET_RECEIVED=`echo $PING_OUTPUT | grep "packet loss" | cut -d"%" -f1 | awk '{print $NF}'`
-
-			if [ "$CHECK_PACKET_RECEIVED" != "" ]
-			then
-				if [ "$CHECK_PACKET_RECEIVED" -ne 100 ] 
-				then
-					ping6_success=1
-                                        ping6_failed=0
-					PING_LATENCY="PING_LATENCY_GWIPv6:"
-					PING_LATENCY_VAL=`echo $PING_OUTPUT | awk 'BEGIN {FS="ms"} { for(i=1;i<=NF;i++) print $i}' | grep "time=" | cut -d"=" -f4`
-					PING_LATENCY_VAL=${PING_LATENCY_VAL%?};
-					echo $PING_LATENCY$PING_LATENCY_VAL|sed 's/ /,/g'
-					break
-				else
-					ping6_failed=1
-				fi
-			else
-				ping6_failed=1
-			fi
-		done
-	fi
-
-	if [ "$ping6_failed" -eq 1 ] && [ "$IPv6_Gateway_addr_global" != "" ] && [ "$BOX_TYPE" != "HUB4" ] &&  [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$UseLANIFIPV6" != "true" ]
-	then
-		PING_OUTPUT=`ping6 -I $WAN_INTERFACE -c $PINGCOUNT -w $RESWAITTIME -s $PING_PACKET_SIZE $IPv6_Gateway_addr_global`
-		CHECK_PACKET_RECEIVED=`echo $PING_OUTPUT | grep "packet loss" | cut -d"%" -f1 | awk '{print $NF}'`
-
-		if [ "$CHECK_PACKET_RECEIVED" != "" ]
+		if [ "$IPv6_Gateway_addr" != "" ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$UseLANIFIPV6" != "true" ]
 		then
-			if [ "$CHECK_PACKET_RECEIVED" -ne 100 ]
-			then
+			echo_t "RDKB_SELFHEAL : Testing IPv6 connectivity on $WAN_INTERFACE"
+
+			# Use the compact IPv6 connectivity check with rdisc6
+			checkIPv6ConnectivityRdisc6 "$WAN_INTERFACE"
+			ipv6_connectivity_result=$?
+
+			if [ $ipv6_connectivity_result -eq 0 ]; then
 				ping6_success=1
-				PING_LATENCY="PING_LATENCY_GWIPv6:"
-				PING_LATENCY_VAL=`echo $PING_OUTPUT | awk 'BEGIN {FS="ms"} { for(i=1;i<=NF;i++) print $i}' | grep "time=" | cut -d"=" -f4`
-				PING_LATENCY_VAL=${PING_LATENCY_VAL%?};
-				echo $PING_LATENCY$PING_LATENCY_VAL|sed 's/ /,/g'
+				ping6_failed=0
+				echo_t "RDKB_SELFHEAL : IPv6 connectivity test successful"
 			else
 				ping6_failed=1
+				echo_t "RDKB_SELFHEAL : IPv6 connectivity test failed"
 			fi
-		else
-			ping6_failed=1
 		fi
-	fi
+
 	fi #LTE-1335 Ping to ipv6 not needed for xle.
     # For HUB4/SR300/SE501/SR213, Using IPOE Health Check Status
     if [ "$IPv6_Gateway_addr" != "" ] && ([ "$BOX_TYPE" = "HUB4" ] || [ "$BOX_TYPE" = "SR300" ] || [ "$BOX_TYPE" = "SE501" ] || [ "$BOX_TYPE" = "SR213" ] || [ "$UseLANIFIPV6" == "true" ])
@@ -411,35 +405,34 @@ runPingTest()
         fi
     fi
 
-		if [ "$ping4_success" -ne 1 ] &&  [ "$ping6_success" -ne 1 ] && [ "$MAPT_CONFIG" != "set" ]
+	if [ "$ping4_success" -ne 1 ] &&  [ "$ping6_success" -ne 1 ] && [ "$MAPT_CONFIG" != "set" ]
+	then
+		if [ "$IPv4_Gateway_addr" == "" ]
 		then
-			if [ "$IPv4_Gateway_addr" == "" ]
-             	 then
-                 	  echo_t "RDKB_SELFHEAL : No IPv4 Gateway Address detected"
-               	else
-                  	 echo_t "RDKB_SELFHEAL : Ping to IPv4 Gateway Address failed."
-                  	 t2CountNotify "RF_ERROR_IPV4PingFailed"
-                   	echo_t "PING_FAILED:$IPv4_Gateway_addr"
-            fi
-	    	#LTE-1335 Ping to ipv6 not needed for xle.
-	        if [ "$BOX_TYPE" != "WNXL11BWL" ]
+			echo_t "RDKB_SELFHEAL : No IPv4 Gateway Address detected"
+		else
+			echo_t "RDKB_SELFHEAL : Ping to IPv4 Gateway Address failed."
+			t2CountNotify "RF_ERROR_IPV4PingFailed"
+			echo_t "PING_FAILED:$IPv4_Gateway_addr"
+		fi
+		#LTE-1335 Ping to ipv6 not needed for xle.
+		if [ "$BOX_TYPE" != "WNXL11BWL" ]
 		then
 	    	last_erouter_mode=$(sysevent get last_erouter_mode)
-                if [ "$last_erouter_mode" == "" ]
-		then
-		    echo_t "RDKB_SELFHEAL : erouter mode is null, fetch from syscfg."
-		    last_erouter_mode=$(syscfg get last_erouter_mode)
-		fi
-                if [ "$IPv6_Gateway_addr" == "" ] && [ "$IPv6_Gateway_addr_global" == "" ] && [ "$last_erouter_mode" -gt 1 ]
-
-              	then
-                  	 echo_t "RDKB_SELFHEAL : No IPv6 Gateway Address detected"
-			 t2CountNotify "SYS_INFO_NoIPv6_Address"
-               	else
-                      echo_t "RDKB_SELFHEAL : Ping to IPv6 Gateway Address are failed."
-                      t2CountNotify "RF_ERROR_IPV6PingFailed"
-                      echo_t "PING_FAILED:$IPv6_Gateway_addr"
-                fi
+			if [ "$last_erouter_mode" == "" ]
+			then
+				echo_t "RDKB_SELFHEAL : erouter mode is null, fetch from syscfg."
+				last_erouter_mode=$(syscfg get last_erouter_mode)
+			fi
+			if [ "$IPv6_Gateway_addr" == "" ] && [ "$IPv6_Gateway_addr_global" == "" ] && [ "$last_erouter_mode" -gt 1 ]
+			then
+				echo_t "RDKB_SELFHEAL : No IPv6 Gateway Address detected"
+				t2CountNotify "SYS_INFO_NoIPv6_Address"
+			else
+				echo_t "RDKB_SELFHEAL : IPv6 connectivity test failed."
+				t2CountNotify "RF_ERROR_IPV6ConnectivityFailed"
+				echo_t "PING_FAILED:$IPv6_Gateway_addr"
+			fi
 		fi #LTE-1335 Ping to ipv6 not needed for xle.
 	 				
 		# check if erouter0 is up
@@ -453,25 +446,25 @@ runPingTest()
 		fi
 	elif [ "$ping4_success" -ne 1 ] && [ "$MAPT_CONFIG" != "set" ]
 	then
-                if [ "$IPv4_Gateway_addr" != "" ]
-                then
-                   echo_t "RDKB_SELFHEAL : Ping to IPv4 Gateway Address failed."
-                   t2CountNotify "RF_ERROR_IPV4PingFailed"
-        	   echo_t "PING_FAILED:$IPv4_Gateway_addr"	
-                else
-                   echo_t "RDKB_SELFHEAL : No IPv4 Gateway Address detected"
-                fi
+		if [ "$IPv4_Gateway_addr" != "" ]
+		then
+			echo_t "RDKB_SELFHEAL : Ping to IPv4 Gateway Address failed."
+			t2CountNotify "RF_ERROR_IPV4PingFailed"
+		echo_t "PING_FAILED:$IPv4_Gateway_addr"
+		else
+			echo_t "RDKB_SELFHEAL : No IPv4 Gateway Address detected"
+		fi
 
-                if [ "$BOX_TYPE" = "XB3" ]
-                then
-                      dhcpStatus=`dmcli eRT retv Device.DHCPv4.Client.1.DHCPStatus`
-                      wanIP=`ifconfig erouter0 | grep "inet addr" | head -n1 |cut -f2 -d: | cut -f1 -d" "`
-                      if [ "$dhcpStatus" = "Rebinding" ] && [ "$wanIP" != "" ]
-                      then
-                          echo_t "EROUTER_DHCP_STATUS:Rebinding"
-			  t2CountNotify "RF_ERROR_DHCP_Rebinding"
-                      fi
-                fi
+		if [ "$BOX_TYPE" = "XB3" ]
+		then
+				dhcpStatus=`dmcli eRT retv Device.DHCPv4.Client.1.DHCPStatus`
+				wanIP=`ifconfig erouter0 | grep "inet addr" | head -n1 |cut -f2 -d: | cut -f1 -d" "`
+				if [ "$dhcpStatus" = "Rebinding" ] && [ "$wanIP" != "" ]
+				then
+					echo_t "EROUTER_DHCP_STATUS:Rebinding"
+		t2CountNotify "RF_ERROR_DHCP_Rebinding"
+				fi
+		fi
 
 		if [ `getCorrectiveActionState` = "true" ]
 		then
@@ -481,16 +474,16 @@ runPingTest()
 	#LTE-1335 ping to ipv6 not needed for xle.
 	elif [ "$ping6_success" -ne 1 ] && [ "$BOX_TYPE" != "WNXL11BWL" ]
 	then
-                if [ "$IPv6_Gateway_addr" != "" ] || [ "$IPv6_Gateway_addr_global" != "" ]
-                then
-		            echo_t "RDKB_SELFHEAL : Ping to IPv6 Gateway Address are failed."
-		            t2CountNotify "RF_ERROR_IPV6PingFailed"
-		            echo_t "PING_FAILED:$IPv6_Gateway_addr"
-                elif [[ $last_erouter_mode -gt 1 ]]
+		if [ "$IPv6_Gateway_addr" != "" ] || [ "$IPv6_Gateway_addr_global" != "" ]
 		then
-                    echo_t "RDKB_SELFHEAL : No IPv6 Gateway Address detected"
+			echo_t "RDKB_SELFHEAL : IPv6 connectivity test failed."
+			t2CountNotify "RF_ERROR_IPV6ConnectivityFailed"
+			echo_t "PING_FAILED:$IPv6_Gateway_addr"
+		elif [[ $last_erouter_mode -gt 1 ]]
+		then
+            echo_t "RDKB_SELFHEAL : No IPv6 Gateway Address detected"
 		    t2CountNotify "SYS_INFO_NoIPv6_Address"
-                fi
+        fi
 		
 		if [ `getCorrectiveActionState` = "true" ]
 		then
