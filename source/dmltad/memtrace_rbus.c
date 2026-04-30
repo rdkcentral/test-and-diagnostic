@@ -160,6 +160,10 @@ BOOL MemTrace_SetParamBoolValue
             }
             else
             {
+                if (syscfg_set_commit(NULL, "MemTrace_Enable", "1") != 0) {
+                    CcspTraceWarning(("%s: Failed to set MemTrace_Enable in syscfg db\n", __FUNCTION__));
+                    return FALSE;
+                }
                 CcspTraceInfo(("%s: Starting memtraced service\n", __FUNCTION__));
                 ret = v_secure_system("systemctl start memtraced");
                 if(ret != 0)
@@ -169,10 +173,6 @@ BOOL MemTrace_SetParamBoolValue
                 }
                 else
                 {
-                    if (syscfg_set_commit(NULL, "MemTrace_Enable", "1") != 0) {
-                        CcspTraceWarning(("%s: Failed to set MemTrace_Enable in syscfg db\n", __FUNCTION__));
-                        return FALSE;
-                    }
                     CcspTraceInfo(("%s: memtraced service started\n", __FUNCTION__));
                     return TRUE;
                 }
@@ -180,6 +180,10 @@ BOOL MemTrace_SetParamBoolValue
         }
         else
         {
+            if (syscfg_set_commit(NULL, "MemTrace_Enable", "0") != 0) {
+                CcspTraceWarning(("%s: Failed to set MemTrace_Enable in syscfg db\n", __FUNCTION__));
+                return FALSE;
+            }
             // Disable and stop MemTrace
             CcspTraceInfo(("%s: Stopping memtraced service\n", __FUNCTION__));
 
@@ -192,11 +196,6 @@ BOOL MemTrace_SetParamBoolValue
 
             // Clean up bucket status file
             v_secure_system("rm -f /tmp/bucket_status.txt");
-
-            if (syscfg_set_commit(NULL, "MemTrace_Enable", "0") != 0) {
-                CcspTraceWarning(("%s: Failed to set MemTrace_Enable in syscfg db\n", __FUNCTION__));
-                return FALSE;
-            }
 
             CcspTraceInfo(("%s: memtraced service stopped\n", __FUNCTION__));
             return TRUE;
