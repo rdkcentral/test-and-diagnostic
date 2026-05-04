@@ -36,8 +36,8 @@
 #include "ServiceMonitor.h"
 #include "lowlatency_util_apis.h"
 pthread_t tid[NUM_PTHREADS];
-pthread_cond_t Monitor_cond=PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
+pthread_cond_t Monitor_cond;
+pthread_cond_t cond;
 pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 char IPv6_addr[ARRAY_LEN],IPv4_addr[ARRAY_LEN];
 int curr_wan_mode=0;
@@ -73,12 +73,6 @@ void* isMonitorService_thread_free(void *arg)
 	UNREFERENCED_PARAMETER(arg);
 	struct timespec ts;
 	int Status=0;
-	//pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
-	pthread_condattr_t SyncAttr;
-	pthread_condattr_init(&SyncAttr);
-	pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
-	pthread_cond_init(&cond,&SyncAttr);
-	pthread_condattr_destroy(&SyncAttr);
 	while(1)
 	{	
 		memset(&ts,0,sizeof(ts));
@@ -112,6 +106,18 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 		int Error=0;
 		
 		gLowLatency_Enable=LowLatency_Enable;
+		/* Initialize cond exactly once with CLOCK_MONOTONIC before first thread creation */
+		{
+			static bool cond_initialized = false;
+			if (!cond_initialized) {
+				pthread_condattr_t attr;
+				pthread_condattr_init(&attr);
+				pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+				pthread_cond_init(&cond, &attr);
+				pthread_condattr_destroy(&attr);
+				cond_initialized = true;
+			}
+		}
 		Error=pthread_create(&tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID],NULL,isMonitorService_thread_free,NULL);
 		if (Error)
 		{
@@ -600,11 +606,18 @@ void SendConditional_pthread_cond_signal()
 
 int LatencyMeasurementServiceInit()
 {
+	/* Close any previously opened fd before reopening to avoid fd leaks on re-enable cycles.
+	 * This is the single owner of sysevent_fd_g open/close lifecycle. */
+	if (sysevent_fd_g >= 0)
+	{
+		sysevent_close(sysevent_fd_g, sysevent_token_g);
+		sysevent_fd_g = -1;
+	}
 	if ((sysevent_fd_g = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "latency_measurement", &sysevent_token_g)) < 0)
-		{
-			CcspTraceInfo(("Failed to open sysevent.\n"));
-			return FALSE;
-		}
+	{
+		CcspTraceInfo(("Failed to open sysevent.\n"));
+		return FALSE;
+	}
 	return 0; 
 }
 /*****************************************************************************
@@ -758,8 +771,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
 	//UNREFERENCED_PARAMETER(arg);
 	char strValue[64] = {0};
 	int Status=0;
-	struct timespec ts; 
-	pthread_condattr_t SyncAttr;
+	struct timespec ts;
 	int Error=0;
 	struct sysinfo s_info;
 	sysinfo(&s_info);
@@ -778,10 +790,6 @@ void* LatencyMeasurement_MonitorService(void *arg)
 	else{
 		CcspTraceInfo(("%s Successfully created SysEventHandlerThrd_for_Monitorservice thread \n",__func__));
 	}
-	pthread_condattr_init(&SyncAttr);
-	pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
-	pthread_cond_init(&Monitor_cond,&SyncAttr);
-	pthread_condattr_destroy(&SyncAttr);
 	LatencyMeasurementServiceInit();
 	sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_ifname", current_wan_ifname, sizeof(strValue));
 	sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_mode_update", strValue, sizeof(strValue));
@@ -830,12 +838,11 @@ void* LatencyMeasurement_MonitorService(void *arg)
 			break;
 		}
 	}
-	if(sysevent_fd_g >= 0)
-	{
-		sysevent_close(sysevent_fd_g, sysevent_token_g);
-		sysevent_fd_g = -1;
-	}
-	pthread_cond_destroy(&Monitor_cond);
+	/* sysevent_fd_g is shared with other threads/callers (e.g., UpdateLatencyMeasurement_EnableCount).
+	 * It is closed and reopened safely in LatencyMeasurementServiceInit() on each enable cycle.
+	 * Do not close it here to avoid racing with concurrent sysevent_get/sysevent_set callers. */
+	/* Monitor_cond is kept alive for process lifetime to allow safe signaling from
+	 * SendConditional_pthread_cond_signal() and sysevent handler at any time. */
 	pthread_detach(tid[MONITOR_PTHREAD_ID]);
 	CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n",__func__));
 	return NULL;
@@ -847,6 +854,20 @@ int LatencyMeasurement_Config_Init()
 {
 	int Error=0;
 	CcspTraceInfo(("Enter into %s\n",__func__));
+	/* Initialize Monitor_cond exactly once with CLOCK_MONOTONIC before thread creation.
+	 * Kept alive for process lifetime - never destroyed - so SendConditional_pthread_cond_signal()
+	 * and other signalers can always safely use it. */
+	{
+		static bool monitor_cond_initialized = false;
+		if (!monitor_cond_initialized) {
+			pthread_condattr_t attr;
+			pthread_condattr_init(&attr);
+			pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+			pthread_cond_init(&Monitor_cond, &attr);
+			pthread_condattr_destroy(&attr);
+			monitor_cond_initialized = true;
+		}
+	}
 	Error=pthread_create(&tid[MONITOR_PTHREAD_ID],NULL,LatencyMeasurement_MonitorService,NULL);
 	if (Error)
 	{
