@@ -222,12 +222,15 @@ int LowLatency_Set_TCP_Stats_Report(char* new_val) {
 		return 1;
 	}
 
-	//update and publish the value
-	CcspTraceInfo(("%s: request for value update\n", __FUNCTION__));
-
-	if (RBUS_ERROR_SUCCESS != LatencyMeasure_PublishToEvent(LM_TCP_Stats_Report, new_val)) {
-		CcspTraceError(("%s : publish value '%s' failed.\n", __FUNCTION__, new_val));
-		return 1;
+	//update and publish the value only when there is at least one subscriber
+	if (LatencyMeasure_GetTCPStatsSubscriberCount() > 0) {
+		CcspTraceInfo(("%s: request for value update\n", __FUNCTION__));
+		if (RBUS_ERROR_SUCCESS != LatencyMeasure_PublishToEvent(LM_TCP_Stats_Report, new_val)) {
+			CcspTraceError(("%s : publish value '%s' failed.\n", __FUNCTION__, new_val));
+			return 1;
+		}
+	} else {
+		CcspTraceInfo(("%s: no subscribers, skipping publish\n", __FUNCTION__));
 	}
 
 	if (g_pTCPStatsReport != NULL) 
