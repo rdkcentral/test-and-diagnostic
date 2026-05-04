@@ -343,7 +343,14 @@ rbusError_t TestDiagnostic_LatencyMeasure_EventStringHandler(rbusHandle_t handle
 }
 
 
-/*** API for Event handling***/	
+/*** API for Event handling***/
+
+static int g_TCPStatsReport_subscriber_count = 0;
+
+int LatencyMeasure_GetTCPStatsSubscriberCount(void)
+{
+	return g_TCPStatsReport_subscriber_count;
+}
 
 BOOL
 LatencyMeasure_EventParamStringValue
@@ -356,11 +363,14 @@ LatencyMeasure_EventParamStringValue
 	if (strcmp(pParamName, "X_RDK_LatencyMeasure_TCP_Stats_Report") == 0) {
 		if (action == RBUS_EVENT_ACTION_SUBSCRIBE)
 		{
-			CcspTraceInfo(("Subscribers count increased for event [%s] \n", pParamName));
+			g_TCPStatsReport_subscriber_count++;
+			CcspTraceInfo(("Subscribers count increased for event [%s], count=%d\n", pParamName, g_TCPStatsReport_subscriber_count));
 		}
 		else if (action == RBUS_EVENT_ACTION_UNSUBSCRIBE)
 		{
-			CcspTraceInfo(("Subscribers count decreased for event [%s] \n", pParamName));
+			if (g_TCPStatsReport_subscriber_count > 0)
+				g_TCPStatsReport_subscriber_count--;
+			CcspTraceInfo(("Subscribers count decreased for event [%s], count=%d\n", pParamName, g_TCPStatsReport_subscriber_count));
 		}
 		return TRUE;
 	}

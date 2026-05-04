@@ -42,12 +42,13 @@ rbusError_t TestDiagnostic_LatencyMeasure_GetStringHandler(rbusHandle_t handle, 
 rbusError_t TestDiagnostic_LatencyMeasure_SetStringHandler(rbusHandle_t handle, rbusProperty_t property, rbusSetHandlerOptions_t* opts);
 rbusError_t TestDiagnostic_LatencyMeasure_EventStringHandler(rbusHandle_t handle, rbusEventSubAction_t action, const char *eventName, rbusFilter_t filter, int32_t interval, bool *autoPublish);
 
-/*** APIs for subscribe event handling***/	
+/*** APIs for subscribe event handling***/
 BOOL
 LatencyMeasure_EventParamStringValue
     (
         char*                       pParamName,
         rbusEventSubAction_t 		action
     );
+int LatencyMeasure_GetTCPStatsSubscriberCount(void);
 
 #endif
