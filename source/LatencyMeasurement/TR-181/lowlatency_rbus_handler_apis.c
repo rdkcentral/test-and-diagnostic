@@ -263,7 +263,8 @@ rbusError_t TestDiagnostic_LatencyMeasure_GetStringHandler(rbusHandle_t handle, 
 
     if (strcmp(param, "X_RDK_LatencyMeasure_TCP_Stats_Report") == 0){
 		rbusValue_SetString(val, g_pTCPStatsReport);
-		free(param);
+		/* Copilot: do NOT free(param) here - it is freed unconditionally below.
+		 * Freeing here caused a double-free when this branch was taken. */
 	}
     else {
         rc = LatencyMeasure_GetParamStringValue(NULL, param, value, NULL);
