@@ -79,6 +79,7 @@ void* isMonitorService_thread_free(void *arg)
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&cond, &SyncAttr);
+    pthread_condattr_destroy(&SyncAttr);
     memset(&ts, 0, sizeof(ts));
     clock_gettime(CLOCK_MONOTONIC, &ts);
     ts.tv_nsec = 0;
@@ -603,12 +604,18 @@ void SendConditional_pthread_cond_signal()
 
 int LatencyMeasurementServiceInit()
 {
+	/* Close any previously opened fd before reopening to avoid fd leaks on re-enable cycles. */
+	if (sysevent_fd_g >= 0)
+	{
+		sysevent_close(sysevent_fd_g, sysevent_token_g);
+		sysevent_fd_g = -1;
+	}
 	if ((sysevent_fd_g = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "latency_measurement", &sysevent_token_g)) < 0)
-		{
-			CcspTraceInfo(("Failed to open sysevent.\n"));
-			return FALSE;
-		}
-	return 0; 
+	{
+		CcspTraceInfo(("Failed to open sysevent.\n"));
+		return FALSE;
+	}
+	return 0;
 }
 /*****************************************************************************
 	SysEventHandlerThrd_for_Monitorservice() is used to get the sysevents and based 
@@ -785,6 +792,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&Monitor_cond, &SyncAttr);
+    pthread_condattr_destroy(&SyncAttr);
     LatencyMeasurementServiceInit();
     sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_ifname", current_wan_ifname, sizeof(strValue));
     sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_mode_update", strValue, sizeof(strValue));
