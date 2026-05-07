@@ -867,7 +867,7 @@ BbhmDiagnsSetDiagParams
     )
 {
     PBBHM_DIAG_NS_LOOKUP_OBJECT     pMyObject    = (PBBHM_DIAG_NS_LOOKUP_OBJECT   )hThisObject;
-    PDSLH_NSLOOKUP_INFO             pDiagInfo    = (PDSLH_NSLOOKUP_INFO           )pMyObject->hDslhDiagInfo;
+    PDSLH_NSLOOKUP_INFO             pDiagInfo    = NULL;
     PDSLH_NSLOOKUP_INFO             pNewDiagInfo = (PDSLH_NSLOOKUP_INFO           )hDslhDiagInfo;
     PBBHM_NS_LOOKUP_ECHO_ENTRY      pDiagnsEntry = (PBBHM_NS_LOOKUP_ECHO_ENTRY    )NULL;
     ULONG                           i;
@@ -884,6 +884,9 @@ BbhmDiagnsSetDiagParams
     }
 
     AnscAcquireLock(&pMyObject->AccessLock);
+
+    /* Read shared member AFTER acquiring lock to avoid lock evasion */
+    pDiagInfo = (PDSLH_NSLOOKUP_INFO)pMyObject->hDslhDiagInfo;
 
     if ( pDiagInfo == NULL )
     {

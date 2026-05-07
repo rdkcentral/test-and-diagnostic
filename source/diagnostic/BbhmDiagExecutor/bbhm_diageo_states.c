@@ -115,7 +115,7 @@ BbhmDiageoSetDiagParams
     )
 {
     PBBHM_DIAG_EXEC_OBJECT          pMyObject    = (PBBHM_DIAG_EXEC_OBJECT)hThisObject;
-    PDSLH_DIAG_INFO_BASE            pDiagInfo    = (PDSLH_DIAG_INFO_BASE  )pMyObject->hDslhDiagInfo;
+    PDSLH_DIAG_INFO_BASE            pDiagInfo    = NULL;
     PDSLH_DIAG_INFO_BASE            pNewDiagInfo = (PDSLH_DIAG_INFO_BASE  )hDslhDiagInfo;
 
     if ( !pMyObject->CheckCanStart((ANSC_HANDLE)pMyObject) )
@@ -145,6 +145,9 @@ BbhmDiageoSetDiagParams
      */
 
     AnscAcquireLock(&pMyObject->AccessLock);
+
+    /* Read shared member AFTER acquiring lock to avoid lock evasion */
+    pDiagInfo = (PDSLH_DIAG_INFO_BASE)pMyObject->hDslhDiagInfo;
 
     if ( pDiagInfo == NULL )
     {
