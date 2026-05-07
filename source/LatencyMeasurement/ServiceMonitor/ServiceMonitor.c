@@ -36,8 +36,8 @@
 #include "ServiceMonitor.h"
 #include "lowlatency_util_apis.h"
 pthread_t tid[NUM_PTHREADS];
-pthread_cond_t Monitor_cond;
-pthread_cond_t cond;
+pthread_cond_t Monitor_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 char IPv6_addr[ARRAY_LEN],IPv4_addr[ARRAY_LEN];
 int curr_wan_mode=0;
@@ -113,6 +113,7 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 		gLowLatency_Enable=LowLatency_Enable;
 		{
 			pthread_condattr_t condAttr;
+			pthread_cond_destroy(&cond);
 			pthread_condattr_init(&condAttr);
 			pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
 			pthread_cond_init(&cond, &condAttr);
@@ -856,6 +857,7 @@ int LatencyMeasurement_Config_Init()
 	CcspTraceInfo(("Enter into %s\n",__func__));
 	{
 		pthread_condattr_t condAttr;
+		pthread_cond_destroy(&Monitor_cond);
 		pthread_condattr_init(&condAttr);
 		pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
 		pthread_cond_init(&Monitor_cond, &condAttr);
