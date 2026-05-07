@@ -765,7 +765,6 @@ void* LatencyMeasurement_MonitorService(void *arg)
     char strValue[64] = {0};
     int Status = 0;
     struct timespec ts;
-    pthread_condattr_t SyncAttr;
     int Error = 0;
     struct sysinfo s_info;
     sysinfo(&s_info);
@@ -785,10 +784,6 @@ void* LatencyMeasurement_MonitorService(void *arg)
     {
         CcspTraceInfo(("%s Successfully created SysEventHandlerThrd_for_Monitorservice thread \n", __func__));
     }
-    pthread_condattr_init(&SyncAttr);
-    pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
-    pthread_cond_init(&Monitor_cond, &SyncAttr);
-    pthread_condattr_destroy(&SyncAttr);
     LatencyMeasurementServiceInit();
     sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_ifname", current_wan_ifname, sizeof(strValue));
     sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_mode_update", strValue, sizeof(strValue));
@@ -859,6 +854,13 @@ int LatencyMeasurement_Config_Init()
 {
 	int Error=0;
 	CcspTraceInfo(("Enter into %s\n",__func__));
+	{
+		pthread_condattr_t condAttr;
+		pthread_condattr_init(&condAttr);
+		pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
+		pthread_cond_init(&Monitor_cond, &condAttr);
+		pthread_condattr_destroy(&condAttr);
+	}
 	Error=pthread_create(&tid[MONITOR_PTHREAD_ID],NULL,LatencyMeasurement_MonitorService,NULL);
 	if (Error)
 	{
