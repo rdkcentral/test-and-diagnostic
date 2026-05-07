@@ -75,11 +75,6 @@ void* isMonitorService_thread_free(void *arg)
     struct timespec ts;
     int Status = 0;
     //pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
-    pthread_condattr_t SyncAttr;
-    pthread_condattr_init(&SyncAttr);
-    pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
-    pthread_cond_init(&cond, &SyncAttr);
-    pthread_condattr_destroy(&SyncAttr);
     memset(&ts, 0, sizeof(ts));
     clock_gettime(CLOCK_MONOTONIC, &ts);
     ts.tv_nsec = 0;
@@ -116,6 +111,13 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 		int Error=0;
 		
 		gLowLatency_Enable=LowLatency_Enable;
+		{
+			pthread_condattr_t condAttr;
+			pthread_condattr_init(&condAttr);
+			pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
+			pthread_cond_init(&cond, &condAttr);
+			pthread_condattr_destroy(&condAttr);
+		}
 		Error=pthread_create(&tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID],NULL,isMonitorService_thread_free,NULL);
 		if (Error)
 		{
