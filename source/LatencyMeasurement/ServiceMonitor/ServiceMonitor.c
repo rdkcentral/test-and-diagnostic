@@ -36,8 +36,8 @@
 #include "ServiceMonitor.h"
 #include "lowlatency_util_apis.h"
 pthread_t tid[NUM_PTHREADS];
-pthread_cond_t Monitor_cond=PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
+pthread_cond_t Monitor_cond;
+pthread_cond_t cond;
 pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 char IPv6_addr[ARRAY_LEN],IPv4_addr[ARRAY_LEN];
 int curr_wan_mode=0;
@@ -786,6 +786,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&Monitor_cond, &SyncAttr);
+    pthread_condattr_destroy(&SyncAttr);
     LatencyMeasurementServiceInit();
     sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_ifname", current_wan_ifname, sizeof(strValue));
     sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_mode_update", strValue, sizeof(strValue));
