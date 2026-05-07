@@ -105,7 +105,8 @@ void* isMonitorService_thread_free(void *arg)
     UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
     pthread_detach(tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID]);
     CcspTraceInfo(("pthread_detach WAIT_FOR_MONITOR_FREE_PTHREAD_ID %s\n", __func__));
-    return NULL;}
+    return NULL;
+}
 int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 {
 	char new_val_buf[20];
@@ -737,7 +738,7 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 					curr_wan_mode=atoi(value);
 				}
 			}
-				else if(strcmp(name,LATENCY_MEASUREMENT_DISABLE)==0)
+			else if(strcmp(name,LATENCY_MEASUREMENT_DISABLE)==0)
 			{
 				CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n",__func__));
 				break;
@@ -846,7 +847,8 @@ void* LatencyMeasurement_MonitorService(void *arg)
     pthread_cond_destroy(&Monitor_cond);
     pthread_detach(tid[MONITOR_PTHREAD_ID]);
     CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
-    return NULL;}
+    return NULL;
+}
 /*****************************************************************************
 	LatencyMeasurement_Config_Init() is used for Xnet services configuration initialization
 ******************************************************************************/

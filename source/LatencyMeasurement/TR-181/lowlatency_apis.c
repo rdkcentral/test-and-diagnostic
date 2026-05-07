@@ -230,7 +230,7 @@ int LowLatency_Set_TCP_Stats_Report(char* new_val) {
 			return 1;
 		}
 	} else {
-		CcspTraceInfo(("%s: no subscribers, skipping publish\n", __FUNCTION__));
+		CcspTraceDebug(("%s: no subscribers, skipping publish\n", __FUNCTION__));
 	}
 
 	if (g_pTCPStatsReport != NULL) 
