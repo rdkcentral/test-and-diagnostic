@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <stdatomic.h>
 #include "lowlatency_rbus_handler_apis.h"
 #include "lowlatency_dml.h"
 #include "lowlatency_apis.h"
@@ -345,11 +346,11 @@ rbusError_t TestDiagnostic_LatencyMeasure_EventStringHandler(rbusHandle_t handle
 
 /*** API for Event handling***/	
 
-static int g_TCPStatsReport_subscriber_count = 0;
+static atomic_int g_TCPStatsReport_subscriber_count = 0;
 
 int LatencyMeasure_GetTCPStatsSubscriberCount(void)
 {
-	return g_TCPStatsReport_subscriber_count;
+	return atomic_load(&g_TCPStatsReport_subscriber_count);
 }
 
 BOOL
@@ -363,14 +364,14 @@ LatencyMeasure_EventParamStringValue
 	if (strcmp(pParamName, "X_RDK_LatencyMeasure_TCP_Stats_Report") == 0) {
 		if (action == RBUS_EVENT_ACTION_SUBSCRIBE)
 		{
-			g_TCPStatsReport_subscriber_count++;
-			CcspTraceInfo(("Subscribers count increased for event [%s], count=%d\n", pParamName, g_TCPStatsReport_subscriber_count));
+			atomic_fetch_add(&g_TCPStatsReport_subscriber_count, 1);
+			CcspTraceInfo(("Subscribers count increased for event [%s], count=%d\n", pParamName, atomic_load(&g_TCPStatsReport_subscriber_count)));
 		}
 		else if (action == RBUS_EVENT_ACTION_UNSUBSCRIBE)
 		{
-			if (g_TCPStatsReport_subscriber_count > 0)
-				g_TCPStatsReport_subscriber_count--;
-			CcspTraceInfo(("Subscribers count decreased for event [%s], count=%d\n", pParamName, g_TCPStatsReport_subscriber_count));
+			if (atomic_load(&g_TCPStatsReport_subscriber_count) > 0)
+				atomic_fetch_sub(&g_TCPStatsReport_subscriber_count, 1);
+			CcspTraceInfo(("Subscribers count decreased for event [%s], count=%d\n", pParamName, atomic_load(&g_TCPStatsReport_subscriber_count)));
 		}
 		return TRUE;
 	}
