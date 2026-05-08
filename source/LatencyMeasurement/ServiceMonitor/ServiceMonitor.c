@@ -166,19 +166,20 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 		CcspTraceInfo(("%s: latencyMeasurementCount:%d\n", __FUNCTION__,latencyMeasurementCount));
 		if(latencyMeasurementCount==0)
 		{
+			pthread_mutex_lock(&lock);
 			if(0 > sysevent_fd_g)
 			{
+				pthread_mutex_unlock(&lock);
 				CcspTraceInfo(("Failed to execute sysevent_set. sysevent_fd_g have no value:'%d'\n", sysevent_fd_g));
 				return FALSE;
 			}
-			else
+			if(sysevent_set(sysevent_fd_g, sysevent_token_g, LATENCY_MEASUREMENT_DISABLE, " ", 0) != 0)
 			{
-				if(sysevent_set(sysevent_fd_g, sysevent_token_g, LATENCY_MEASUREMENT_DISABLE, " ", 0) != 0)
-				{
-					CcspTraceInfo(("Failed to execute sysevent_set from %s:%d\n", __FUNCTION__, __LINE__));
-					return FALSE;
-				}
+				pthread_mutex_unlock(&lock);
+				CcspTraceInfo(("Failed to execute sysevent_set from %s:%d\n", __FUNCTION__, __LINE__));
+				return FALSE;
 			}
+			pthread_mutex_unlock(&lock);
 		}
 		//set updated value in db
 		sprintf(new_val_buf, "%d", latencyMeasurementCount);
@@ -840,11 +841,13 @@ void* LatencyMeasurement_MonitorService(void *arg)
             break;
         }
     }
+    pthread_mutex_lock(&lock);
     if(sysevent_fd_g >= 0)
     {
         sysevent_close(sysevent_fd_g, sysevent_token_g);
         sysevent_fd_g = -1;
     }
+    pthread_mutex_unlock(&lock);
     pthread_detach(tid[MONITOR_PTHREAD_ID]);
     CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
     return NULL;
