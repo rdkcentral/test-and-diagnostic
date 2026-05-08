@@ -37,15 +37,6 @@
 #include "lowlatency_util_apis.h"
 pthread_t tid[NUM_PTHREADS];
 pthread_cond_t Monitor_cond;
-static pthread_once_t monitor_cond_once = PTHREAD_ONCE_INIT;
-static void monitor_cond_init_once(void)
-{
-    pthread_condattr_t condAttr;
-    pthread_condattr_init(&condAttr);
-    pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
-    pthread_cond_init(&Monitor_cond, &condAttr);
-    pthread_condattr_destroy(&condAttr);
-}
 pthread_cond_t cond;
 static pthread_once_t cond_once = PTHREAD_ONCE_INIT;
 static void cond_init_once(void)
@@ -866,7 +857,17 @@ int LatencyMeasurement_Config_Init()
 	int Error=0;
 	CcspTraceInfo(("Enter into %s\n",__func__));
 	pthread_mutex_lock(&lock);
-	pthread_once(&monitor_cond_once, monitor_cond_init_once);
+	{
+		static bool monitor_cond_initialized = false;
+		if (!monitor_cond_initialized) {
+			pthread_condattr_t condAttr;
+			pthread_condattr_init(&condAttr);
+			pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
+			pthread_cond_init(&Monitor_cond, &condAttr);
+			pthread_condattr_destroy(&condAttr);
+			monitor_cond_initialized = true;
+		}
+	}
 	pthread_mutex_unlock(&lock);
 	Error=pthread_create(&tid[MONITOR_PTHREAD_ID],NULL,LatencyMeasurement_MonitorService,NULL);
 	if (Error)
