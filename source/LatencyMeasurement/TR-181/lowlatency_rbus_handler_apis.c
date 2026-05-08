@@ -369,8 +369,12 @@ LatencyMeasure_EventParamStringValue
 		}
 		else if (action == RBUS_EVENT_ACTION_UNSUBSCRIBE)
 		{
-			if (atomic_load(&g_TCPStatsReport_subscriber_count) > 0)
-				atomic_fetch_sub(&g_TCPStatsReport_subscriber_count, 1);
+			{
+				int prev = atomic_load(&g_TCPStatsReport_subscriber_count);
+				while (prev > 0 &&
+				       !atomic_compare_exchange_weak(&g_TCPStatsReport_subscriber_count, &prev, prev - 1))
+					; /* prev updated by CAS on failure; retry */
+			}
 			CcspTraceInfo(("Subscribers count decreased for event [%s], count=%d\n", pParamName, atomic_load(&g_TCPStatsReport_subscriber_count)));
 		}
 		return TRUE;
