@@ -117,12 +117,21 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 			static bool cond_initialized = false;
 			if (!cond_initialized) {
 				pthread_condattr_t condAttr;
+				int ret;
 				pthread_cond_destroy(&cond);
-				pthread_condattr_init(&condAttr);
-				pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
-				pthread_cond_init(&cond, &condAttr);
-				pthread_condattr_destroy(&condAttr);
-				cond_initialized = true;
+				ret = pthread_condattr_init(&condAttr);
+				if (ret != 0) {
+					CcspTraceError(("%s: pthread_condattr_init failed: %d\n", __FUNCTION__, ret));
+				} else {
+					pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
+					ret = pthread_cond_init(&cond, &condAttr);
+					pthread_condattr_destroy(&condAttr);
+					if (ret != 0) {
+						CcspTraceError(("%s: pthread_cond_init failed: %d\n", __FUNCTION__, ret));
+					} else {
+						cond_initialized = true;
+					}
+				}
 			}
 		}
 		pthread_mutex_unlock(&lock);
@@ -869,12 +878,21 @@ int LatencyMeasurement_Config_Init()
 		static bool monitor_cond_initialized = false;
 		if (!monitor_cond_initialized) {
 			pthread_condattr_t condAttr;
+			int ret;
 			pthread_cond_destroy(&Monitor_cond);
-			pthread_condattr_init(&condAttr);
-			pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
-			pthread_cond_init(&Monitor_cond, &condAttr);
-			pthread_condattr_destroy(&condAttr);
-			monitor_cond_initialized = true;
+			ret = pthread_condattr_init(&condAttr);
+			if (ret != 0) {
+				CcspTraceError(("%s: pthread_condattr_init failed: %d\n", __FUNCTION__, ret));
+			} else {
+				pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
+				ret = pthread_cond_init(&Monitor_cond, &condAttr);
+				pthread_condattr_destroy(&condAttr);
+				if (ret != 0) {
+					CcspTraceError(("%s: pthread_cond_init failed: %d\n", __FUNCTION__, ret));
+				} else {
+					monitor_cond_initialized = true;
+				}
+			}
 		}
 	}
 	pthread_mutex_unlock(&lock);
