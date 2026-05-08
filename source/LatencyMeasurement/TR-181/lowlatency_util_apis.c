@@ -200,7 +200,7 @@ LatencyMeasure_PublishToEvent
 		CcspTraceInfo(("%s : Publish to %s ret value is %d\n", __FUNCTION__,event_name,ret));
 	}
     /* release rbus value and object variable */
-    rbusValue_Release(value);
+    rbusValue_Release(value);    
     rbusObject_Release(data);
     return ret;
 }
