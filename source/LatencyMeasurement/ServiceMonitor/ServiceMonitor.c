@@ -36,8 +36,8 @@
 #include "ServiceMonitor.h"
 #include "lowlatency_util_apis.h"
 pthread_t tid[NUM_PTHREADS];
-pthread_cond_t Monitor_cond;
-pthread_cond_t cond;
+pthread_cond_t Monitor_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 static pthread_once_t cond_once = PTHREAD_ONCE_INIT;
 static void cond_init_once(void)
 {
