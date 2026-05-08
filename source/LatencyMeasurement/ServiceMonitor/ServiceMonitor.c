@@ -36,7 +36,16 @@
 #include "ServiceMonitor.h"
 #include "lowlatency_util_apis.h"
 pthread_t tid[NUM_PTHREADS];
-pthread_cond_t Monitor_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t Monitor_cond;
+static pthread_once_t monitor_cond_once = PTHREAD_ONCE_INIT;
+static void monitor_cond_init_once(void)
+{
+    pthread_condattr_t condAttr;
+    pthread_condattr_init(&condAttr);
+    pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
+    pthread_cond_init(&Monitor_cond, &condAttr);
+    pthread_condattr_destroy(&condAttr);
+}
 pthread_cond_t cond;
 static pthread_once_t cond_once = PTHREAD_ONCE_INIT;
 static void cond_init_once(void)
@@ -845,7 +854,6 @@ void* LatencyMeasurement_MonitorService(void *arg)
         sysevent_close(sysevent_fd_g, sysevent_token_g);
         sysevent_fd_g = -1;
     }
-    pthread_cond_destroy(&Monitor_cond);
     pthread_detach(tid[MONITOR_PTHREAD_ID]);
     CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
     return NULL;
@@ -857,14 +865,7 @@ int LatencyMeasurement_Config_Init()
 {
 	int Error=0;
 	CcspTraceInfo(("Enter into %s\n",__func__));
-	{
-		pthread_condattr_t condAttr;
-		pthread_cond_destroy(&Monitor_cond);
-		pthread_condattr_init(&condAttr);
-		pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
-		pthread_cond_init(&Monitor_cond, &condAttr);
-		pthread_condattr_destroy(&condAttr);
-	}
+	pthread_once(&monitor_cond_once, monitor_cond_init_once);
 	Error=pthread_create(&tid[MONITOR_PTHREAD_ID],NULL,LatencyMeasurement_MonitorService,NULL);
 	if (Error)
 	{
