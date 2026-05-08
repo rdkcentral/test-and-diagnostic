@@ -37,7 +37,16 @@
 #include "lowlatency_util_apis.h"
 pthread_t tid[NUM_PTHREADS];
 pthread_cond_t Monitor_cond = PTHREAD_COND_INITIALIZER;
-pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond;
+static pthread_once_t cond_once = PTHREAD_ONCE_INIT;
+static void cond_init_once(void)
+{
+    pthread_condattr_t condAttr;
+    pthread_condattr_init(&condAttr);
+    pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
+    pthread_cond_init(&cond, &condAttr);
+    pthread_condattr_destroy(&condAttr);
+}
 pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 char IPv6_addr[ARRAY_LEN],IPv4_addr[ARRAY_LEN];
 int curr_wan_mode=0;
@@ -111,14 +120,7 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 		int Error=0;
 		
 		gLowLatency_Enable=LowLatency_Enable;
-		{
-			pthread_condattr_t condAttr;
-			pthread_cond_destroy(&cond);
-			pthread_condattr_init(&condAttr);
-			pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
-			pthread_cond_init(&cond, &condAttr);
-			pthread_condattr_destroy(&condAttr);
-		}
+		pthread_once(&cond_once, cond_init_once);
 		Error=pthread_create(&tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID],NULL,isMonitorService_thread_free,NULL);
 		if (Error)
 		{
