@@ -865,7 +865,9 @@ int LatencyMeasurement_Config_Init()
 {
 	int Error=0;
 	CcspTraceInfo(("Enter into %s\n",__func__));
+	pthread_mutex_lock(&lock);
 	pthread_once(&monitor_cond_once, monitor_cond_init_once);
+	pthread_mutex_unlock(&lock);
 	Error=pthread_create(&tid[MONITOR_PTHREAD_ID],NULL,LatencyMeasurement_MonitorService,NULL);
 	if (Error)
 	{
