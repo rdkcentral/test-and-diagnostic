@@ -49,6 +49,5 @@ LatencyMeasure_EventParamStringValue
         char*                       pParamName,
         rbusEventSubAction_t 		action
     );
-int LatencyMeasure_GetTCPStatsSubscriberCount(void);
 
 #endif

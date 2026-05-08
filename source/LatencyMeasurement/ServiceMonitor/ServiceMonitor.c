@@ -42,6 +42,7 @@ static pthread_once_t cond_once = PTHREAD_ONCE_INIT;
 static void cond_init_once(void)
 {
     pthread_condattr_t condAttr;
+    pthread_cond_destroy(&cond);
     pthread_condattr_init(&condAttr);
     pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&cond, &condAttr);
@@ -864,6 +865,7 @@ int LatencyMeasurement_Config_Init()
 		static bool monitor_cond_initialized = false;
 		if (!monitor_cond_initialized) {
 			pthread_condattr_t condAttr;
+			pthread_cond_destroy(&Monitor_cond);
 			pthread_condattr_init(&condAttr);
 			pthread_condattr_setclock(&condAttr, CLOCK_MONOTONIC);
 			pthread_cond_init(&Monitor_cond, &condAttr);

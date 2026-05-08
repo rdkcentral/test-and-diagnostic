@@ -348,11 +348,6 @@ rbusError_t TestDiagnostic_LatencyMeasure_EventStringHandler(rbusHandle_t handle
 
 static atomic_int g_TCPStatsReport_subscriber_count = 0;
 
-int LatencyMeasure_GetTCPStatsSubscriberCount(void)
-{
-	return atomic_load(&g_TCPStatsReport_subscriber_count);
-}
-
 BOOL
 LatencyMeasure_EventParamStringValue
     (
