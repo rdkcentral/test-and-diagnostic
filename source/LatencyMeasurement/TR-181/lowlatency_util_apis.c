@@ -189,7 +189,7 @@ LatencyMeasure_PublishToEvent
 	{
 		if (ret == RBUS_ERROR_NOSUBSCRIBERS) {
 			ret = RBUS_ERROR_SUCCESS;
-			CcspTraceError(("%s: No subscribers found\n", __FUNCTION__));
+			CcspTraceDebug(("%s: No subscribers found\n", __FUNCTION__));
 		}
 		else {
 			CcspTraceError(("Unable to Publish event data %s  rbus error code : %d\n",event_name, ret));
