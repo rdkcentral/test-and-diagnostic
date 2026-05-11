@@ -835,6 +835,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
             break;
         }
     }
+    pthread_cond_destroy(&Monitor_cond);
     pthread_detach(tid[MONITOR_PTHREAD_ID]);
     CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
     return NULL;
