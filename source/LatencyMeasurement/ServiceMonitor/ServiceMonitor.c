@@ -604,6 +604,11 @@ void SendConditional_pthread_cond_signal()
 
 int LatencyMeasurementServiceInit()
 {
+	if (sysevent_fd_g >= 0)
+	{
+		CcspTraceInfo(("sysevent_fd_g already open (%d), skipping sysevent_open.\n", sysevent_fd_g));
+		return 0;
+	}
 	if ((sysevent_fd_g = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "latency_measurement", &sysevent_token_g)) < 0)
 		{
 			CcspTraceInfo(("Failed to open sysevent.\n"));
