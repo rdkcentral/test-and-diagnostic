@@ -201,5 +201,6 @@ LatencyMeasure_PublishToEvent
 	}
     /* release rbus value and object variable */
     rbusValue_Release(value);    
+    rbusObject_Release(data);
     return ret;
 }

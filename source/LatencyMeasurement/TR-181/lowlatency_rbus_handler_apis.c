@@ -263,19 +263,20 @@ rbusError_t TestDiagnostic_LatencyMeasure_GetStringHandler(rbusHandle_t handle, 
 
     if (strcmp(param, "X_RDK_LatencyMeasure_TCP_Stats_Report") == 0){
 		rbusValue_SetString(val, g_pTCPStatsReport);
-		free(param);
 	}
     else {
         rc = LatencyMeasure_GetParamStringValue(NULL, param, value, NULL);
-        free(param);
         if(rc != 0)
         {
             CcspTraceError(("[%s]: LatencyMeasure_GetParamStringValue failed\n", __FUNCTION__));
+            free(param);
+            rbusValue_Release(val);
             return RBUS_ERROR_BUS_ERROR;
         }
         rbusValue_SetString(val, value);
     }
 
+    free(param);
     rbusProperty_SetValue(property, val);
     rbusValue_Release(val);
 

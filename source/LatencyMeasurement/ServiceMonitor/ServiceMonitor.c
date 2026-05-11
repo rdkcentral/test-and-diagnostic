@@ -79,6 +79,7 @@ void* isMonitorService_thread_free(void *arg)
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&cond, &SyncAttr);
+    pthread_condattr_destroy(&SyncAttr);
     memset(&ts, 0, sizeof(ts));
     clock_gettime(CLOCK_MONOTONIC, &ts);
     ts.tv_nsec = 0;
@@ -603,6 +604,11 @@ void SendConditional_pthread_cond_signal()
 
 int LatencyMeasurementServiceInit()
 {
+	if (sysevent_fd_g >= 0)
+	{
+		CcspTraceInfo(("sysevent_fd_g already open (%d), skipping sysevent_open.\n", sysevent_fd_g));
+		return 0;
+	}
 	if ((sysevent_fd_g = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "latency_measurement", &sysevent_token_g)) < 0)
 		{
 			CcspTraceInfo(("Failed to open sysevent.\n"));
@@ -744,6 +750,11 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 			}
 		}
 	}
+	if(sysevent_fd >= 0)
+	{
+		sysevent_close(sysevent_fd, sysevent_token);
+		sysevent_fd = -1;
+	}
 	pthread_detach(tid[SYSEVENT_PTHREAD_ID]);
 	CcspTraceInfo(("pthread_detach SYSEVENT_PTHREAD_ID %s\n",__func__));
 	return NULL;
@@ -780,6 +791,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&Monitor_cond, &SyncAttr);
+    pthread_condattr_destroy(&SyncAttr);
     LatencyMeasurementServiceInit();
     sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_ifname", current_wan_ifname, sizeof(strValue));
     sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_mode_update", strValue, sizeof(strValue));
