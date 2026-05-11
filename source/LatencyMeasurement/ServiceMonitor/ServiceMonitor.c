@@ -79,6 +79,7 @@ void* isMonitorService_thread_free(void *arg)
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&cond, &SyncAttr);
+    pthread_condattr_destroy(&SyncAttr);
     memset(&ts, 0, sizeof(ts));
     clock_gettime(CLOCK_MONOTONIC, &ts);
     ts.tv_nsec = 0;
