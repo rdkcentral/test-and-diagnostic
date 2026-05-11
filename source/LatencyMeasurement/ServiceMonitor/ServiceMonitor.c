@@ -745,6 +745,11 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 			}
 		}
 	}
+	if(sysevent_fd >= 0)
+	{
+		sysevent_close(sysevent_fd, sysevent_token);
+		sysevent_fd = -1;
+	}
 	pthread_detach(tid[SYSEVENT_PTHREAD_ID]);
 	CcspTraceInfo(("pthread_detach SYSEVENT_PTHREAD_ID %s\n",__func__));
 	return NULL;
