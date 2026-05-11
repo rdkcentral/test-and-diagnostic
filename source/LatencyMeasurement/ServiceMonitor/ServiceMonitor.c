@@ -845,11 +845,6 @@ void* LatencyMeasurement_MonitorService(void *arg)
             break;
         }
     }
-    if(sysevent_fd_g >= 0)
-    {
-        sysevent_close(sysevent_fd_g, sysevent_token_g);
-        sysevent_fd_g = -1;
-    }
     pthread_cond_destroy(&Monitor_cond);
     pthread_detach(tid[MONITOR_PTHREAD_ID]);
     CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
