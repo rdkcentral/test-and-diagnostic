@@ -845,7 +845,11 @@ void* LatencyMeasurement_MonitorService(void *arg)
             break;
         }
     }
-    pthread_cond_destroy(&Monitor_cond);
+    /* Monitor_cond is shared with other threads (including detached/background
+     * signalers). Do not destroy it here unless all users have been stopped
+     * and joined; keep it for process lifetime to avoid racing with
+     * pthread_cond_signal()/pthread_cond_timedwait() on other threads.
+     */
     pthread_detach(tid[MONITOR_PTHREAD_ID]);
     CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
     return NULL;
