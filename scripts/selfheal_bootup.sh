@@ -945,6 +945,9 @@ dumpLogs()
     ifconfig -a  >> /rdklogs/logs/dbg_wan_ip_missing.txt
 }
 
+# Here LANIPv6GUASupport used to identify the region of the device. For example LANIPv6GUASupport is true for EU region devices and false for NA region devices. 
+# Eth WAN failover recovery action is taken only for NA region devices.
+# TODO : LANIPv6GUASupport shouldn't be used here. Need a generic self heal mechanism which is independent of region specific parameters.
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
 eth_wan_enabled=$(syscfg get eth_wan_enabled)
 if [ "$eth_wan_enabled" = "true" ] && [ "$UseLANIFIPV6" != "true" ];then
