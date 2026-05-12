@@ -371,7 +371,7 @@ int main(int argc, char* argv[])
     //crate a thread to update time thread for ethwan enable mode
     BOOL ethwanEnabled = FALSE;
     ethwanEnabled = IsEthWanEnabled();
-    #ifdef RDKB_EXTENDER_ENABLED
+    #if defined(RDKB_EXTENDER_ENABLED) || defined(PON_GATEWAY)
   	int callUpdate = 1;
     #else
   	int callUpdate = 0;
