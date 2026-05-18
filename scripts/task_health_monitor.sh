@@ -35,6 +35,9 @@ fi
 
 SelfHeal_Support=`sysevent get SelfhelpWANConnectionDiagSupport`
 HomeSecuritySupport=`sysevent get HomeSecuritySupport`
+# Here LANIPv6GUASupport used to identify the region of the device. For example LANIPv6GUASupport is true for EU region devices and false for NA region devices. 
+# Eth WAN failover recovery action is taken only for NA region devices.
+# TODO : DHCP selfheal mechanisms used here are outdated and dhcp should be controlled from and Wanmanager and the DHCPManager.
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
 
 DIBBLER_SERVER_CONF="/etc/dibbler/server.conf"
