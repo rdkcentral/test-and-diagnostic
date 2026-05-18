@@ -35,10 +35,13 @@
 #include "secure_wrapper.h"
 #include "ServiceMonitor.h"
 #include "lowlatency_util_apis.h"
+#include "xNetDP.h"
+#include "xNetSniffer.h"
 pthread_t tid[NUM_PTHREADS];
 pthread_cond_t Monitor_cond=PTHREAD_COND_INITIALIZER;
 pthread_cond_t cond=PTHREAD_COND_INITIALIZER;
 pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t xnet_service_lock = PTHREAD_MUTEX_INITIALIZER;
 char IPv6_addr[ARRAY_LEN],IPv4_addr[ARRAY_LEN];
 int curr_wan_mode=0;
 char current_wan_ifname[64]={0};
@@ -52,6 +55,153 @@ int reportInterval_prev=0;
 bool IsPthreadisBusy=false;
 bool IsTR181_triger_at_PthreadisBusy=false;
 bool gLowLatency_Enable=false;
+
+typedef struct EmbeddedServiceState
+{
+	pthread_t thread;
+	bool active;
+} EmbeddedServiceState;
+
+static EmbeddedServiceState g_xnet_dp_service = {0};
+static EmbeddedServiceState g_xnet_sniffer_service = {0};
+static xNetDPConfig g_xnet_dp_config = {0};
+static xNetSnifferConfig g_xnet_sniffer_config = {0};
+
+static bool has_sniffer_work(const xNetSnifferConfig *config)
+{
+	return (config->interface_name[0] != '\0') && ((config->ipv4_prefix[0] != '\0') || (config->ipv6_prefix[0] != '\0'));
+}
+
+static void* xnet_dp_service_thread(void *arg)
+{
+	UNREFERENCED_PARAMETER(arg);
+	xNetDP_Run(&g_xnet_dp_config);
+
+	pthread_mutex_lock(&xnet_service_lock);
+	g_xnet_dp_service.active = false;
+	pthread_mutex_unlock(&xnet_service_lock);
+	return NULL;
+}
+
+static void* xnet_sniffer_service_thread(void *arg)
+{
+	xNetSnifferConfig config;
+	UNREFERENCED_PARAMETER(arg);
+
+	pthread_mutex_lock(&xnet_service_lock);
+	config = g_xnet_sniffer_config;
+	pthread_mutex_unlock(&xnet_service_lock);
+
+	xNetSniffer_Run(&config);
+
+	pthread_mutex_lock(&xnet_service_lock);
+	g_xnet_sniffer_service.active = false;
+	pthread_mutex_unlock(&xnet_service_lock);
+	return NULL;
+}
+
+static int ensure_xnet_dp_service(const xNetDPConfig *config, bool enabled)
+{
+	bool should_start = false;
+
+	pthread_mutex_lock(&xnet_service_lock);
+	g_xnet_dp_config = *config;
+	if (!g_xnet_dp_service.active && enabled)
+	{
+		should_start = true;
+		g_xnet_dp_service.active = true;
+	}
+	pthread_mutex_unlock(&xnet_service_lock);
+
+	if (should_start)
+	{
+		if (pthread_create(&g_xnet_dp_service.thread, NULL, xnet_dp_service_thread, NULL) != 0)
+		{
+			pthread_mutex_lock(&xnet_service_lock);
+			g_xnet_dp_service.active = false;
+			pthread_mutex_unlock(&xnet_service_lock);
+			CcspTraceError(("%s: Failed to start embedded xNetDP thread\n", __FUNCTION__));
+			return -1;
+		}
+	}
+	else if (g_xnet_dp_service.active)
+	{
+		xNetDP_UpdateConfig(config);
+	}
+
+	return 0;
+}
+
+static void stop_xnet_sniffer_service(void)
+{
+	pthread_t thread;
+	bool active;
+
+	pthread_mutex_lock(&xnet_service_lock);
+	active = g_xnet_sniffer_service.active;
+	thread = g_xnet_sniffer_service.thread;
+	pthread_mutex_unlock(&xnet_service_lock);
+
+	if (!active)
+	{
+		return;
+	}
+
+	xNetSniffer_RequestStop();
+	pthread_join(thread, NULL);
+
+	pthread_mutex_lock(&xnet_service_lock);
+	g_xnet_sniffer_service.active = false;
+	memset(&g_xnet_sniffer_config, 0, sizeof(g_xnet_sniffer_config));
+	pthread_mutex_unlock(&xnet_service_lock);
+}
+
+static int ensure_xnet_sniffer_service(const xNetSnifferConfig *config)
+{
+	bool active;
+	bool restart_required;
+
+	pthread_mutex_lock(&xnet_service_lock);
+	active = g_xnet_sniffer_service.active;
+	restart_required = active && (memcmp(&g_xnet_sniffer_config, config, sizeof(*config)) != 0);
+	pthread_mutex_unlock(&xnet_service_lock);
+
+	if (restart_required)
+	{
+		stop_xnet_sniffer_service();
+		active = false;
+	}
+
+	if (!has_sniffer_work(config))
+	{
+		if (active)
+		{
+			stop_xnet_sniffer_service();
+		}
+		return 0;
+	}
+
+	if (active)
+	{
+		return 0;
+	}
+
+	pthread_mutex_lock(&xnet_service_lock);
+	g_xnet_sniffer_config = *config;
+	g_xnet_sniffer_service.active = true;
+	pthread_mutex_unlock(&xnet_service_lock);
+
+	if (pthread_create(&g_xnet_sniffer_service.thread, NULL, xnet_sniffer_service_thread, NULL) != 0)
+	{
+		pthread_mutex_lock(&xnet_service_lock);
+		g_xnet_sniffer_service.active = false;
+		pthread_mutex_unlock(&xnet_service_lock);
+		CcspTraceError(("%s: Failed to start embedded xNetSniffer thread\n", __FUNCTION__));
+		return -1;
+	}
+
+	return 0;
+}
 
 /*adding _SCER11BEL_PRODUCT_REQ_ , because both lan_prefix and ipv6_prefix has same value in XER10 US Device*/
 /*For Example:
@@ -216,205 +366,61 @@ void MonitorLatencyMeasurementServices()
 	bool IPv4Enable=false,IPv6Enable=false;
 	int ReportInterval=0;
 	char report_name[BUF_SIZE]="Device.QOS.X_RDK_LatencyMeasure_TCP_Stats_Report\0";
-	char ServicePID[BUF_SIZE]={0};
-	char Ipv6Cmd[ARRAY_SIZE]={0};
 	char lan_ifname[BUF_SIZE]={0};
-	char* token;
-	char* rest = ServicePID;
-	char* token1;
-	char* rest1 = ServicePID;
-	char* token_ipv4;
-	char* rest_ipv4 = ServicePID;
-	int xNetSniffer_PID1=0;
-	int xNetSniffer_PID2=0;
-	bool latency_measure_disabled =0;
-	bool LanIpv6_prefix_flag=false;
-	bool Lan_prefix_flag=false;
+	xNetDPConfig dp_config;
+	xNetSnifferConfig sniffer_config;
+	bool sniffer_active = false;
 	/** get the IPv4Enable, IPv6Enable and ReportInterval from TR181****/
 	CcspTraceInfo(("Entering %s: \n", __FUNCTION__));
 	ReportInterval=GetTCPReportInterval() * 60 ; 
 	IPv6Enable=GetLatencyMeasurementEnableStatus(IPV6_LATENCY_MEASUREMENT_ENABLE);
 	IPv4Enable=GetLatencyMeasurementEnableStatus(IPV4_LATENCY_MEASUREMENT_ENABLE);
-	/**check the xNetDP service is running or not if not running start the service****/
-	if(CheckLatencyMeasurementServiceStatus(DP_SERVICE,ServicePID)==SERVICE_NOT_ACTIVE)  
+	memset(&dp_config, 0, sizeof(dp_config));
+	memset(&sniffer_config, 0, sizeof(sniffer_config));
+	dp_config.report_type = RBUS_DATA_MODEL;
+	dp_config.report_interval = ReportInterval;
+	strncpy(dp_config.report_name, report_name, sizeof(dp_config.report_name) - 1);
+
+	if ((IPv4Enable == true) || (IPv6Enable == true))
 	{
-		if((IPv4Enable==true)||(IPv6Enable==true)) // check IPv6Enable or  IPv4Enable enable any one is enable start the xNetDP service
-		{
-			CcspTraceInfo(("%s: Initializing xNetDP service. \n", __FUNCTION__));
-			v_secure_system("/usr/bin/xNetDP -t 1 -i %d -n %s &",ReportInterval,report_name);
-			CheckLatencyMeasurementServiceStatus(DP_SERVICE,ServicePID);
-			DP_PID=atoi(ServicePID);
-		}
-		else
-		{
-			 CcspTraceInfo(("%sIPv4Enable:%d: IPv6Enable :%d xNetDP not running\n", __FUNCTION__,IPv4Enable,IPv6Enable));
-		}
+		ensure_xnet_dp_service(&dp_config, true);
+		DP_PID = getpid();
 	}
 	else
 	{
-		if (ReportInterval != reportInterval_prev)
-		{
+		DP_PID = -1;
+	}
 
-			if((IPv4Enable==true)||(IPv6Enable==true)) // check IPv6Enable or  IPv4Enable enable any one is enable start the xNetDP service
-			{
-				CcspTraceInfo(("%s: Reporting interval is updated, restarting xNetDP service\n", __FUNCTION__));
-				v_secure_system("killall xNetDP");
-				v_secure_system("/usr/bin/xNetDP -t 1 -i %d -n %s  &",ReportInterval,report_name);
-				CheckLatencyMeasurementServiceStatus(DP_SERVICE,ServicePID);
-				DP_PID=atoi(ServicePID);
-			}	
+	syscfg_get(NULL, "lan_ifname", lan_ifname, sizeof(lan_ifname));
+	strncpy(sniffer_config.interface_name, lan_ifname, sizeof(sniffer_config.interface_name) - 1);
+
+	if (IPv4Enable == true)
+	{
+		Get_IPv4_addr();
+		if (strlen(IPv4_addr) > 0)
+		{
+			strncpy(sniffer_config.ipv4_prefix, IPv4_addr, sizeof(sniffer_config.ipv4_prefix) - 1);
 		}
 	}
-	CheckLatencyMeasurementServiceStatus(SNIFFER_SERVICE,ServicePID);
-	
-	token1 = strtok_r(rest1, " ", &rest1);
-	if(token1!=NULL)
+
+	if (IPv6Enable == true)
 	{
-		xNetSniffer_PID1=atoi(rest1);
-		xNetSniffer_PID2=atoi(token1);
-	}
-
-	CcspTraceInfo(("%s: xNetSniffer_PID1:%d,xNetSniffer_PID2:%d\n", __FUNCTION__,xNetSniffer_PID1,xNetSniffer_PID2));
-	CcspTraceInfo(("%s: IPv4PID:%d,IPV6PID:%d\n", __FUNCTION__,IPv4PID,IPV6PID));
-	/**check the xNetSniffer service is running or not if not running start the service****/
-	//if((CheckLatencyMeasurementServiceStatus(SNIFFER_SERVICE,ServicePID)==SERVICE_NOT_ACTIVE)||(IPv4PID==0||IPV6PID==0))
-	if((!xNetSniffer_PID1)||(!xNetSniffer_PID2))  
-	{
-		syscfg_get(NULL, "lan_ifname", lan_ifname, sizeof(lan_ifname));
-		CcspTraceInfo(("%s: xNetSniffer service not running\n", __FUNCTION__));
-		if((IPv4PID!=xNetSniffer_PID1)&&(IPv4PID!=xNetSniffer_PID2))
+		sysevent_get(sysevent_fd_g, sysevent_token_g, LAN_PREFIX_SYSEVENT, IPv6_addr, sizeof(IPv6_addr));
+		if (strlen(IPv6_addr) > 0)
 		{
-			if(IPv4Enable==true)// check IPv4Enable enable is enable start the xNetSniffer service with IPv4
-			{
-				Get_IPv4_addr();
-
-				CcspTraceInfo(("%s: Initializing xNetSniffer service on IPv4 IPv4_addr:%s len:%ld.\n", __FUNCTION__,IPv4_addr,strlen(IPv4_addr)));
-
-				if (strlen(IPv4_addr) > 0 )
-				{
-					v_secure_system("/usr/bin/xNetSniffer -i %s -f IPv4 -p %s &",lan_ifname,IPv4_addr);
-				}
-				else{
-					//v_secure_system("/usr/bin/xNetSniffer -i %s -f IPv4 &",lan_ifname);
-					Lan_prefix_flag=true;
-				}
-				CheckLatencyMeasurementServiceStatus(SNIFFER_SERVICE,ServicePID);
-				if (strlen(ServicePID) == 0)
-				{
-					CcspTraceInfo(("%s: Failed to run IPv4 xNetSniffer service\n", __FUNCTION__));
-				} else {
-					token_ipv4 = strtok_r(rest_ipv4, " ", &rest_ipv4);
-					CcspTraceInfo(("%s: xNetSniffer_v4 service PID:%s rest:%s\n", __FUNCTION__,token_ipv4,rest_ipv4));
-					if((rest_ipv4 != NULL) && (IPV6PID==atoi(rest_ipv4)))
-					{
-						IPv4PID=atoi(token_ipv4);
-					} else if((token_ipv4 != NULL) && (IPV6PID==atoi(token_ipv4)))
-					{
-						if(rest_ipv4 != NULL)
-						{
-							IPv4PID=atoi(rest_ipv4);
-						}
-					} else {
-						IPv4PID=atoi(ServicePID);
-					}
-					if (IPv4PID > 0)
-					{
-						CcspTraceInfo(("%s: ServicePID:%s xNetSniffer IPv4:%d service started in background\n", __FUNCTION__,ServicePID,IPv4PID));
-					} else {
-						CcspTraceError(("%s: Failed to determine valid IPv4 xNetSniffer PID from ServicePID:%s (IPv4PID=%d)\n", __FUNCTION__, ServicePID, IPv4PID));
-					}
-				}
-			}
-		}
-
-		if((IPV6PID!=xNetSniffer_PID1)&&(IPV6PID!=xNetSniffer_PID2))
-		{
-			if(IPv6Enable==true) // check IPv6Enable enable is enable start the xNetSniffer service with IPv6
-			{
-				sysevent_get(sysevent_fd_g, sysevent_token_g, LAN_PREFIX_SYSEVENT, IPv6_addr, sizeof(IPv6_addr));
-				
-				CcspTraceInfo(("%s: Initializing xNetSniffer service on IPv6:IPv6_addr:%s.Len:%ld\n", __FUNCTION__,IPv6_addr,strlen(IPv6_addr)));
-
-				if (strlen(IPv6_addr) > 0 )
-				{
-					v_secure_system("/usr/bin/xNetSniffer -i %s -f IPv6 -p %s &",lan_ifname,IPv6_addr);
-				}
-				else
-				{
-					//v_secure_system("/usr/bin/xNetSniffer -i %s -f IPv6 &",lan_ifname);
-					LanIpv6_prefix_flag=true;
-				}
-				//v_secure_system("/usr/bin/xNetSniffer -i %s -f IPv6 -D &",lan_ifname);
-				
-				CheckLatencyMeasurementServiceStatus(SNIFFER_SERVICE,ServicePID);
-				CcspTraceInfo(("xNetSniffer service PID:%s ServicePID:%s\n",rest,ServicePID));
-				if (strlen(ServicePID) == 0)
-				{
-					CcspTraceInfo(("%s: Failed to run IPv6 xNetSniffer service\n", __FUNCTION__));
-				} else {
-					token = strtok_r(rest, " ", &rest);
-					CcspTraceInfo(("%s: xNetSniffer service PID:%s rest:%s\n", __FUNCTION__,token,rest));
-					if((rest != NULL) && (IPv4PID==atoi(rest)))
-					{
-						IPV6PID=atoi(token);
-					} else if((token != NULL) && (IPv4PID==atoi(token)))
-					{
-						if(rest != NULL)
-						{
-							IPV6PID=atoi(rest);
-						}
-					}
-					else{
-						IPV6PID=atoi(ServicePID);
-					}
-					if (IPV6PID > 0)
-					{
-						CcspTraceInfo(("IPV6PID:%s %d\n",rest,IPV6PID));
-						CcspTraceInfo(("%s: xNetSniffer IPv6::%s service started in background\n", __FUNCTION__,Ipv6Cmd));
-					} else {
-						CcspTraceError(("%s: Failed to determine valid IPV6 xNetSniffer PID from ServicePID:%s (IPV6ID=%d)\n", __FUNCTION__, ServicePID, IPV6PID));
-					}
-				}
-			}
+			strncpy(sniffer_config.ipv6_prefix, IPv6_addr, sizeof(sniffer_config.ipv6_prefix) - 1);
 		}
 	}
-	else
-	{
-		CcspTraceInfo(("%s: xNetSniffer service running\n", __FUNCTION__));
-	}
 
-	if((IPv4Enable==false)&&(IPv4PID>0))
-	{
-		v_secure_system("kill -9 %d",IPv4PID);
-		CcspTraceInfo(("%s:killed IPv4PID:%d,IPv4Enable:%d\n",__FUNCTION__,IPv4PID,IPv4Enable));
-		IPv4PID=-1;
-		latency_measure_disabled=1;
-	}
-	
-	if((IPv6Enable==false)&&(IPV6PID>0))
-	{
-		v_secure_system("kill -9 %d",IPV6PID);
-		CcspTraceInfo(("%s:killed IPV6PID:%d,IPv6Enable:%d\n",__FUNCTION__,IPV6PID,IPv6Enable));
-		IPV6PID=-1;
-		latency_measure_disabled=1;
-	}
-	if((LanIpv6_prefix_flag==true)&&(IPV6PID==0))
-	{
-		IPV6PID=-1;
-		LanIpv6_prefix_flag=false;
-	}
-	if((Lan_prefix_flag==true)&&(IPv4PID==0))
-	{
-		IPv4PID=-1;
-		Lan_prefix_flag=false;
-	}
-	if (latency_measure_disabled == 1 )
-	{
-		if((IPv4Enable == false) && (IPv6Enable == false) )
-		{
-			v_secure_system("killall xNetDP");
-		}
-	}
+	ensure_xnet_sniffer_service(&sniffer_config);
+
+	pthread_mutex_lock(&xnet_service_lock);
+	sniffer_active = g_xnet_sniffer_service.active;
+	pthread_mutex_unlock(&xnet_service_lock);
+
+	IPv4PID = (sniffer_active && (sniffer_config.ipv4_prefix[0] != '\0')) ? getpid() : -1;
+	IPV6PID = (sniffer_active && (sniffer_config.ipv6_prefix[0] != '\0')) ? getpid() : -1;
+	CcspTraceInfo(("%s: embedded xNetSniffer active:%d IPv4PID:%d IPV6PID:%d DP_PID:%d\n", __FUNCTION__, sniffer_active, IPv4PID, IPV6PID, DP_PID));
 	reportInterval_prev=ReportInterval;
 
 }
@@ -424,56 +430,18 @@ stop the service
 **************************************************************************************************/
 void Stop_LatencyMeasurement_Services(Lm_ServiceType LM_Service)
 {
-	char ServicePID[BUF_SIZE]={0};
-	char* token;
-	char* rest = ServicePID;
 	CcspTraceInfo(("entry %s LM_Service:%d:\n", __FUNCTION__,LM_Service));
 	if(LM_Service==LM_DP_SERVICE)
 	{
-		/**************check DP_SERVICE service is runnig or not if it is running stop the service ****/
-		if(CheckLatencyMeasurementServiceStatus(DP_SERVICE,ServicePID)==SERVICE_ACTIVE)
-		{
-			if(DP_PID==atoi(ServicePID))
-			{
-				CcspTraceInfo(("%s: xNetDP service active\n", __FUNCTION__));
-				v_secure_system("kill -9 %s",ServicePID);
-				CcspTraceInfo(("%s: xNetDP service is stopped PID :%s\n", __FUNCTION__,ServicePID));
-			}
-		}
-		else
-		{
-			CcspTraceInfo(("%s: xNetDP service not running\n", __FUNCTION__));
-		}
+		DP_PID=-1;
+		CcspTraceInfo(("%s: embedded xNetDP logical state set inactive\n", __FUNCTION__));
 	}
 	else //LM_IPV4_SNIFFER_SERVICE,  LM_IPV6_SNIFFER_SERVICE
 	{
-		/**************check xNetSniffer service is runnig or not if it is running stop the service ****/
-		if(CheckLatencyMeasurementServiceStatus(SNIFFER_SERVICE,ServicePID)==SERVICE_ACTIVE)
-		{
-			CcspTraceInfo(("%s: xNetSniffer service active :\n", __FUNCTION__));
-			while ((token = strtok_r(rest, " ", &rest))){
-				if(LM_Service==LM_IPV4_SNIFFER_SERVICE)
-				{
-					if(IPv4PID==atoi(token)){
-						v_secure_system("kill -9 %s",token);
-						IPv4PID=-1;
-						CcspTraceInfo(("%s: xNetSniffer service is stopped PID:%s IPv4PID:%d\n", __FUNCTION__,token,IPv4PID));
-					}
-				}
-				else if(LM_Service==LM_IPV6_SNIFFER_SERVICE)
-				{
-					if(IPV6PID==atoi(token)){
-						v_secure_system("kill -9 %s",token);
-						IPV6PID=-1;
-						CcspTraceInfo(("%s: xNetSniffer service is stopped PID:%s IPv4PID:%d\n", __FUNCTION__,token,IPv4PID));
-					}
-				}
-			}
-		}
-		else
-		{
-			CcspTraceInfo(("%s: xNetSniffer service not running\n", __FUNCTION__));
-		}
+		stop_xnet_sniffer_service();
+		IPv4PID=-1;
+		IPV6PID=-1;
+		CcspTraceInfo(("%s: embedded xNetSniffer service stopped\n", __FUNCTION__));
 	}
 }
 /***********************************************************************************
@@ -481,9 +449,8 @@ void Stop_LatencyMeasurement_Services(Lm_ServiceType LM_Service)
 ***********************************************************************************/
 void Stop_all_LatencyMeasurement_Services()
 {
-	Stop_LatencyMeasurement_Services(LM_DP_SERVICE);
 	Stop_LatencyMeasurement_Services(LM_IPV4_SNIFFER_SERVICE);
-	Stop_LatencyMeasurement_Services(LM_IPV6_SNIFFER_SERVICE);
+	Stop_LatencyMeasurement_Services(LM_DP_SERVICE);
 }
 /**********************************************************************
     prototype
@@ -499,36 +466,38 @@ void Stop_all_LatencyMeasurement_Services()
 **********************************************************************/
 int CheckLatencyMeasurementServiceStatus(int Service_Type,char *Pidbuf)
 {
-    char buf[BUF_SIZE] = {0};
-    FILE *fp;
-    if(Service_Type==SNIFFER_SERVICE){
-    	fp = v_secure_popen("r",SNIFFER_CMD);
-	}
-	else //if(Service_Type==DP_SERVICE)
+	bool active = false;
+
+	if (Pidbuf != NULL)
 	{
-		fp = v_secure_popen("r",DP_CMD);
+		Pidbuf[0] = '\0';
 	}
-    if ( fp == 0 )
-    {
-        CcspTraceInfo(("%s: Not able to read cmd\n", __FUNCTION__));
-    }
-    else
-    {
-        copy_command_output(fp, buf, sizeof(buf));
-        v_secure_pclose(fp);
-    }
-    strcpy(Pidbuf,buf);
+
+	pthread_mutex_lock(&xnet_service_lock);
+	if(Service_Type==SNIFFER_SERVICE)
+	{
+	    active = g_xnet_sniffer_service.active;
+	}
+	else
+	{
+		active = g_xnet_dp_service.active && (DP_PID > 0);
+	}
+	pthread_mutex_unlock(&xnet_service_lock);
+
+	if (active && (Pidbuf != NULL))
+	{
+		if ((Service_Type == SNIFFER_SERVICE) && (IPv4PID > 0) && (IPV6PID > 0))
+		{
+			snprintf(Pidbuf, BUF_SIZE, "%d %d", (int)getpid(), (int)getpid());
+		}
+		else
+		{
+			snprintf(Pidbuf, BUF_SIZE, "%d", (int)getpid());
+		}
+	}
+
 	CcspTraceInfo(("PID's :%s \n",Pidbuf));
-    if(buf[0] != '\0')
-    {
-        CcspTraceInfo(("%s: %s is RUNNING!\n", __FUNCTION__,buf));
-        return 1;
-    }
-    else
-    {
-        CcspTraceInfo(("%s: %s is NOT RUNNING!\n", __FUNCTION__,buf));
-        return 0;
-    }
+	return active ? SERVICE_ACTIVE : SERVICE_NOT_ACTIVE;
 }
 
 void copy_command_output(FILE *fp, char * buf, int len)

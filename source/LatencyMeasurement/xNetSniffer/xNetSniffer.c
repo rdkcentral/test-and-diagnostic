@@ -41,6 +41,9 @@ Licensed under a BSD-3 style license reproduced in LICENSE
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <errno.h>
+#include <signal.h>
+
+#include "xNetSniffer.h"
 
 
 // C Program for Message Queue (Writer Process)
@@ -69,15 +72,16 @@ struct mesg_buffer {
     u_int   ip_type; 
     u_short th_dport;
 
-} message;
+};
   /*
   struct mesg_buffer {
     long mesg_type;
     char mesg_text[100];
 } message;*/
-   key_t key;
-    int msgid;
-int ack_req = TRUE;
+static struct mesg_buffer message;
+static key_t key;
+static int msgid;
+static int ack_req = TRUE;
 
 
 enum ip_family
@@ -160,9 +164,9 @@ struct sniff_tcp {
         u_short th_urp;                 /* urgent pointer */
 };
 
-
+#ifndef XNET_EMBEDDED_BUILD
 /* Command line options. */
-struct option longopts[] =
+static struct option longopts[] =
 {
   { "PhysicalInterfaceName",required_argument,       NULL, 'i'},
   { "IPFamily",             required_argument,       NULL, 'f'},
@@ -172,10 +176,11 @@ struct option longopts[] =
   { "help",                 no_argument,       NULL, 'h'},
   { 0 }
 };
+#endif /* XNET_EMBEDDED_BUILD */
 
 #define MAX_LOG_BUFF_SIZE 2048
-FILE *logFp = NULL;
-char log_buff[MAX_LOG_BUFF_SIZE] ;
+static FILE *logFp = NULL;
+static char log_buff[MAX_LOG_BUFF_SIZE] ;
 #define VALIDATION_SUCCESS 0
 #define VALIDATION_FAILED  -1
 #define INTERFACE_NOT_EXIST -1
@@ -186,11 +191,13 @@ typedef struct Params
   bool dbg_mode;  
   char interface_name[32];
   char log_file[64];
-  char lan_prefix[128];
-  char family[8];
+    char ipv4_prefix[128];
+    char ipv6_prefix[128];
 }Param;
 
-Param data;
+static Param data;
+static volatile sig_atomic_t g_xnet_sniffer_stop = 0;
+static pcap_t *g_xnet_sniffer_handle = NULL;
 #define dbg_log(fmt ...)    {\
                             if (data.dbg_mode){\
                             snprintf(log_buff, MAX_LOG_BUFF_SIZE-1,fmt);\
@@ -506,6 +513,7 @@ got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
     return;
 }
 
+#ifndef XNET_EMBEDDED_BUILD
 /* Help information display. */
 static void
 usage (char *progname, int status)
@@ -527,6 +535,7 @@ usage (char *progname, int status)
 
   exit (status);
 }
+#endif /* XNET_EMBEDDED_BUILD */
 // Function to check if interface is created
 int checkIfExists(char* iface_name)
 {
@@ -551,90 +560,55 @@ int checkIfExists(char* iface_name)
     return INTERFACE_EXIST;
 }
 
-int validateParams()
+static int validateParams()
 {
     if ( strlen(data.interface_name) == 0 || INTERFACE_NOT_EXIST == checkIfExists(data.interface_name))
     {
         printf("Interface validation failed\n");
         return VALIDATION_FAILED;
     }
-        if ( strlen(data.lan_prefix) == 0 )
+        if ((strlen(data.ipv4_prefix) == 0) && (strlen(data.ipv6_prefix) == 0))
     {
-        printf("Lan Prefix validation failed\n");
-        return VALIDATION_FAILED;
-    }
-
-    if ( (strcmp(data.family,"IPv4") != 0) && (strcmp(data.family,"IPv6") != 0 ) )
-    {
-        printf("Ip family validation failed\n");
+                printf("Lan Prefix validation failed\n");
         return VALIDATION_FAILED;
     }
 
     return VALIDATION_SUCCESS;
 }
 
-int main(int argc, char **argv)
+static int build_filter_expression(char *filter_exp, size_t filter_len)
 {
-    char errbuf[PCAP_ERRBUF_SIZE];      /* error buffer */
-    pcap_t *handle;             /* packet capture handle */
-    char filter_exp[256]; 
-    //char filter_exp[] = ""; 
-    //char filter_exp[] = "tcp[tcpflags] & (tcp-syn|tcp-ack) != 0";       /* filter expression [2] and [18] */
-    struct bpf_program fp;          /* compiled filter program (expression) */
-    bpf_u_int32 mask;           /* subnet mask */
-    bpf_u_int32 net;            /* ip */
-    int num_packets = 0;            /* number of packets to capture */
-
-   // print_app_banner();
-
-  char *progname;
-  char *p;
-
-  progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
-
-  if(argc == 1 )
-    usage (progname, 1);
-  int opt;
-  memset(&data,0,sizeof(Param));
-
-    while (1)
+        if ((strlen(data.ipv4_prefix) > 0) && (strlen(data.ipv6_prefix) > 0))
     {
-      opt = getopt_long (argc, argv, "Dhi:f:F:p:", longopts, 0);
-
-      if (opt == EOF)
-      {
-            break;
-      }
-      switch (opt)
-      {
-            case 'i':
-              strncpy(data.interface_name,optarg,sizeof(data.interface_name)-1);
-              break;
-            case 'D':
-              data.dbg_mode = TRUE;
-              break;
-            case 'f':
-              //data.family = optarg;
-              strncpy(data.family,optarg,sizeof(data.family)-1);
-              break;
-            case 'F':
-             // data.log_file = optarg;
-              strncpy(data.log_file,optarg,sizeof(data.log_file)-1);
-              logFp = fopen(data.log_file,"w+");
-              break;
-            case 'p':
-             // data.log_file = optarg;
-              strncpy(data.lan_prefix,optarg,sizeof(data.lan_prefix)-1);
-              break;
-            case 'h':
-              usage (progname, 0);
-              break;
-            default:
-              usage (progname, 1);
-              break;  
-        }
+                return snprintf(filter_exp, filter_len,
+                        "((tcp[tcpflags] & (tcp-syn|tcp-ack) != 0) and net %s) or ((ip6[6] = 6) and (ip6[53] & 0x12 != 0) and net %s)",
+                        data.ipv4_prefix,
+                        data.ipv6_prefix);
     }
-    printf("data.dbg_mode is %d\n",data.dbg_mode);
+
+        if (strlen(data.ipv4_prefix) > 0)
+        {
+                return snprintf(filter_exp, filter_len,
+                        "tcp[tcpflags] & (tcp-syn|tcp-ack) != 0 and net %s",
+                        data.ipv4_prefix);
+        }
+
+        return snprintf(filter_exp, filter_len,
+                "(ip6[6] = 6) and (ip6[53] & 0x12 != 0) and net %s",
+                data.ipv6_prefix);
+}
+
+static int run_xnet_sniffer(void)
+{
+        char errbuf[PCAP_ERRBUF_SIZE];
+        pcap_t *handle;             /* packet capture handle */
+        char filter_exp[256];
+        struct bpf_program fp;
+        bpf_u_int32 mask;
+        bpf_u_int32 net;
+        int num_packets = -1;
+        int result = EXIT_SUCCESS;
+
     if ( VALIDATION_SUCCESS == validateParams() )
     {
         dbg_log("Arg validation success\n");
@@ -646,19 +620,10 @@ int main(int argc, char **argv)
 
     }
     memset(filter_exp,0,sizeof(filter_exp));
-    if(strcmp(data.family,"IPv4") == 0)
+    if (build_filter_expression(filter_exp, sizeof(filter_exp)) <= 0)
     {
-        if (strlen(data.lan_prefix) != 0 )
-            snprintf(filter_exp,sizeof(filter_exp),"tcp[tcpflags] & (tcp-syn|tcp-ack) != 0 and net %s",data.lan_prefix);
-        else
-            snprintf(filter_exp,sizeof(filter_exp),"tcp[tcpflags] & (tcp-syn|tcp-ack) != 0");
-    }
-    else if(strcmp(data.family,"IPv6") == 0)
-    {
-        if (strlen(data.lan_prefix) != 0 )
-            snprintf(filter_exp,sizeof(filter_exp),"(ip6[6] = 6) and (ip6[53] & 0x12 != 0) and net %s",data.lan_prefix);
-        else
-            snprintf(filter_exp,sizeof(filter_exp),"(ip6[6] = 6) and (ip6[53] & 0x12 != 0)");
+        dbg_log("Failed to build filter expression\n");
+        return EXIT_FAILURE;
     }
 
     /* get network number and mask associated with capture device */
@@ -681,8 +646,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "Couldn't open device %s: %s\n", data.interface_name, errbuf);
                 dbg_log("Couldn't open device %s: %s\n", data.interface_name, errbuf);
 
-        exit(EXIT_FAILURE);
+                return EXIT_FAILURE;
     }
+            g_xnet_sniffer_handle = handle;
      //printf("Timestamp type = %d\n",pcap_set_tstamp_type(handle, PCAP_TSTAMP_ADAPTER));
 
     /* make sure we're capturing on an Ethernet device [2] */
@@ -690,7 +656,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "%s is not an Ethernet\n", data.interface_name);
                 dbg_log("%s is not an Ethernet\n", data.interface_name);
 
-        exit(EXIT_FAILURE);
+                result = EXIT_FAILURE;
+                goto cleanup;
     }
 
     /* compile the filter expression */
@@ -700,7 +667,8 @@ int main(int argc, char **argv)
 
         dbg_log("Couldn't parse filter %s: %s\n",
             filter_exp, pcap_geterr(handle));
-        exit(EXIT_FAILURE);
+        result = EXIT_FAILURE;
+        goto cleanup;
     }
 
     /* apply the compiled filter */
@@ -710,7 +678,8 @@ int main(int argc, char **argv)
 
         dbg_log("Couldn't install filter %s: %s\n",
             filter_exp, pcap_geterr(handle));
-        exit(EXIT_FAILURE);
+        result = EXIT_FAILURE;
+        goto cleanup;
     }
 
     // ftok to generate unique key
@@ -721,11 +690,33 @@ int main(int argc, char **argv)
     msgid = msgget(key, 0666 | IPC_CREAT);
 
     /* now we can set our callback function */
-    pcap_loop(handle, num_packets, got_packet, NULL);
+    while (!g_xnet_sniffer_stop)
+    {
+        int dispatch_rc = pcap_dispatch(handle, num_packets, got_packet, NULL);
+
+        if (dispatch_rc == 0)
+        {
+            continue;
+        }
+
+        if (dispatch_rc == -2 && g_xnet_sniffer_stop)
+        {
+            break;
+        }
+
+        if (dispatch_rc < 0)
+        {
+            dbg_log("pcap_dispatch failed: %s\n", pcap_geterr(handle));
+            result = EXIT_FAILURE;
+            break;
+        }
+    }
 
     /* cleanup */
+cleanup:
     pcap_freecode(&fp);
     pcap_close(handle);
+    g_xnet_sniffer_handle = NULL;
 
     if (logFp != NULL)
     {
@@ -733,5 +724,104 @@ int main(int argc, char **argv)
         logFp=NULL;
     }
     dbg_log("\nCapture complete.\n");
-    return 0;
+    return result;
 }
+
+int xNetSniffer_Run(const xNetSnifferConfig *config)
+{
+    memset(&data, 0, sizeof(data));
+    g_xnet_sniffer_stop = 0;
+
+    if (config != NULL)
+    {
+        data.dbg_mode = config->dbg_mode;
+        strncpy(data.interface_name, config->interface_name, sizeof(data.interface_name) - 1);
+        strncpy(data.log_file, config->log_file, sizeof(data.log_file) - 1);
+        strncpy(data.ipv4_prefix, config->ipv4_prefix, sizeof(data.ipv4_prefix) - 1);
+        strncpy(data.ipv6_prefix, config->ipv6_prefix, sizeof(data.ipv6_prefix) - 1);
+
+        if (data.log_file[0] != '\0')
+        {
+            logFp = fopen(data.log_file, "w+");
+        }
+    }
+
+    return run_xnet_sniffer();
+}
+
+void xNetSniffer_RequestStop(void)
+{
+    g_xnet_sniffer_stop = 1;
+
+    if (g_xnet_sniffer_handle != NULL)
+    {
+        pcap_breakloop(g_xnet_sniffer_handle);
+    }
+}
+
+#ifndef XNET_EMBEDDED_BUILD
+int main(int argc, char **argv)
+{
+    char *progname;
+    char *p;
+    char family[8] = {0};
+    char lan_prefix[128] = {0};
+    int opt;
+
+    progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
+
+    if(argc == 1 )
+        usage (progname, 1);
+
+    memset(&data,0,sizeof(Param));
+    optind = 1;
+
+    while (1)
+    {
+        opt = getopt_long (argc, argv, "Dhi:f:F:p:", longopts, 0);
+
+        if (opt == EOF)
+        {
+            break;
+        }
+        switch (opt)
+        {
+            case 'i':
+                strncpy(data.interface_name,optarg,sizeof(data.interface_name)-1);
+                break;
+            case 'D':
+                data.dbg_mode = TRUE;
+                break;
+            case 'f':
+                strncpy(family,optarg,sizeof(family)-1);
+                break;
+            case 'F':
+                strncpy(data.log_file,optarg,sizeof(data.log_file)-1);
+                logFp = fopen(data.log_file,"w+");
+                break;
+            case 'p':
+                strncpy(lan_prefix,optarg,sizeof(lan_prefix)-1);
+                break;
+            case 'h':
+                usage (progname, 0);
+                break;
+            default:
+                usage (progname, 1);
+                break;
+        }
+    }
+
+    if (strcmp(family, "IPv4") == 0)
+    {
+        strncpy(data.ipv4_prefix, lan_prefix, sizeof(data.ipv4_prefix) - 1);
+    }
+    else if (strcmp(family, "IPv6") == 0)
+    {
+        strncpy(data.ipv6_prefix, lan_prefix, sizeof(data.ipv6_prefix) - 1);
+    }
+
+    printf("data.dbg_mode is %d\n",data.dbg_mode);
+    g_xnet_sniffer_stop = 0;
+    return run_xnet_sniffer();
+}
+#endif

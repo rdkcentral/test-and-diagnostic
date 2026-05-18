@@ -21,11 +21,16 @@ noinst_LTLIBRARIES = libCcspTandDSsp_ServiceMonitor.la
 
 libCcspTandDSsp_ServiceMonitor_la_CPPFLAGS = -I$(top_srcdir)/source/LatencyMeasurement/ServiceMonitor/include \
                                              -I$(top_srcdir)/source/LatencyMeasurement/TR-181 \
+                                             -I$(top_srcdir)/source/LatencyMeasurement/xNetDP \
+                                             -I$(top_srcdir)/source/LatencyMeasurement/xNetSniffer \
+                                             -DXNET_EMBEDDED_BUILD \
                                              -I${PKG_CONFIG_SYSROOT_DIR}$(includedir)/rbus
 
-libCcspTandDSsp_ServiceMonitor_la_SOURCES = ServiceMonitor.c
+libCcspTandDSsp_ServiceMonitor_la_SOURCES = ServiceMonitor.c \
+                                            $(top_srcdir)/source/LatencyMeasurement/xNetDP/xNetDP.c \
+                                            $(top_srcdir)/source/LatencyMeasurement/xNetSniffer/xNetSniffer.c
 
-libCcspTandDSsp_ServiceMonitor_la_LDFLAGS = -lsysevent -lsyscfg -lsecure_wrapper -lpthread 
+libCcspTandDSsp_ServiceMonitor_la_LDFLAGS = -lsysevent -lsyscfg -lsecure_wrapper -lpthread -lpcap -lm
 
 libCcspTandDSsp_ServiceMonitor_DEPENDENCIES = ${top_builddir}/source/LatencyMeasurement/TR-181/libLowLatency.la
 

@@ -41,8 +41,10 @@
 #include <net/if.h>
 #include <errno.h>
 #include <math.h>
+#include <signal.h>
 #include <rbus/rbus.h>
 #include "syscfg/syscfg.h"
+#include "xNetDP.h"
 #define ADD_MAX_SAMPLE 10
 #define MAX_SAMPLE 50
 #define MIN_SAMPLE 10
@@ -53,23 +55,23 @@
 #define MAX_MAC_ADDRESSES 3
 #define MAC_ADDRESS_LEN 18
 #define PRIORITY_MACS_LOG_FILE "/rdklogs/logs/LatencyLog.txt"
-FILE *priorityMacsLogFp = NULL;
-char g_cMacAddresses[MAX_MAC_ADDRESSES][MAC_ADDRESS_LEN];
-int g_iPriorityMacCount = 0;
+static FILE *priorityMacsLogFp = NULL;
+static char g_cMacAddresses[MAX_MAC_ADDRESSES][MAC_ADDRESS_LEN];
+static int g_iPriorityMacCount = 0;
 
 typedef struct
 {
     bool  bIsPriorityMacsUpdated;
     bool  bIsPriorityMacsReplaced;
 }priorityMacUpdateStatus;
-priorityMacUpdateStatus sPriorityMacUpdateStatus = {false,false};
+static priorityMacUpdateStatus sPriorityMacUpdateStatus = {false,false};
 
 typedef struct
 {
    bool loggedOnceIPv4;
    bool loggedOnceIPv6;
 }loggedOnceStatus;
-loggedOnceStatus sLoggedOnceStatus = {false,false};
+static loggedOnceStatus sLoggedOnceStatus = {false,false};
 
 #define swap(T, x, y) \
     {                 \
@@ -79,7 +81,7 @@ loggedOnceStatus sLoggedOnceStatus = {false,false};
     }
 static rbusHandle_t bus_handle_rbus = NULL;
 
-pthread_mutex_t latency_report_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t latency_report_lock = PTHREAD_MUTEX_INITIALIZER;
 //#define LATENCY_REPORT_FILE "/tmp/LatencyReport.txt"
 #define SYN 0x2 //1
 #define SYN_ACK 0x12 //18
@@ -153,10 +155,10 @@ typedef enum{
     WAN_PERCENTILE
 }percentleType;
 
-msg message;
-u_int g_HashCount = 0;
-u_int gHashLatTabIpv4MacCount = 0;//Hash Latency table IPv4 mac count
-u_int gHashLatTabIpv6MacCount = 0;//Hash Latency table IPv6 mac count
+static msg message;
+static u_int g_HashCount = 0;
+static u_int gHashLatTabIpv4MacCount = 0;//Hash Latency table IPv4 mac count
+static u_int gHashLatTabIpv6MacCount = 0;//Hash Latency table IPv6 mac count
 //msg PcktHashTable[SIZE];
   
 // structure for message queue
@@ -172,13 +174,11 @@ struct DataItem {
    int key;
 };*/
 
-TcpSniffer hashArray[SIZE]; 
-msg dummyItem;
-msg item;
+static TcpSniffer hashArray[SIZE]; 
 
-
+#ifndef XNET_EMBEDDED_BUILD
 /* Command line options. */
-struct option longopts[] =
+static struct option longopts[] =
 {
   { "Report Type",                          required_argument,       NULL, 't'},
   { "Report Interval",                      required_argument,       NULL, 'i'},
@@ -191,15 +191,16 @@ struct option longopts[] =
   { "help",                                 no_argument,             NULL, 'h'},
   { 0 }
 };
+#endif /* XNET_EMBEDDED_BUILD */
 
 #define MAX_LOG_BUFF_SIZE 2048
 
 //Enable ENABLE_95th_PERCENTILE macro to calculate 95th percentile
 //#define ENABLE_95th_PERCENTILE
 
-FILE *logFp = NULL;
-char log_buff[MAX_LOG_BUFF_SIZE], time_buff[64];
-char cPriorityLogBuff[MAX_LOG_BUFF_SIZE];
+static FILE *logFp = NULL;
+static char log_buff[MAX_LOG_BUFF_SIZE], time_buff[64];
+static char cPriorityLogBuff[MAX_LOG_BUFF_SIZE];
 #define VALIDATION_SUCCESS 0
 #define VALIDATION_FAILED  -1
 
@@ -256,7 +257,9 @@ typedef struct Params
   char log_file[64];
 }Param;
 
-Param args;
+static Param args;
+static volatile sig_atomic_t g_xnet_dp_stop = 0;
+static int g_xnet_dp_msgid = -1;
 
 #define MAX_PORTS 32
 typedef struct LatencyTable
@@ -292,12 +295,12 @@ typedef struct LatencyTable
 
 #define MAX_NUM_OF_CLIENTS 50
 
-LatencyTable Ipv4HashLatencyTable[MAX_NUM_OF_CLIENTS];
-LatencyTable Ipv6HashLatencyTable[MAX_NUM_OF_CLIENTS];
+static LatencyTable Ipv4HashLatencyTable[MAX_NUM_OF_CLIENTS];
+static LatencyTable Ipv6HashLatencyTable[MAX_NUM_OF_CLIENTS];
 
 #define FILTER_BUF_SIZE 128
 #define PERCENTILE_CALCULATION_ENABLE 		"LatencyMeasure_PercentileCalc_Enable"
-bool PercentileCalculationEnable=0;
+static bool PercentileCalculationEnable=0;
 
 #ifdef ENABLE_95th_PERCENTILE
 #define PERCENTILE_VALUE 95
@@ -1102,13 +1105,18 @@ void* LatencyReportThread(void* arg)
     dbg_log("Inside the LatencyReportThread\n");
     FILE *fp = NULL;
     //fp = fopen("LatencyReport.txt", "w+");
-    while(1)
+    while(!g_xnet_dp_stop)
     {
         memset(report_buf,0,MAX_REPORT_SIZE);
         memset(tmp_report_buf,0,MAX_REPORT_SIZE);
         num_of_ipv4_clients=0, num_of_ipv6_clients =0;
         dbg_log("args.report_interval is %d\n",args.report_interval);
         sleep(args.report_interval);
+
+        if (g_xnet_dp_stop)
+        {
+            break;
+        }
         // display();
         // Reset flag to allow priority MAC replacement on next full table
         sPriorityMacUpdateStatus.bIsPriorityMacsReplaced = false;
@@ -1320,9 +1328,14 @@ void* LatencyReportThreadPerSession(void* arg)
     FILE *fp;
     //fp = fopen("LatencyReport.txt", "w+");
 
-    while(1)
+    while(!g_xnet_dp_stop)
     {
         sleep(5);
+
+        if (g_xnet_dp_stop)
+        {
+            break;
+        }
         //fp = fopen("LatencyReport.txt", "a+");
         //if(fp != NULL)
         {
@@ -1396,6 +1409,7 @@ void* LatencyReportThreadPerSession(void* arg)
     }
     // exit the current thread
     //pthread_exit(NULL);
+    return NULL;
 }
 #endif
 
@@ -1408,9 +1422,14 @@ void* ClearHashThread(void* arg)
     pthread_detach(pthread_self());
   
     dbg_log("Inside the ClearHashThread\n");
-            while(1)
+            while(!g_xnet_dp_stop)
             {
                 sleep(7);
+
+                if (g_xnet_dp_stop)
+                {
+                    break;
+                }
                 while(i < SIZE)
                 {
                     //struct timeval te; 
@@ -1442,9 +1461,11 @@ void* ClearHashThread(void* arg)
             }
     
     //fp = 
+    return NULL;
 
 }
 
+#ifndef XNET_EMBEDDED_BUILD
 /* Help information display. */
 static void
 usage (char *progname, int status)
@@ -1469,6 +1490,7 @@ usage (char *progname, int status)
     }
   exit (status);
 }
+#endif /* XNET_EMBEDDED_BUILD */
 int validateParams()
 {
     if ( REP_TYPE_FILE != args.report_type &&  REP_TYPE_T2 != args.report_type )
@@ -1666,7 +1688,7 @@ void* retry_subscription_thread(void *arg)
     unsigned int uiRetryTime=0;
 
     // Retry subscription loop for up to 10 minutes
-    while(uiRetryTime <= MAX_RETRY_TIME)
+    while((uiRetryTime <= MAX_RETRY_TIME) && !g_xnet_dp_stop)
     {
         if(handle_rbusSubscribe() == true)
         {
@@ -1690,67 +1712,8 @@ void* retry_subscription_thread(void *arg)
 }
 /* subscribe changes  */
 
-int main(int argc,char **argv)
+static int run_xnet_dp(char *progname)
 {
-
-      char *progname;
-  char *p;
- 
-  progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
-
-  if(argc == 1 )
-    usage (progname, 1);
-
-  int opt;
-  memset(&args,0,sizeof(Param));
-  memset(&Ipv4HashLatencyTable,0,sizeof(LatencyTable) * MAX_NUM_OF_CLIENTS);
-  memset(&Ipv6HashLatencyTable,0,sizeof(LatencyTable) * MAX_NUM_OF_CLIENTS);
-
-    while (1)
-    {
-      opt = getopt_long (argc, argv, "apDhvi:t:s:n:F:", longopts, 0);
-
-      if (opt == EOF)
-      {
-            break;
-      }
-        switch (opt)
-        {
-            case 'i':
-              args.report_interval = atoi(optarg);
-              break;
-            case 't':
-              args.report_type = atoi(optarg);
-              break;
-            case 'n':
-              strncpy(args.report_name,optarg,sizeof(args.report_name)-1);
-              break;
-            case 'D':
-              args.dbg_mode = true;
-              break;
-            case 'v':
-              args.verbose_mode = true;
-              break;
-           /* case 'a':
-              args.aggregated_data = true;
-              break;
-            case 'p':
-              args.aggregated_data_per_port = true;
-              break; */
-            case 'F':
-             // data.log_file = optarg;
-              strncpy(args.log_file,optarg,sizeof(args.log_file)-1);
-              logFp = fopen(args.log_file,"w+");
-              break;
-            case 'h':
-              usage (progname, 0);
-              break;
-            default:
-              usage (progname, 1);
-              break;  
-        }
-    }
-
     if ( VALIDATION_SUCCESS == validateParams() )
     {
         dbg_log("Arg validation success\n");
@@ -1769,8 +1732,6 @@ int main(int argc,char **argv)
         }
     }
 
-    key_t key;
-    int msgid;
     pthread_t ptid;
     pthread_t ptid1;
 
@@ -1805,19 +1766,38 @@ int main(int argc,char **argv)
 
     memset(hashArray,0,sizeof(TcpSniffer)*SIZE);
     // ftok to generate unique key
-    key = ftok("progfile", 65);
+    key_t key = ftok("progfile", 65);
   
     // msgget creates a message queue
     // and returns identifier
-    msgid = msgget(key, 0666 | IPC_CREAT);
+    g_xnet_dp_msgid = msgget(key, 0666 | IPC_CREAT);
     //if((msgid = msgget(12345, 0666 | IPC_CREAT)) == -1)
     //perror( "server: Failed to create message queue:" );
 
     PercentileCalculationEnable=isLowLatency_PercentileCalculationEnable();
     // msgrcv to receive message
     //msgrcv(msgid, &message, sizeof(message), 1, 0);
-    while(msgrcv(msgid, &message, sizeof(message) - sizeof(message.mesg_type), 1, 0) > 0)
+    while(!g_xnet_dp_stop)
     {
+    ssize_t msgrcv_rc = msgrcv(g_xnet_dp_msgid, &message, sizeof(message) - sizeof(message.mesg_type), 1, IPC_NOWAIT);
+
+    if (msgrcv_rc < 0)
+    {
+        if (errno == ENOMSG)
+        {
+            usleep(200000);
+            continue;
+        }
+
+        if (errno == EINTR)
+        {
+            continue;
+        }
+
+        dbg_log("msgrcv failed errno=%d\n", errno);
+        break;
+    }
+
   //perror( "server: Failed to create message queue:" );
     // display the message
    // printf("Data Received is : %s \n", message.mesg_text);
@@ -1885,7 +1865,11 @@ int main(int argc,char **argv)
     }
   
     // to destroy the message queue
-    msgctl(msgid, IPC_RMID, NULL);
+    if (g_xnet_dp_msgid >= 0)
+    {
+        msgctl(g_xnet_dp_msgid, IPC_RMID, NULL);
+        g_xnet_dp_msgid = -1;
+    }
     rbus_close(bus_handle_rbus);
 
     if (logFp != NULL)
@@ -1895,3 +1879,106 @@ int main(int argc,char **argv)
     }  
     return 0;
 }
+
+void xNetDP_UpdateConfig(const xNetDPConfig *config)
+{
+    if (config == NULL)
+    {
+        return;
+    }
+
+    args.dbg_mode = config->dbg_mode;
+    args.verbose_mode = config->verbose_mode;
+    args.report_type = config->report_type;
+    args.report_interval = config->report_interval;
+    strncpy(args.report_name, config->report_name, sizeof(args.report_name) - 1);
+
+    if ((config->log_file[0] != '\0') && (strncmp(args.log_file, config->log_file, sizeof(args.log_file)) != 0))
+    {
+        strncpy(args.log_file, config->log_file, sizeof(args.log_file) - 1);
+
+        if (logFp != NULL)
+        {
+            fclose(logFp);
+            logFp = NULL;
+        }
+
+        logFp = fopen(args.log_file, "w+");
+    }
+}
+
+int xNetDP_Run(const xNetDPConfig *config)
+{
+    memset(&args,0,sizeof(Param));
+    memset(&Ipv4HashLatencyTable,0,sizeof(LatencyTable) * MAX_NUM_OF_CLIENTS);
+    memset(&Ipv6HashLatencyTable,0,sizeof(LatencyTable) * MAX_NUM_OF_CLIENTS);
+    memset(hashArray,0,sizeof(TcpSniffer)*SIZE);
+    g_xnet_dp_stop = 0;
+    xNetDP_UpdateConfig(config);
+    return run_xnet_dp("xNetDP");
+}
+
+void xNetDP_RequestStop(void)
+{
+    g_xnet_dp_stop = 1;
+}
+
+#ifndef XNET_EMBEDDED_BUILD
+int main(int argc,char **argv)
+{
+    char *progname;
+    char *p;
+    int opt;
+
+    progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
+
+    if(argc == 1 )
+        usage (progname, 1);
+
+    memset(&args,0,sizeof(Param));
+    memset(&Ipv4HashLatencyTable,0,sizeof(LatencyTable) * MAX_NUM_OF_CLIENTS);
+    memset(&Ipv6HashLatencyTable,0,sizeof(LatencyTable) * MAX_NUM_OF_CLIENTS);
+    g_xnet_dp_stop = 0;
+    optind = 1;
+
+    while (1)
+    {
+        opt = getopt_long (argc, argv, "apDhvi:t:s:n:F:", longopts, 0);
+
+        if (opt == EOF)
+        {
+            break;
+        }
+        switch (opt)
+        {
+            case 'i':
+                args.report_interval = atoi(optarg);
+                break;
+            case 't':
+                args.report_type = atoi(optarg);
+                break;
+            case 'n':
+                strncpy(args.report_name,optarg,sizeof(args.report_name)-1);
+                break;
+            case 'D':
+                args.dbg_mode = true;
+                break;
+            case 'v':
+                args.verbose_mode = true;
+                break;
+            case 'F':
+                strncpy(args.log_file,optarg,sizeof(args.log_file)-1);
+                logFp = fopen(args.log_file,"w+");
+                break;
+            case 'h':
+                usage (progname, 0);
+                break;
+            default:
+                usage (progname, 1);
+                break;
+        }
+    }
+
+    return run_xnet_dp(progname);
+}
+#endif
