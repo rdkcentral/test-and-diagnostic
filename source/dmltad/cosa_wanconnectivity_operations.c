@@ -2713,6 +2713,13 @@ ANSC_STATUS wancnctvty_chk_monitor_result_update(ULONG InstanceNumber,monitor_re
     BOOL send_publish_event = FALSE;
     pthread_mutex_lock(&gIntfAccessMutex);
     PWANCNCTVTY_CHK_GLOBAL_INTF_INFO gIntfInfo = get_InterfaceList(InstanceNumber);
+    if (!gIntfInfo)
+    {
+        WANCHK_LOG_WARN("Interface with InstanceNumber %ld not found, skipping MonitorResult update\n", InstanceNumber);
+        pthread_mutex_unlock(&gIntfAccessMutex);
+        return ANSC_STATUS_FAILURE;
+    }
+    
     previous_result = gIntfInfo->IPInterface.MonitorResult;
     gIntfInfo->IPInterface.MonitorResult  = result;
     if (previous_result != gIntfInfo->IPInterface.MonitorResult)
