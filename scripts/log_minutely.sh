@@ -18,13 +18,29 @@
 # limitations under the License.
 ##########################################################################
 
-UPTIME=$(cut -d. -f1 /proc/uptime)
+POLL_INTERVAL=$(syscfg get CPUMEMLog_PollInterval)
 
-if [ "$UPTIME" -lt 1800 ]
-then
-    exit 0
+if [ -z "$POLL_INTERVAL" ]; then
+    POLL_INTERVAL=60
 fi
 
-#sh /usr/ccsp/tad/log_mem_cpu_info.sh &
-sh /usr/ccsp/tad/uptime.sh &
+# Validate range: 1 min to 1440 min
+if [ "$POLL_INTERVAL" -lt 1 ] || [ "$POLL_INTERVAL" -gt 1440 ]; then
+    POLL_INTERVAL=60
+fi
 
+CURRENT_HOUR=$(date +%H)
+CURRENT_MIN=$(date +%M)
+
+CURRENT_HOUR=$((10#$CURRENT_HOUR))
+CURRENT_MIN=$((10#$CURRENT_MIN))
+
+TOTAL_MINUTES=$((CURRENT_HOUR * 60 + CURRENT_MIN))
+
+REMAINDER=$((TOTAL_MINUTES % POLL_INTERVAL))
+
+if [ "$REMAINDER" -eq 0 ]; then
+    echo "$(date) : Triggering log_mem_cpu_info.sh with PollInterval=$POLL_INTERVAL minutes" >> /rdklogs/logs/minutely_check.log
+
+    sh /usr/ccsp/tad/log_mem_cpu_info.sh
+fi
