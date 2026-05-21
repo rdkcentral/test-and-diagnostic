@@ -17,15 +17,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
+POLL_INTERVAL=$(syscfg get CPUMEMLog_PollInterval | tr -d '[:space:]')
 
-POLL_INTERVAL=$(syscfg get CPUMEMLog_PollInterval)
-
+# Default if empty
 if [ -z "$POLL_INTERVAL" ]; then
     POLL_INTERVAL=60
 fi
 
+# Ensure numeric only
+case "$POLL_INTERVAL" in
+    ''|*[!0-9]*)
+        echo "$(date) : Invalid PollInterval='$POLL_INTERVAL', resetting to 60" >> /rdklogs/logs/minutely_check.log
+        POLL_INTERVAL=60
+        ;;
+esac
+
 # Validate range: 1 min to 1440 min
 if [ "$POLL_INTERVAL" -lt 1 ] || [ "$POLL_INTERVAL" -gt 1440 ]; then
+    echo "$(date) : PollInterval out of range='$POLL_INTERVAL', resetting to 60" >> /rdklogs/logs/minutely_check.log
     POLL_INTERVAL=60
 fi
 
