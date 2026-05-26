@@ -916,7 +916,7 @@ resetNeeded()
                     advsec_restart_agent
                 fi
 
-            elif [ "$SELFHEAL_TYPE" = "BASE" ] && [ "$ProcessName" = "cujo-qosd" ]; then
+            elif [ "$ProcessName" = "cujo-qosd" ]; then
                 echo_t "RDKB_SELFHEAL : Resetting process $ProcessName"
                 systemctl start cujo-ni
                 t2CountNotify "SYS_SH_CUJO_NI_restart"
