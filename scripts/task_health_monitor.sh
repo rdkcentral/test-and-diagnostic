@@ -1511,6 +1511,15 @@ else
                             ;;
                         esac
                     fi  # [ -f $ADVSEC_PATH ]
+                    # cujo-qosd
+                    NI_ENABLED=$(dmcli eRT retv Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.NetworkIntelligence.Enable)
+                    if [ "$NI_ENABLED" = "true" ]; then
+                        NI_PID=$(pidof cujo-qosd)
+                        if [ "$NI_PID" = "" ] ; then
+                            echo_t "RDKB_PROCESS_CRASHED : cujo-qosd process is not running, need restart"
+                            resetNeeded "" cujo-qosd
+                        fi
+                    fi
                 fi  # [ "$advsec_bridge_mode" != "2" ]
 fi #BWG
 case $SELFHEAL_TYPE in
