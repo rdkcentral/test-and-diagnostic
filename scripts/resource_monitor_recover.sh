@@ -26,12 +26,12 @@ source /etc/device.properties
 source /etc/log_timestamp.sh
 source $UTOPIA_PATH/log_env_var.sh
 source /lib/rdk/t2Shared_api.sh
+source $TAD_PATH/boot_mode.sh
 
 exec 3>&1 4>&2 >>$SELFHEALFILE 2>&1
 
 SELFHEAL_ENABLE=$(syscfg get selfheal_enable)
-CRON_ENABLED=$(syscfg get SelfHealCronEnable)
-if [ "$SELFHEAL_ENABLE" = "true" ] && [ -f /tmp/.resource_monitor_started ] && [ "$CRON_ENABLED" != "true" ]; then
+if [ "$SELFHEAL_ENABLE" = "true" ] && [ -f /tmp/.resource_monitor_started ] && [ "$SELFHEAL_EXECUTION_MODE" != "CRON" ]; then
                 SelfHealScript_PID=$(busybox pidof resource_monitor.sh)
                 if [ -z "$SelfHealScript_PID" ]; then
 		        echo_t "RDKB_PROCESS_CRASHED : resource_monitor.sh is not running, need restart"

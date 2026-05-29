@@ -945,6 +945,9 @@ dumpLogs()
     ifconfig -a  >> /rdklogs/logs/dbg_wan_ip_missing.txt
 }
 
+# Here LANIPv6GUASupport used to identify the region of the device. For example LANIPv6GUASupport is true for EU region devices and false for NA region devices. 
+# Eth WAN failover recovery action is taken only for NA region devices.
+# TODO : LANIPv6GUASupport shouldn't be used here. Need a generic self heal mechanism which is independent of region specific parameters.
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
 eth_wan_enabled=$(syscfg get eth_wan_enabled)
 if [ "$eth_wan_enabled" = "true" ] && [ "$UseLANIFIPV6" != "true" ];then
@@ -992,11 +995,12 @@ fi
 # Tech XB7  => MODEL_NUM=CGM4331COM
 # CMX  XB7  => MODEL_NUM=TG4482A - not included
 # Tech XB8  => MODEL_NUM=CGM4981COM
+# Tech XB9  => MODEL_NUM=CWA438TCOM
 # Tech XB10    => MODEL_NUM=CGM601TCOM
 # Sercomm XB10 => MODEL_NUM=SG417DBCT
 
-if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || \
-   [ "$MODEL_NUM" = "SG417DBCT" ]; then
+if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || \
+   [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ]; then
 
   echo_t "RDKB_SELFHEAL: Starting ethagent script..."
   ETHAGENT_SCRIPT="$TAD_PATH/ethagent_associated_dev.sh"
