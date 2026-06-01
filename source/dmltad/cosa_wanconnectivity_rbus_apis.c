@@ -435,7 +435,7 @@ ANSC_STATUS CosaWanCnctvtyChk_Intf_Commit (PCOSA_DML_WANCNCTVTY_CHK_INTF_INFO  p
 **********************************************************************/
 ANSC_STATUS CosaWanCnctvtyChk_URL_delDBEntry (unsigned int InstanceNumber)
 {
-    char paramName[BUFLEN_128];
+    char paramName[BUFLEN_128] = {0};
     int url_max_inst = 0;
     errno_t rc = -1;
     PSINGLE_LINK_ENTRY              pSListEntry       = NULL;
