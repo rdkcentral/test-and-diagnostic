@@ -127,7 +127,7 @@ ANSC_STATUS wancnctvty_chk_start_threads(ULONG InstanceNumber,service_type_t typ
     PWANCNCTVTY_CHK_GLOBAL_INTF_INFO gIntfInfo = get_InterfaceList(InstanceNumber);
     if (!gIntfInfo)
     {
-        WANCHK_LOG_ERROR("Unable to start threads,global data is NULL for InstanceNumber %ld\n",
+        WANCHK_LOG_ERROR("Unable to start threads,global data is NULL for InstanceNumber %lu\n",
                                                                                 InstanceNumber);
         pthread_mutex_unlock(&gIntfAccessMutex);
         return ANSC_STATUS_FAILURE;
@@ -176,15 +176,15 @@ ANSC_STATUS wancnctvty_chk_stop_threads(ULONG InstanceNumber,service_type_t type
 {
     pthread_mutex_lock(&gIntfAccessMutex);
     PWANCNCTVTY_CHK_GLOBAL_INTF_INFO gIntfInfo = get_InterfaceList(InstanceNumber);
-    WANCHK_LOG_INFO ("%s: Stopping threads if any for interface %s\n",__FUNCTION__,
-                                                            gIntfInfo->IPInterface.InterfaceName);
     if (!gIntfInfo)
     {
-        WANCHK_LOG_ERROR("Unable to stop threads,global data is NULL for InstanceNumber %ld\n",
+        WANCHK_LOG_ERROR("Unable to stop threads,global data is NULL for InstanceNumber %lu\n",
                                                                                 InstanceNumber);
         pthread_mutex_unlock(&gIntfAccessMutex);
         return ANSC_STATUS_FAILURE;
     }
+    WANCHK_LOG_INFO ("%s: Stopping threads if any for interface %s\n",__FUNCTION__,
+                                                            gIntfInfo->IPInterface.InterfaceName);
 
     if ( ( (type== QUERYNOW_THREAD)  || (type == ALL_THREADS)) &&
                                                     gIntfInfo->QueryNow_Running == TRUE)
@@ -691,6 +691,14 @@ static void cleanup_querynow(void *arg)
     /* Clear tid and state*/
     pthread_mutex_lock(&gIntfAccessMutex);
     PWANCNCTVTY_CHK_GLOBAL_INTF_INFO gIntfInfo = get_InterfaceList(pQuerynowCtxt->InstanceNumber);
+    if (!gIntfInfo)
+    {
+        WANCHK_LOG_ERROR("Unable to get global data for InstanceNumber %lu\n",
+                                                                                pQuerynowCtxt->InstanceNumber);
+        pthread_mutex_unlock(&gIntfAccessMutex);
+        AnscFreeMemory(pQuerynowCtxt);
+        return;
+    }
     gIntfInfo->QueryNow_Running = FALSE;
     gIntfInfo->wancnctvychkquerynowthread_tid = 0;
     pthread_mutex_unlock(&gIntfAccessMutex);
@@ -870,6 +878,12 @@ wanchk_bgtimeout_cb (EV_P_ ev_timer *w, int revents)
 
     pthread_mutex_lock(&gIntfAccessMutex);
     PWANCNCTVTY_CHK_GLOBAL_INTF_INFO gIntfInfo =  get_InterfaceList(pPassive->InstanceNumber);
+    if (!gIntfInfo)
+    {
+        WANCHK_LOG_ERROR("%s:Unable to fetch interface info for instance %lu\n",__FUNCTION__, pPassive->InstanceNumber);
+        pthread_mutex_unlock(&gIntfAccessMutex);
+        return;
+    }
     ActiveMonitor = gIntfInfo->IPInterface.ActiveMonitor;
     pthread_mutex_unlock(&gIntfAccessMutex);
 
@@ -2684,6 +2698,12 @@ ANSC_STATUS wancnctvty_chk_querynow_result_update(ULONG InstanceNumber,querynow_
     BOOL send_publish_event = FALSE;
     pthread_mutex_lock(&gIntfAccessMutex);
     PWANCNCTVTY_CHK_GLOBAL_INTF_INFO gIntfInfo = get_InterfaceList(InstanceNumber);
+    if (!gIntfInfo)
+    {
+        WANCHK_LOG_WARN("Interface with InstanceNumber %lu not found, skipping QueryNowResult update\n", InstanceNumber);
+        pthread_mutex_unlock(&gIntfAccessMutex);
+        return ANSC_STATUS_FAILURE;
+    }
     previous_result = gIntfInfo->IPInterface.QueryNowResult;
     gIntfInfo->IPInterface.QueryNowResult  = result;
     if (previous_result != gIntfInfo->IPInterface.QueryNowResult)
@@ -2713,6 +2733,13 @@ ANSC_STATUS wancnctvty_chk_monitor_result_update(ULONG InstanceNumber,monitor_re
     BOOL send_publish_event = FALSE;
     pthread_mutex_lock(&gIntfAccessMutex);
     PWANCNCTVTY_CHK_GLOBAL_INTF_INFO gIntfInfo = get_InterfaceList(InstanceNumber);
+    if (!gIntfInfo)
+    {
+        WANCHK_LOG_WARN("Interface with InstanceNumber %lu not found, skipping MonitorResult update\n", InstanceNumber);
+        pthread_mutex_unlock(&gIntfAccessMutex);
+        return ANSC_STATUS_FAILURE;
+    }
+    
     previous_result = gIntfInfo->IPInterface.MonitorResult;
     gIntfInfo->IPInterface.MonitorResult  = result;
     if (previous_result != gIntfInfo->IPInterface.MonitorResult)
