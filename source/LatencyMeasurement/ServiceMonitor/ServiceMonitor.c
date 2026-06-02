@@ -52,6 +52,7 @@ int reportInterval_prev=0;
 bool IsPthreadisBusy=false;
 bool IsTR181_triger_at_PthreadisBusy=false;
 bool gLowLatency_Enable=false;
+bool monitor_wakeup_pending=false;
 
 /*adding _SCER11BEL_PRODUCT_REQ_ , because both lan_prefix and ipv6_prefix has same value in XER10 US Device*/
 /*For Example:
@@ -594,6 +595,7 @@ void SendConditional_pthread_cond_signal()
 {
 	CcspTraceInfo(("%s Send conditional signal to monitoring thread\n",__func__));
 	pthread_mutex_lock(&lock);
+	monitor_wakeup_pending = true;
 	pthread_cond_signal(&Monitor_cond);
 	pthread_mutex_unlock(&lock);
 }
@@ -815,7 +817,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
         ts.tv_sec += TIMERINTERVEL;
         pthread_mutex_lock(&lock);
         /* FIX: predicate-guarded timed wait */
-        while(!IsTR181_triger_at_PthreadisBusy)
+	    while(!monitor_wakeup_pending)
         {
             Status = pthread_cond_timedwait(&Monitor_cond, &lock, &ts);
             if(Status == ETIMEDOUT)
@@ -827,12 +829,12 @@ void* LatencyMeasurement_MonitorService(void *arg)
                 CcspTraceInfo(("%s pthread_cond_timedwait failed\n", __func__));
             }
         }
-        IsTR181_triger_at_PthreadisBusy = false;
-        pthread_mutex_unlock(&lock);
+        monitor_wakeup_pending = false;
         if(ROUTER_MODE == Get_Status_of_bridge_mode())
         {
             MonitorLatencyMeasurementServices();
         }
+	    pthread_mutex_unlock(&lock);
         if(IsTR181_triger_at_PthreadisBusy == true)
         {
             sleep(1);
