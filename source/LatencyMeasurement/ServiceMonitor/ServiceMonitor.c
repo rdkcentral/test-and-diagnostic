@@ -594,7 +594,7 @@ void SendConditional_pthread_cond_signal()
 {
 	CcspTraceInfo(("%s Send conditional signal to monitoring thread\n",__func__));
 	pthread_mutex_lock(&lock);
-	IsTR181_triger_at_PthreadisBusy = true;
+	//IsTR181_triger_at_PthreadisBusy = true;
 	pthread_cond_signal(&Monitor_cond);
 	pthread_mutex_unlock(&lock);
 }
@@ -834,13 +834,14 @@ void* LatencyMeasurement_MonitorService(void *arg)
                 CcspTraceInfo(("%s pthread_cond_timedwait failed with status : %d \n", __func__, Status));
             }
         }
-        IsTR181_triger_at_PthreadisBusy = false;
-        pthread_mutex_unlock(&lock);
+     //   IsTR181_triger_at_PthreadisBusy = false;
+        
         if(ROUTER_MODE == Get_Status_of_bridge_mode())
         {
 			CcspTraceInfo(("%s: Monitoring Latency Measurement Services on router mode...\n", __func__));
             MonitorLatencyMeasurementServices();
         }
+		pthread_mutex_unlock(&lock);
         if(IsTR181_triger_at_PthreadisBusy == true)
         {
             sleep(1);
