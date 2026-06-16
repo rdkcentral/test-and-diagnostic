@@ -143,7 +143,9 @@ int LowLatency_Set_TCP_ReportInterval(uint32_t new_val) { //---->check
 				return 1;
 			}
 			LowLatencyInfo.TCP_ReportInterval = new_val;
+			CcspTraceInfo(("%s: new ReportInterval is updated:%d\n", __FUNCTION__,LowLatencyInfo.TCP_ReportInterval));
 			SendConditional_pthread_cond_signal();
+			CcspTraceInfo(("%s : Conditional signal sent for ReportInterval update\n", __FUNCTION__));
 		}
 		return 0;
 	}

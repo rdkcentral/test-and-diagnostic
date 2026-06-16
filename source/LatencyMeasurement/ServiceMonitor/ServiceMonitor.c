@@ -51,6 +51,7 @@ extern int latencyMeasurementCount;
 int reportInterval_prev=0;
 bool IsPthreadisBusy=false;
 bool IsTR181_triger_at_PthreadisBusy=false;
+bool monitor_wakeup_pending=false;
 bool gLowLatency_Enable=false;
 
 /*adding _SCER11BEL_PRODUCT_REQ_ , because both lan_prefix and ipv6_prefix has same value in XER10 US Device*/
@@ -86,20 +87,27 @@ void* isMonitorService_thread_free(void *arg)
     ts.tv_sec += TIMER_VALUE;
     pthread_mutex_lock(&lock);
     /* FIX: predicate-guarded wait */
+	CcspTraceInfo(("%s: Monitor thread free pthread busy and predicate = %d...\n", __func__, IsTR181_triger_at_PthreadisBusy));
     while(!IsTR181_triger_at_PthreadisBusy)
     {
+		CcspTraceInfo(("%s: pthread not busy and predicate = %d...\n", __func__, IsTR181_triger_at_PthreadisBusy));
         Status = pthread_cond_timedwait(&cond, &lock, &ts);
+		CcspTraceInfo(("%s: THREAD FREE pthread_cond_timedwait returned with status: %d\n", __func__, Status));
         if(Status == ETIMEDOUT)
         {
+            CcspTraceInfo(("%s: THREAD FREE status timedout and predicate : %d\n", __func__, IsTR181_triger_at_PthreadisBusy));
             break;
         }
         if((Status != 0) && (Status != ETIMEDOUT))
         {
-            CcspTraceInfo(("%s pthread_cond_timedwait failed\n", __func__));
+            CcspTraceInfo(("%s THREAD FREE pthread_cond_timedwait failed\n", __func__));
         }
+		CcspTraceInfo(("%s: THREAD FREE value of predicate inside while loop %d \n", __func__, IsTR181_triger_at_PthreadisBusy));
     }
     /* Predicate reset under lock */
+	CcspTraceInfo(("%s: THREAD FREE value of predicate before reset %d \n", __func__, IsTR181_triger_at_PthreadisBusy));
     IsTR181_triger_at_PthreadisBusy = false;
+	CcspTraceInfo(("%s: THREAD FREE value of predicate after reset %d \n", __func__, IsTR181_triger_at_PthreadisBusy));
     pthread_mutex_unlock(&lock);
     sleep(1);
     UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
@@ -594,6 +602,7 @@ void SendConditional_pthread_cond_signal()
 {
 	CcspTraceInfo(("%s Send conditional signal to monitoring thread\n",__func__));
 	pthread_mutex_lock(&lock);
+	monitor_wakeup_pending = true;
 	pthread_cond_signal(&Monitor_cond);
 	pthread_mutex_unlock(&lock);
 }
@@ -604,6 +613,7 @@ void SendConditional_pthread_cond_signal()
 
 int LatencyMeasurementServiceInit()
 {
+	CcspTraceInfo(("Entering %s :\n",__func__));
 	if (sysevent_fd_g >= 0)
 	{
 		CcspTraceInfo(("sysevent_fd_g already open (%d), skipping sysevent_open.\n", sysevent_fd_g));
@@ -764,6 +774,7 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 *********************************************************************************************/
 void* LatencyMeasurement_MonitorService(void *arg)
 {
+	CcspTraceInfo(("Entering %s :\n",__func__));
     //UNREFERENCED_PARAMETER(arg);
     char strValue[64] = {0};
     int Status = 0;
@@ -774,6 +785,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
     sysinfo(&s_info);
     while(s_info.uptime < 900) // 900 this wait for device boot up then only monitor services will run
     {
+        CcspTraceInfo(("%s : Device uptime is less than 15 mins, waiting...\n", __func__));
         sysinfo(&s_info);
         sleep(60); //60sec
     }
@@ -809,30 +821,40 @@ void* LatencyMeasurement_MonitorService(void *arg)
     IsTR181_triger_at_PthreadisBusy = false;
     while(1)
     {
+		CcspTraceInfo(("%s: Waiting for conditional signal to monitor the services\n", __func__));
         memset(&ts, 0, sizeof(ts));
         clock_gettime(CLOCK_MONOTONIC, &ts);
         ts.tv_nsec = 0;
         ts.tv_sec += TIMERINTERVEL;
         pthread_mutex_lock(&lock);
         /* FIX: predicate-guarded timed wait */
-        while(!IsTR181_triger_at_PthreadisBusy)
+        while(!monitor_wakeup_pending)
         {
+			CcspTraceInfo(("%s: value of predicate inside inner while loop %d \n", __func__, monitor_wakeup_pending));
+			CcspTraceInfo(("%s: Waiting for conditional signal if Pthread is not busy...\n", __func__));
             Status = pthread_cond_timedwait(&Monitor_cond, &lock, &ts);
+			CcspTraceInfo(("%s: pthread_cond_timedwait returned with status: %d\n", __func__, Status));
+			CcspTraceInfo(("%s: value of predicate after signaling %d \n", __func__, monitor_wakeup_pending));
             if(Status == ETIMEDOUT)
             {
+				CcspTraceInfo(("%s: status timedout and predicate : %d\n", __func__, monitor_wakeup_pending));
                 break;
             }
             if((Status != 0) && (Status != ETIMEDOUT))
             {
-                CcspTraceInfo(("%s pthread_cond_timedwait failed\n", __func__));
+                CcspTraceInfo(("%s pthread_cond_timedwait failed with status : %d \n", __func__, Status));
             }
+			CcspTraceInfo(("%s: Last line of inner while loop and predicate = %d...\n", __func__, monitor_wakeup_pending));
         }
-        IsTR181_triger_at_PthreadisBusy = false;
-        pthread_mutex_unlock(&lock);
+		CcspTraceInfo(("%s: predicate value outside inner while loop %d \n", __func__, monitor_wakeup_pending));
+        monitor_wakeup_pending = false;
+		CcspTraceInfo(("%s: Woke up from conditional wait, checking service status %d...\n", __func__, monitor_wakeup_pending));
         if(ROUTER_MODE == Get_Status_of_bridge_mode())
         {
+			CcspTraceInfo(("%s: Monitoring Latency Measurement Services on router mode...\n", __func__));
             MonitorLatencyMeasurementServices();
         }
+		pthread_mutex_unlock(&lock);
         if(IsTR181_triger_at_PthreadisBusy == true)
         {
             sleep(1);

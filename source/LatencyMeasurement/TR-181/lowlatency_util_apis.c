@@ -142,8 +142,10 @@ LowLatency_SetValueToDb
         paramDbName_t           DbName
     )
 {
+	CcspTraceInfo(("'%s': setting value '%s' for parameter to DB'%s'\n", __FUNCTION__, pValue, ParamName));
 	if (DbName == SYSCFG_DB){
 
+		CcspTraceInfo(("syscfg_set for the parameter '%s' with value '%s'\n", ParamName, pValue));
 		if( syscfg_set( NULL, ParamName, pValue ) != 0 )
 		{
 			CcspTraceError(("syscfg_set failed for the parameter '%s'\n", ParamName));
@@ -151,12 +153,14 @@ LowLatency_SetValueToDb
 		}
 		else
 		{
+			CcspTraceInfo(("syscfg_set success for the parameter '%s'\n", ParamName));
 			if ( 0 != syscfg_commit( ) )
 			{
 				CcspTraceError(("syscfg_set commit failed for the parameter '%s'\n", ParamName));
 				return FALSE;
 			}
 		}
+		CcspTraceInfo(("syscfg_set commit success for the parameter '%s'\n", ParamName));
 		return TRUE;
 	}
 	

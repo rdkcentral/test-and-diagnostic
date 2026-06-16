@@ -136,6 +136,7 @@ LatencyMeasure_SetParamUlongValue
     )
 {
 	UNREFERENCED_PARAMETER(hInsContext);
+	CcspTraceInfo(("%s: received new value '%d' for parameter '%s'\n", __FUNCTION__, uValue, pParamName));
 
 	if (strcmp(pParamName, "X_RDK_LatencyMeasure_TCP_ReportInterval") == 0)
     {
@@ -144,11 +145,13 @@ LatencyMeasure_SetParamUlongValue
 			CcspTraceError(("%s result:FAIL value not in range, pParamName='%s'\n", __FUNCTION__, pParamName));
 			return FALSE;
 		}
+		CcspTraceInfo(("%s: new value '%d' is in valid range for parameter '%s'\n", __FUNCTION__, uValue, pParamName));
 		if (0 != LowLatency_Set_TCP_ReportInterval(uValue)) {
 			CcspTraceError(("%s result: value set failed, pParamName='%s'\n", __FUNCTION__, pParamName));
 
 			return FALSE;
 		}
+		CcspTraceInfo(("%s: new value '%d' is set successfully for parameter '%s'\n", __FUNCTION__, uValue, pParamName));
 		return TRUE;
     }
 
