@@ -1380,17 +1380,6 @@ self_heal_dropbear()
          "BASE")
              # TODO: move DROPBEAR BASE code with TCCBR,SYSTEMD code!
          ;;
-         "TCCBR")
-             #Check dropbear is alive to do rsync/scp to/fro ATOM
-             if [ "$ARM_INTERFACE_IP" != "" ] && [ ! -f "/nvram/ETHWAN_ENABLE" ]; then
-                 DROPBEAR_ENABLE=$(ps -ww | grep "dropbear" | grep "$ARM_INTERFACE_IP")
-                 if [ "$DROPBEAR_ENABLE" = "" ]; then
-                     echo_t "RDKB_PROCESS_CRASHED : rsync_dropbear_process is not running, need restart"
-                     t2CountNotify "SYS_SH_Dropbear_restart"
-                     dropbear -E -s -p $ARM_INTERFACE_IP:22 > /dev/null 2>&1
-                 fi
-             fi
-         ;;
          "SYSTEMD")
              if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SCER11BEL" ] &&  [ "$BOX_TYPE" != "SCXF11BFL" ]; then
                  #Checking dropbear PID
