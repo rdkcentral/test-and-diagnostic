@@ -452,7 +452,22 @@ fi
 	fi
 
 	SELFHEAL_ENABLE=`syscfg get selfheal_enable`
-	COUNT=$((COUNT+1))
+	if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
+		COUNT_FILE="/tmp/.resmon_exec_count"
+		# Read COUNT (default = 0)
+		COUNT=$(cat "$COUNT_FILE" 2>/dev/null)
+		COUNT=${COUNT:-0}
+		# Ensure COUNT is numeric
+		case "$COUNT" in
+			''|*[!0-9]*) COUNT=0 ;;
+		esac
+		# Increment COUNT
+		COUNT=$((COUNT+1))
+
+	else
+		COUNT=$((COUNT+1))
+	fi
+
     if [ "$COUNT" -eq 4 ]
     then
         ######DUMP MEMORY INFO######
@@ -464,6 +479,10 @@ fi
         echo_t "CachedMemory: $cachedMem"
 	t2ValNotify "cachedMem_split" "$cachedMem"
         COUNT=0
+    fi
+
+    if [ "$SELFHEAL_EXECUTION_MODE" = "CRON" ]; then
+	    echo "$COUNT" > "$COUNT_FILE"
     fi
 
     #Kernel Memory info -> Slab
