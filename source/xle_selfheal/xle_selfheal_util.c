@@ -497,8 +497,15 @@ int xle_reliability_monitoring()
         xle_log("[xle_self_heal] RBUS ERROR on getting Device.X_RDK_Connection.Interface or Device.X_RDK_MeshAgent.MeshBackHaul.Ifname values\n");
         return 0;
     }
-    if (strncmp(MeshBackHaulIfname, RDKConnectionInterface, sizeof(MeshBackHaulIfname)-1) != 0) {
-        xle_log("[xle_self_heal] Device.X_RDK_Connection.Interfacee=%s not same with Device.X_RDK_MeshAgent.MeshBackHaul.Ifname=%s in Ext mode \n", RDKConnectionInterface, MeshBackHaulIfname);
+    if (strncmp(RDKConnectionInterface, MESH_IFNAME, sizeof(RDKConnectionInterface)-1) != 0) {
+        xle_log("[xle_self_heal] Device.X_RDK_Connection.Interface=%s is not " MESH_IFNAME " in Ext mode, correcting it\n", RDKConnectionInterface);
+        char setIfVal[128] = MESH_IFNAME;
+        if (rbus_setStringValue(setIfVal, "Device.X_RDK_Connection.Interface") == 0) {
+            xle_log("[xle_self_heal] Device.X_RDK_Connection.Interface set to " MESH_IFNAME ", restarting RdkInterDeviceManager\n");
+            system("systemctl restart RdkInterDeviceManager.service");
+        } else {
+            xle_log("[xle_self_heal] Failed to set Device.X_RDK_Connection.Interface to " MESH_IFNAME "\n");
+        }
      }
 
      return 0;
