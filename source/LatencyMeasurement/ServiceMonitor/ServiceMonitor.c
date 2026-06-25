@@ -211,7 +211,7 @@ int GetTCPReportInterval(){
 }
 
 /*******************************************************************************************
- an utility function that prforms atoi safely
+ a utility function that performs atoi safely
  ******************************************************************************************/
 static int safe_atoi(const char *s)
 {
