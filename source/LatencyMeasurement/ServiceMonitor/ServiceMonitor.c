@@ -262,8 +262,6 @@ void MonitorLatencyMeasurementServices()
 	char* rest = ServicePID;
 	char* token1;
 	char* rest1 = ServicePID;
-	char* token_ipv4;
-	char* rest_ipv4 = ServicePID;
 	int xNetSniffer_PID1=0;
 	int xNetSniffer_PID2=0;
 	bool latency_measure_disabled =0;
