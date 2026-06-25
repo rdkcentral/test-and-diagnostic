@@ -329,7 +329,7 @@ void MonitorLatencyMeasurementServices()
 				}
 				else if (ServicePID[0] == '\0')
 				{
-				    CcspTraceInfo(("%s: Failed to determine valid IPv4 because ServicePID is empty\n", __FUNCTION__));
+				    CcspTraceInfo(("%s: Failed to determine valid IPv4 PID because ServicePID is empty\n", __FUNCTION__));
 				}
 				else
 				{
