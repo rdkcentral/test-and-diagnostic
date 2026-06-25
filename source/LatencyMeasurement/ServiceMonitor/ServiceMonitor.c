@@ -209,6 +209,20 @@ int GetTCPReportInterval(){
 	CcspTraceInfo(("Enter into %s ReportInterval:%d:\n", __FUNCTION__,reportInterval));
 	return reportInterval;
 }
+
+/*******************************************************************************************
+ an utility function that prforms atoi safely
+ ******************************************************************************************/
+static int safe_atoi(const char *s)
+{
+    if (s == NULL || *s == '\0')
+    {
+        return 0;
+    }
+
+    return atoi(s);
+}
+
 /***********************************************************************************************
 MonitorLatencyMeasurementServices() function monitor the services and if the serice is not running 
 start the service again based on IPv4Enable and IPv6Enable.
@@ -300,30 +314,66 @@ void MonitorLatencyMeasurementServices()
 					//v_secure_system("/usr/bin/xNetSniffer -i %s -f IPv4 &",lan_ifname);
 					Lan_prefix_flag=true;
 				}
-				CheckLatencyMeasurementServiceStatus(SNIFFER_SERVICE,ServicePID);
-				if (strlen(ServicePID) == 0)
+
+				int service_status = CheckLatencyMeasurementServiceStatus(SNIFFER_SERVICE,ServicePID);
+				CcspTraceInfo(("%s: SNIFFER_SERVICE status=%s ServicePID='%s'\n",
+						__FUNCTION__,
+						(service_status == SERVICE_ACTIVE) ?
+						"SERVICE_ACTIVE" :
+						"SERVICE_NOT_ACTIVE",
+						ServicePID));
+
+				if (service_status != SERVICE_ACTIVE)
 				{
-					CcspTraceInfo(("%s: Failed to run IPv4 xNetSniffer service\n", __FUNCTION__));
-				} else {
-					token_ipv4 = strtok_r(rest_ipv4, " ", &rest_ipv4);
-					CcspTraceInfo(("%s: xNetSniffer_v4 service PID:%s rest:%s\n", __FUNCTION__,token_ipv4,rest_ipv4));
-					if((rest_ipv4 != NULL) && (IPV6PID==atoi(rest_ipv4)))
+				    CcspTraceInfo(("%s: Failed to run IPv4 xNetSniffer service\n", __FUNCTION__));
+				}
+				else if (ServicePID[0] == '\0')
+				{
+				    CcspTraceInfo(("%s: Failed to determine valid IPv4 because ServicePID is empty\n", __FUNCTION__));
+				}
+				else
+				{
+				    char pid_copy[BUF_SIZE] = {0};
+				    snprintf(pid_copy, sizeof(pid_copy), "%s", ServicePID);
+
+				    char *save_ptr = NULL;
+				    // token_ipv4 = strtok_r(pid_copy, " ", &save_ptr);
+				    char *pid1 = strtok_r(pid_copy, " ", &save_ptr);
+				    char *pid2 = strtok_r(NULL, " ", &save_ptr);
+
+				    CcspTraceInfo(("%s: Parsed PIDs pid1:%s pid2:%s\n",
+						   __FUNCTION__,
+						   pid1 ? pid1 : "NULL",
+						   pid2 ? pid2 : "NULL"));
+
+					if (pid2 && (IPV6PID == safe_atoi(pid2)))
 					{
-						IPv4PID=atoi(token_ipv4);
-					} else if((token_ipv4 != NULL) && (IPV6PID==atoi(token_ipv4)))
-					{
-						if(rest_ipv4 != NULL)
-						{
-							IPv4PID=atoi(rest_ipv4);
-						}
-					} else {
-						IPv4PID=atoi(ServicePID);
+					    IPv4PID = safe_atoi(pid1);
 					}
+					else if (pid1 &&
+					     (IPV6PID == safe_atoi(pid1)))
+					{
+					    IPv4PID = safe_atoi(pid2);
+					}
+					else
+					{
+					    // fall back to first PID parsed from ServicePID
+					    IPv4PID = safe_atoi(ServicePID);
+					}
+
 					if (IPv4PID > 0)
 					{
-						CcspTraceInfo(("%s: ServicePID:%s xNetSniffer IPv4:%d service started in background\n", __FUNCTION__,ServicePID,IPv4PID));
-					} else {
-						CcspTraceError(("%s: Failed to determine valid IPv4 xNetSniffer PID from ServicePID:%s (IPv4PID=%d)\n", __FUNCTION__, ServicePID, IPv4PID));
+					    CcspTraceInfo(("%s: ServicePID:%s xNetSniffer IPv4:%d service started in background\n",
+						       __FUNCTION__,
+						       ServicePID,
+						       IPv4PID));
+					}
+					else
+					{
+					    CcspTraceError(("%s: Failed to determine valid IPv4 xNetSniffer PID from ServicePID:%s (IPv4PID=%d)\n",
+							__FUNCTION__,
+							ServicePID,
+							IPv4PID));
 					}
 				}
 			}
