@@ -215,12 +215,35 @@ int GetTCPReportInterval(){
  ******************************************************************************************/
 static int safe_atoi(const char *s)
 {
+    char *end = NULL;
+    long val;
+    const long int_max = (long)((unsigned int)~0U >> 1);
+    const long int_min = -int_max - 1;
+
     if (s == NULL || *s == '\0')
     {
         return 0;
     }
 
-    return atoi(s);
+    errno = 0;
+    val = strtol(s, &end, 10);
+    if (end == s || errno == ERANGE)
+    {
+        return 0;
+    }
+
+    /* Allow trailing whitespace or additional PID tokens (e.g. "1234 5678"). */
+    while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r' || *end == '\f' || *end == '\v')
+    {
+        end++;
+    }
+
+    if (*end != '\0' || val > int_max || val < int_min)
+    {
+        return 0;
+    }
+
+    return (int)val;
 }
 
 /***********************************************************************************************
