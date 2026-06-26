@@ -371,7 +371,15 @@ int main(int argc, char* argv[])
 
     // SelfHeal Subdoc Version Mismatch
     initWebcfgProperties(WEBCFG_PROPERTIES_FILE);
-    webcfg_subdoc_mismatch_boot_check();
+    //webcfg_subdoc_mismatch_boot_check();
+    {
+        pthread_t webcfg_sh_tid;
+        if (pthread_create(&webcfg_sh_tid, NULL,
+                           webcfg_subdoc_mismatch_boot_check_thread, NULL) != 0) {
+            CcspTraceError(("%s: webcfg_subdoc_mismatch_boot_check_thread "
+                            "pthread_create failed\n", __FUNCTION__));
+        }
+    }
 
     //create a thread to update time thread for ethwan enable mode
     BOOL ethwanEnabled = FALSE;
