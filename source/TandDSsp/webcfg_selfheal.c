@@ -33,11 +33,8 @@
    limitations under the License.
 **********************************************************************/
 
+#include <pthread.h>
 #include "webcfg_selfheal.h"
-#include "ssp_global.h"
-
-extern ANSC_HANDLE bus_handle;
-extern char g_Subsystem[32];
 #define MAX_DOC_FIELD_LEN   256
 #define MAX_SUBDOC_LEN      128
 
@@ -420,147 +417,32 @@ static int Get_Component_Version(const char *subdoc, long long *ver_out) {
     return 0;
 }
 
-#define FORCE_RESET_DISCOVER_INTERVAL    10  /* seconds between discovery retries */
-#define FORCE_RESET_DISCOVER_MAX_RETRIES 30  /* max retries (~300s total) */
-#if 0
-#define FORCE_RESET_SET_RETRY_INTERVAL    5  /* seconds between rbus_setStr retries */
-#define FORCE_RESET_SET_MAX_RETRIES       6  /* max set retries */
-
-static int Wait_For_Webcfg_Component(void)
-{
-    int retry = 0;
-    int componentCnt = 0;
-    char **pComponentNames = NULL;
-    char const *paramList[1] = { "Device.X_RDK_WebConfig.webcfgSubdocForceReset" };
-
-    CcspTraceInfo(("%s: Waiting for webconfig component to be ready\n", __FUNCTION__));
-
-    while (retry < FORCE_RESET_DISCOVER_MAX_RETRIES)
-    {
-        rbusError_t rc = rbus_discoverComponentName(g_rbusHandle, 1, paramList,
-                                                    &componentCnt, &pComponentNames);
-        if (rc == RBUS_ERROR_SUCCESS && componentCnt > 0)
-        {
-            CcspTraceInfo(("%s: webconfig component discovered after %d retries\n",
-                           __FUNCTION__, retry));
-            for (int i = 0; i < componentCnt; i++)
-                free(pComponentNames[i]);
-            free(pComponentNames);
-            return 0;
-        }
-
-        retry++;
-        sleep(FORCE_RESET_DISCOVER_INTERVAL);
-    }
-
-    CcspTraceError(("%s: Timed out waiting for webconfig component (%d retries)\n",
-                    __FUNCTION__, retry));
-    return -1;
-}
-#endif
-
 static int Set_Webcfg_ForceReset(const char *reset_list)
 {
-    char dst_pathname_cr[256] = {0};
-    componentStruct_t **ppComponents = NULL;
-    int comp_size = 0;
-    int ret = CCSP_FAILURE;
-    char *faultParam = NULL;
-    int retry = 0;
+    rbusError_t err;
 
-    if (bus_handle == NULL)
+    if (g_rbusHandle == NULL)
     {
-        CcspTraceError(("%s: bus_handle is NULL, CCSP bus not initialized\n", __FUNCTION__));
+        CcspTraceError(("%s: g_rbusHandle is NULL, RBUS not initialized\n", __FUNCTION__));
         return -1;
     }
 
-    snprintf(dst_pathname_cr, sizeof(dst_pathname_cr), "%s%s", g_Subsystem, CCSP_DBUS_INTERFACE_CR);
-
-    CcspTraceInfo(("%s: Discovering component for webcfgSubdocForceReset via CR\n", __FUNCTION__));
-
-    /* Wait until the webconfig component registers with CR */
-    while (retry < FORCE_RESET_DISCOVER_MAX_RETRIES)
-    {
-        ret = CcspBaseIf_discComponentSupportingNamespace(
-                  bus_handle,
-                  dst_pathname_cr,
-                  "Device.X_RDK_WebConfig.webcfgSubdocForceReset",
-                  g_Subsystem,
-                  &ppComponents,
-                  &comp_size);
-
-        if (ret == CCSP_SUCCESS && comp_size > 0)
-        {
-            CcspTraceInfo(("%s: Component discovered: %s (path: %s) after %d retries\n",
-                           __FUNCTION__, ppComponents[0]->componentName,
-                           ppComponents[0]->dbusPath, retry));
-            break;
-        }
-
-        retry++;
-        CcspTraceInfo(("%s: Component not found yet, retry %d/%d\n",
-                       __FUNCTION__, retry, FORCE_RESET_DISCOVER_MAX_RETRIES));
-        sleep(FORCE_RESET_DISCOVER_INTERVAL);
-    }
-
-    if (ret != CCSP_SUCCESS || comp_size <= 0)
-    {
-        CcspTraceError(("%s: Timed out discovering webcfg component after %d retries\n",
-                        __FUNCTION__, retry));
-        return -1;
-    }
-
-    /* Set the parameter via CCSP bus */
-    parameterValStruct_t param_val[1];
-    param_val[0].parameterName = "Device.X_RDK_WebConfig.webcfgSubdocForceReset";
-    param_val[0].parameterValue = (char *)reset_list;
-    param_val[0].type = ccsp_string;
-
-    CcspTraceInfo(("%s: Setting webcfgSubdocForceReset='%s' via CCSP bus\n",
+    CcspTraceInfo(("%s: Setting webcfgSubdocForceReset='%s' via RBUS\n",
                    __FUNCTION__, reset_list ? reset_list : "(null)"));
 
-    ret = CcspBaseIf_setParameterValues(
-              bus_handle,
-              ppComponents[0]->componentName,
-              ppComponents[0]->dbusPath,
-              0,
-              0x0,
-              param_val,
-              1,
-              TRUE,
-              &faultParam);
+    err = rbus_setStr(g_rbusHandle,
+                      "Device.X_RDK_WebConfig.webcfgSubdocForceReset",
+                      (char *)reset_list);
 
-    if (ret != CCSP_SUCCESS)
+    if (err != RBUS_ERROR_SUCCESS)
     {
-        CcspTraceError(("%s: CcspBaseIf_setParameterValues failed, ret=%d, faultParam=%s\n",
-                        __FUNCTION__, ret, faultParam ? faultParam : "(null)"));
-        if (faultParam)
-        {
-            CCSP_MESSAGE_BUS_INFO *bus_info = (CCSP_MESSAGE_BUS_INFO *)bus_handle;
-            bus_info->freefunc(faultParam);
-        }
-    }
-    else
-    {
-        CcspTraceInfo(("%s: Successfully set webcfgSubdocForceReset\n", __FUNCTION__));
+        CcspTraceError(("%s: rbus_setStr failed for webcfgSubdocForceReset, err=%d\n",
+                        __FUNCTION__, err));
+        return -1;
     }
 
-    /* Free component info */
-    for (int i = 0; i < comp_size; i++)
-    {
-        if (ppComponents[i]->remoteCR_dbus_path)
-            AnscFreeMemory(ppComponents[i]->remoteCR_dbus_path);
-        if (ppComponents[i]->remoteCR_name)
-            AnscFreeMemory(ppComponents[i]->remoteCR_name);
-        if (ppComponents[i]->componentName)
-            AnscFreeMemory(ppComponents[i]->componentName);
-        if (ppComponents[i]->dbusPath)
-            AnscFreeMemory(ppComponents[i]->dbusPath);
-        AnscFreeMemory(ppComponents[i]);
-    }
-    AnscFreeMemory(ppComponents);
-
-    return (ret == CCSP_SUCCESS) ? 0 : -1;
+    CcspTraceInfo(("%s: Successfully set webcfgSubdocForceReset\n", __FUNCTION__));
+    return 0;
 }
 
 static cJSON *Load_WebcfgDB_Array(void) {
@@ -721,6 +603,71 @@ static cJSON *Load_WebcfgDB_Array(void) {
     return arr;
 }
 
+#define WEBCFG_READY_POLL_INTERVAL_SEC  5
+#define WEBCFG_READY_MAX_WAIT_SEC       500
+
+/*
+ * Poll the RBus bus until webcfg has registered
+ * Device.X_RDK_WebConfig.webcfgSubdocForceReset, then run the check.
+ * RBUS_ERROR_ELEMENT_DOES_NOT_EXIST means the provider is not up yet;
+ * any other return code (including SUCCESS) means the element exists.
+ */
+static void *webcfg_selfheal_thread(void *arg)
+{
+    (void)arg;
+    int waited = 0;
+
+    pthread_detach(pthread_self());
+
+    CcspTraceInfo(("webcfg_selfheal_thread: waiting for webcfg to register "
+                   "Device.X_RDK_WebConfig.webcfgSubdocForceReset\n"));
+
+    while (waited < WEBCFG_READY_MAX_WAIT_SEC)
+    {
+        rbusValue_t val = NULL;
+        rbusError_t rc = rbus_get(g_rbusHandle,
+                                  "Device.X_RDK_WebConfig.webcfgSubdocForceReset",
+                                  &val);
+        if (val)
+            rbusValue_Release(val);
+
+        if (rc != RBUS_ERROR_ELEMENT_DOES_NOT_EXIST)
+        {
+            CcspTraceInfo(("webcfg_selfheal_thread: webcfg ready after %d sec "
+                           "(rbus rc=%d)\n", waited, rc));
+            break;
+        }
+
+        CcspTraceInfo(("webcfg_selfheal_thread: webcfg not ready yet, "
+                       "retrying in %d sec (%d/%d)\n",
+                       WEBCFG_READY_POLL_INTERVAL_SEC,
+                       waited, WEBCFG_READY_MAX_WAIT_SEC));
+        sleep(WEBCFG_READY_POLL_INTERVAL_SEC);
+        waited += WEBCFG_READY_POLL_INTERVAL_SEC;
+    }
+
+    if (waited >= WEBCFG_READY_MAX_WAIT_SEC)
+    {
+        CcspTraceError(("webcfg_selfheal_thread: timed out waiting for webcfg, "
+                        "skipping subdoc mismatch check\n"));
+        return NULL;
+    }
+
+    webcfg_subdoc_mismatch_boot_check();
+    return NULL;
+}
+
+void webcfg_selfheal_start(void)
+{
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, webcfg_selfheal_thread, NULL) != 0)
+    {
+        CcspTraceError(("webcfg_selfheal_start: pthread_create failed, "
+                        "running check synchronously\n"));
+        webcfg_subdoc_mismatch_boot_check();
+    }
+}
+
 void webcfg_subdoc_mismatch_boot_check(void) {
     CcspTraceInfo(("=== Webconfig selfheal starting ===\n"));
     
@@ -783,12 +730,4 @@ void webcfg_subdoc_mismatch_boot_check(void) {
     free(reset_list);
     cJSON_Delete(arr);
     CcspTraceInfo(("=== Webconfig Selfheal Completed ===\n"));
-}
-
-void *webcfg_subdoc_mismatch_boot_check_thread(void *arg)
-{
-    (void)arg;
-    pthread_detach(pthread_self());
-    webcfg_subdoc_mismatch_boot_check();
-    return NULL;
 }

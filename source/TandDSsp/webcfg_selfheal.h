@@ -47,7 +47,6 @@
 #include <cjson/cJSON.h>
 #include <ctype.h>
 #include <msgpack.h>
-#include <pthread.h>
 #include "ccsp_trace.h"
 #include "tad_rbus_apis.h"
 
@@ -87,6 +86,6 @@ SubDocSupportMap_t * get_global_sdInfoTail(void);
 SupplementaryDocs_t * get_global_spInfoTail(void);
 
 void webcfg_subdoc_mismatch_boot_check(void);
-void *webcfg_subdoc_mismatch_boot_check_thread(void *arg);
+void webcfg_selfheal_start(void);
 
 #endif /* WEBCFG_SELFHEAL_H */

@@ -370,16 +370,14 @@ int main(int argc, char* argv[])
     LatencyMeasurementInit();
 
     // SelfHeal Subdoc Version Mismatch
+    // webcfg_selfheal_start() spawns a background thread that polls the RBus
+    // until Device.X_RDK_WebConfig.webcfgSubdocForceReset is registered by
+    // the webcfg component (RBUS_ERROR_ELEMENT_DOES_NOT_EXIST = not ready yet).
+    // This avoids the boot-time race where T&D runs before webcfg has
+    // finished its rbus_regDataElements() call. No CR is available on this
+    // platform, so RBus element existence is used as the readiness signal.
     initWebcfgProperties(WEBCFG_PROPERTIES_FILE);
-    //webcfg_subdoc_mismatch_boot_check();
-    {
-        pthread_t webcfg_sh_tid;
-        if (pthread_create(&webcfg_sh_tid, NULL,
-                           webcfg_subdoc_mismatch_boot_check_thread, NULL) != 0) {
-            CcspTraceError(("%s: webcfg_subdoc_mismatch_boot_check_thread "
-                            "pthread_create failed\n", __FUNCTION__));
-        }
-    }
+    webcfg_selfheal_start();
 
     //create a thread to update time thread for ethwan enable mode
     BOOL ethwanEnabled = FALSE;
