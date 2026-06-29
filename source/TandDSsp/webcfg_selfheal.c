@@ -35,6 +35,8 @@
 
 #include <pthread.h>
 #include "webcfg_selfheal.h"
+
+extern volatile int g_subdocForceReset_subscribed;
 #define MAX_DOC_FIELD_LEN   256
 #define MAX_SUBDOC_LEN      128
 
@@ -417,9 +419,13 @@ static int Get_Component_Version(const char *subdoc, long long *ver_out) {
     return 0;
 }
 
+#define FORCERESET_SET_RETRY_COUNT    12
+#define FORCERESET_SET_RETRY_DELAY   10
+
 static int Set_Webcfg_ForceReset(const char *reset_list)
 {
     rbusError_t err;
+    int attempt;
 
     if (g_rbusHandle == NULL)
     {
@@ -427,22 +433,32 @@ static int Set_Webcfg_ForceReset(const char *reset_list)
         return -1;
     }
 
-    CcspTraceInfo(("%s: Setting webcfgSubdocForceReset='%s' via RBUS\n",
+    CcspTraceInfo(("%s: Setting webcfgSubdocForceReset='%s' via rbus_setStr\n",
                    __FUNCTION__, reset_list ? reset_list : "(null)"));
 
-    err = rbus_setStr(g_rbusHandle,
-                      "Device.X_RDK_WebConfig.webcfgSubdocForceReset",
-                      (char *)reset_list);
-
-    if (err != RBUS_ERROR_SUCCESS)
+    for (attempt = 1; attempt <= FORCERESET_SET_RETRY_COUNT; attempt++)
     {
-        CcspTraceError(("%s: rbus_setStr failed for webcfgSubdocForceReset, err=%d\n",
-                        __FUNCTION__, err));
-        return -1;
+        err = rbus_setStr(g_rbusHandle,
+                          "Device.X_RDK_WebConfig.webcfgSubdocForceReset",
+                          (char *)reset_list);
+
+        if (err == RBUS_ERROR_SUCCESS)
+        {
+            CcspTraceInfo(("%s: Successfully set webcfgSubdocForceReset (attempt %d)\n",
+                           __FUNCTION__, attempt));
+            return 0;
+        }
+
+        CcspTraceError(("%s: rbus_setStr failed, err=%d (attempt %d/%d)\n",
+                        __FUNCTION__, err, attempt, FORCERESET_SET_RETRY_COUNT));
+
+        if (attempt < FORCERESET_SET_RETRY_COUNT)
+            sleep(FORCERESET_SET_RETRY_DELAY);
     }
 
-    CcspTraceInfo(("%s: Successfully set webcfgSubdocForceReset\n", __FUNCTION__));
-    return 0;
+    CcspTraceError(("%s: All %d attempts failed for webcfgSubdocForceReset\n",
+                    __FUNCTION__, FORCERESET_SET_RETRY_COUNT));
+    return -1;
 }
 
 static cJSON *Load_WebcfgDB_Array(void) {
@@ -603,26 +619,27 @@ static cJSON *Load_WebcfgDB_Array(void) {
     return arr;
 }
 
-#define WEBCFG_READY_POLL_INTERVAL_SEC  5
-#define WEBCFG_READY_MAX_WAIT_SEC       500
+#define SUBDOC_RESET_POLL_SEC       5
+#define SUBDOC_RESET_TIMEOUT_SEC    300
+#define SUBSCRIBER_WAIT_SEC         120
 
 /*
- * Poll the RBus bus until webcfg has registered
- * Device.X_RDK_WebConfig.webcfgSubdocForceReset, then run the check.
- * RBUS_ERROR_ELEMENT_DOES_NOT_EXIST means the provider is not up yet;
- * any other return code (including SUCCESS) means the element exists.
+ * Poll_Webcfg_Rbus_Element() - Poll using rbus_get until the webcfg component
+ * has registered Device.X_RDK_WebConfig.webcfgSubdocForceReset.
+ * Only RBUS_ERROR_SUCCESS means the element is fully available.
+ * Any other error code (DESTINATION_NOT_FOUND, ELEMENT_DOES_NOT_EXIST, etc.)
+ * means the component is not ready yet.
+ *
+ * Returns: 0 on success (webcfg ready), -1 on timeout
  */
-static void *webcfg_selfheal_thread(void *arg)
+static int Poll_Webcfg_Rbus_Element(void)
 {
-    (void)arg;
-    int waited = 0;
+    int elapsed = 0;
 
-    pthread_detach(pthread_self());
+    CcspTraceInfo(("%s: Waiting for webcfg component to register "
+                   "webcfgSubdocForceReset on rbus...\n", __FUNCTION__));
 
-    CcspTraceInfo(("webcfg_selfheal_thread: waiting for webcfg to register "
-                   "Device.X_RDK_WebConfig.webcfgSubdocForceReset\n"));
-
-    while (waited < WEBCFG_READY_MAX_WAIT_SEC)
+    while (elapsed < SUBDOC_RESET_TIMEOUT_SEC)
     {
         rbusValue_t val = NULL;
         rbusError_t rc = rbus_get(g_rbusHandle,
@@ -631,25 +648,76 @@ static void *webcfg_selfheal_thread(void *arg)
         if (val)
             rbusValue_Release(val);
 
-        if (rc != RBUS_ERROR_ELEMENT_DOES_NOT_EXIST)
+        if (rc == RBUS_ERROR_SUCCESS)
         {
-            CcspTraceInfo(("webcfg_selfheal_thread: webcfg ready after %d sec "
-                           "(rbus rc=%d)\n", waited, rc));
-            break;
+            CcspTraceInfo(("%s: webcfg component ready after %d seconds\n",
+                           __FUNCTION__, elapsed));
+            return 0;
         }
 
-        CcspTraceInfo(("webcfg_selfheal_thread: webcfg not ready yet, "
-                       "retrying in %d sec (%d/%d)\n",
-                       WEBCFG_READY_POLL_INTERVAL_SEC,
-                       waited, WEBCFG_READY_MAX_WAIT_SEC));
-        sleep(WEBCFG_READY_POLL_INTERVAL_SEC);
-        waited += WEBCFG_READY_POLL_INTERVAL_SEC;
+        CcspTraceInfo(("%s: webcfg not ready (rbus_get rc=%d), "
+                       "retry in %d sec [%d/%d]\n",
+                       __FUNCTION__, rc,
+                       SUBDOC_RESET_POLL_SEC, elapsed, SUBDOC_RESET_TIMEOUT_SEC));
+
+        sleep(SUBDOC_RESET_POLL_SEC);
+        elapsed += SUBDOC_RESET_POLL_SEC;
     }
 
-    if (waited >= WEBCFG_READY_MAX_WAIT_SEC)
+    CcspTraceError(("%s: Timed out after %d seconds waiting for webcfg\n",
+                    __FUNCTION__, SUBDOC_RESET_TIMEOUT_SEC));
+    return -1;
+}
+
+/*
+ * Wait_For_Subscriber_Ready() - Wait until the WebconfigFramework's
+ * subscribeSubdocForceReset() has completed its event subscription.
+ * The SET handler in the webcfg component only accepts rbus_setStr
+ * after the subscriber is connected.
+ *
+ * Returns: 0 on success, -1 on timeout
+ */
+static int Wait_For_Subscriber_Ready(void)
+{
+    int elapsed = 0;
+
+    CcspTraceInfo(("%s: Waiting for subdocForceReset subscriber...\n", __FUNCTION__));
+
+    while (elapsed < SUBSCRIBER_WAIT_SEC)
     {
-        CcspTraceError(("webcfg_selfheal_thread: timed out waiting for webcfg, "
-                        "skipping subdoc mismatch check\n"));
+        if (g_subdocForceReset_subscribed == 1)
+        {
+            CcspTraceInfo(("%s: Subscriber ready after %d seconds\n",
+                           __FUNCTION__, elapsed));
+            return 0;
+        }
+
+        sleep(SUBDOC_RESET_POLL_SEC);
+        elapsed += SUBDOC_RESET_POLL_SEC;
+    }
+
+    CcspTraceError(("%s: Timed out after %d seconds waiting for subscriber\n",
+                    __FUNCTION__, SUBSCRIBER_WAIT_SEC));
+    return -1;
+}
+
+static void *webcfg_subdoc_mismatch_boot_check_thread(void *arg)
+{
+    (void)arg;
+
+    pthread_detach(pthread_self());
+
+    if (Poll_Webcfg_Rbus_Element() != 0)
+    {
+        CcspTraceError(("webcfg_subdoc_mismatch_boot_check_thread: "
+                        "webcfg not ready, skipping check\n"));
+        return NULL;
+    }
+
+    if (Wait_For_Subscriber_Ready() != 0)
+    {
+        CcspTraceError(("webcfg_subdoc_mismatch_boot_check_thread: "
+                        "subscriber not ready, skipping check\n"));
         return NULL;
     }
 
@@ -660,11 +728,16 @@ static void *webcfg_selfheal_thread(void *arg)
 void webcfg_selfheal_start(void)
 {
     pthread_t tid;
-    if (pthread_create(&tid, NULL, webcfg_selfheal_thread, NULL) != 0)
+
+    if (pthread_create(&tid, NULL, webcfg_subdoc_mismatch_boot_check_thread, NULL) != 0)
     {
-        CcspTraceError(("webcfg_selfheal_start: pthread_create failed, "
-                        "running check synchronously\n"));
+        CcspTraceError(("webcfg_selfheal_start: Failed to create thread, "
+                        "running synchronously\n"));
         webcfg_subdoc_mismatch_boot_check();
+    }
+    else
+    {
+        CcspTraceInfo(("webcfg_selfheal_start: Boot check thread launched\n"));
     }
 }
 

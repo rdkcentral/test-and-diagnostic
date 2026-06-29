@@ -370,12 +370,11 @@ int main(int argc, char* argv[])
     LatencyMeasurementInit();
 
     // SelfHeal Subdoc Version Mismatch
-    // webcfg_selfheal_start() spawns a background thread that polls the RBus
-    // until Device.X_RDK_WebConfig.webcfgSubdocForceReset is registered by
-    // the webcfg component (RBUS_ERROR_ELEMENT_DOES_NOT_EXIST = not ready yet).
-    // This avoids the boot-time race where T&D runs before webcfg has
-    // finished its rbus_regDataElements() call. No CR is available on this
-    // platform, so RBus element existence is used as the readiness signal.
+    // webcfg_selfheal_start() spawns a detached thread that polls rbus_get()
+    // until Device.X_RDK_WebConfig.webcfgSubdocForceReset returns SUCCESS,
+    // indicating the webcfg component has fully registered.
+    // This avoids the boot-time race where T&D attempts rbus_setStr before
+    // webcfg has finished its rbus_regDataElements() call.
     initWebcfgProperties(WEBCFG_PROPERTIES_FILE);
     webcfg_selfheal_start();
 
