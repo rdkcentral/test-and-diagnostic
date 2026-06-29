@@ -33,6 +33,7 @@
    limitations under the License.
 **********************************************************************/
 
+#include <pthread.h>
 #include "webcfg_selfheal.h"
 #define MAX_DOC_FIELD_LEN   256
 #define MAX_SUBDOC_LEN      128
@@ -600,6 +601,71 @@ static cJSON *Load_WebcfgDB_Array(void) {
     free(data);
 
     return arr;
+}
+
+#define WEBCFG_READY_POLL_INTERVAL_SEC  5
+#define WEBCFG_READY_MAX_WAIT_SEC       1000
+
+/*
+ * Poll the RBus bus until webcfg has registered
+ * Device.X_RDK_WebConfig.webcfgSubdocForceReset, then run the check.
+ * RBUS_ERROR_ELEMENT_DOES_NOT_EXIST means the provider is not up yet;
+ * any other return code (including SUCCESS) means the element exists.
+ */
+static void *webcfg_selfheal_thread(void *arg)
+{
+    (void)arg;
+    int waited = 0;
+
+    pthread_detach(pthread_self());
+
+    CcspTraceInfo(("webcfg_selfheal_thread: waiting for webcfg to register "
+                   "Device.X_RDK_WebConfig.webcfgSubdocForceReset\n"));
+
+    while (waited < WEBCFG_READY_MAX_WAIT_SEC)
+    {
+        rbusValue_t val = NULL;
+        rbusError_t rc = rbus_get(g_rbusHandle,
+                                  "Device.X_RDK_WebConfig.webcfgSubdocForceReset",
+                                  &val);
+        if (val)
+            rbusValue_Release(val);
+
+        if (rc != RBUS_ERROR_ELEMENT_DOES_NOT_EXIST)
+        {
+            CcspTraceInfo(("webcfg_selfheal_thread: webcfg ready after %d sec "
+                           "(rbus rc=%d)\n", waited, rc));
+            break;
+        }
+
+        CcspTraceInfo(("webcfg_selfheal_thread: webcfg not ready yet, "
+                       "retrying in %d sec (%d/%d)\n",
+                       WEBCFG_READY_POLL_INTERVAL_SEC,
+                       waited, WEBCFG_READY_MAX_WAIT_SEC));
+        sleep(WEBCFG_READY_POLL_INTERVAL_SEC);
+        waited += WEBCFG_READY_POLL_INTERVAL_SEC;
+    }
+
+    if (waited >= WEBCFG_READY_MAX_WAIT_SEC)
+    {
+        CcspTraceError(("webcfg_selfheal_thread: timed out waiting for webcfg, "
+                        "skipping subdoc mismatch check\n"));
+        return NULL;
+    }
+
+    webcfg_subdoc_mismatch_boot_check();
+    return NULL;
+}
+
+void webcfg_selfheal_start(void)
+{
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, webcfg_selfheal_thread, NULL) != 0)
+    {
+        CcspTraceError(("webcfg_selfheal_start: pthread_create failed, "
+                        "running check synchronously\n"));
+        webcfg_subdoc_mismatch_boot_check();
+    }
 }
 
 void webcfg_subdoc_mismatch_boot_check(void) {
