@@ -637,15 +637,27 @@ static void webcfgSubscribeAsyncCallback(rbusHandle_t handle,
                                          rbusError_t error)
 {
     (void)handle;
+<<<<<<< HEAD
+=======
+    (void)subscription;
+>>>>>>> ad72ff9 (Checking with 1000 secs wait thread)
 
     if (error == RBUS_ERROR_SUCCESS)
     {
         CcspTraceInfo(("%s: Event handler ready, subscription succeeded\n", __FUNCTION__));
 
+<<<<<<< HEAD
         rbusError_t uerr = rbusEvent_UnsubscribeEx(g_rbusHandle, subscription, 1);
         if (uerr != RBUS_ERROR_SUCCESS)
         {
             CcspTraceError(("%s: rbusEvent_UnsubscribeEx failed, rc=%d\n",
+=======
+        rbusError_t uerr = rbusEvent_Unsubscribe(g_rbusHandle,
+                               "Device.X_RDK_WebConfig.webcfgSubdocForceReset");
+        if (uerr != RBUS_ERROR_SUCCESS)
+        {
+            CcspTraceError(("%s: rbusEvent_Unsubscribe failed, rc=%d\n",
+>>>>>>> ad72ff9 (Checking with 1000 secs wait thread)
                             __FUNCTION__, uerr));
         }
 
@@ -755,21 +767,18 @@ void webcfg_subdoc_mismatch_boot_check(void) {
         }
         else
         {
-            static rbusEventSubscription_t subscription = {
-                .eventName        = "Device.X_RDK_WebConfig.webcfgSubdocForceReset",
-                .handler          = webcfgForceResetProbeHandler,
-                .userData         = "TandD_EventReady_Check",
-                .filter           = NULL,
-                .publishOnSubscribe = false
-            };
-
             g_forceResetList = reset_list;
 
             CcspTraceInfo(("Subscribing async to webcfgSubdocForceReset event\n"));
 
-            rbusError_t err = rbusEvent_SubscribeAsync(g_rbusHandle,
-                                                       &subscription, 1,
-                                                       webcfgSubscribeAsyncCallback, 0);
+            rbusError_t err = rbusEvent_SubscribeAsync(
+                g_rbusHandle,
+                "Device.X_RDK_WebConfig.webcfgSubdocForceReset",
+                webcfgForceResetProbeHandler,
+                webcfgSubscribeAsyncCallback,
+                "TandD_EventReady_Check",
+                0);
+
             if (err != RBUS_ERROR_SUCCESS)
             {
                 CcspTraceError(("rbusEvent_SubscribeAsync failed, rc=%d\n", err));
