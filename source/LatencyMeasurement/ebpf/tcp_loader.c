@@ -55,8 +55,9 @@ int main(void)
     /* 1. Load the BPF object                                              */
     /* ------------------------------------------------------------------ */
     struct bpf_object *obj = bpf_object__open(BPF_OBJ_PATH);
-    if (!obj) {
-        fprintf(stderr, "Failed to open %s: %s\n", BPF_OBJ_PATH, strerror(errno));
+    /* libbpf returns ERR_PTR on failure, not NULL — must use libbpf_get_error() */
+    if (libbpf_get_error(obj)) {
+        fprintf(stderr, "Failed to open %s: %ld\n", BPF_OBJ_PATH, libbpf_get_error(obj));
         return 1;
     }
 

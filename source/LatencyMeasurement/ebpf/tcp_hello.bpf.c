@@ -24,13 +24,17 @@
 /*
  * Single-entry ARRAY map — key 0 holds the RTT callback counter.
  * Userspace reads this to confirm the BPF program is running.
+ *
+ * Using legacy map definition (SEC("maps") not SEC(".maps")) to avoid
+ * BTF dependency. The new BTF-based syntax (SEC(".maps") with __uint/__type)
+ * requires CONFIG_DEBUG_INFO_BTF=y in the kernel, which is not set.
  */
-struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
-    __type(key,   __u32);
-    __type(value, __u64);
-} rtt_counter SEC(".maps");
+struct bpf_map_def SEC("maps") rtt_counter = {
+    .type        = BPF_MAP_TYPE_ARRAY,
+    .key_size    = sizeof(__u32),
+    .value_size  = sizeof(__u64),
+    .max_entries = 1,
+};
 
 /*
  * count_rtt - called by the kernel TCP stack on every RTT update.
