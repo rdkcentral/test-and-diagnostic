@@ -48,8 +48,8 @@ EXTRA_DIST = tcp_hello.bpf.c tcp_loader.c
 all-local:
 	@if [ -n "$(LIBBPF_INC)" ] && [ -n "$(LIBBPF_LIB)" ]; then \
 	    echo "  CC       tcp_loader"; \
-	    $(CC) -Wall -O2 -I$(LIBBPF_INC) $(srcdir)/tcp_loader.c \
-	        -L$(LIBBPF_LIB) -lbpf -lelf -lz -lpthread -o tcp_loader; \
+	    $(CC) -Wall -O2 $(CPPFLAGS) $(CFLAGS) -I$(LIBBPF_INC) $(srcdir)/tcp_loader.c \
+	        $(LDFLAGS) -L$(LIBBPF_LIB) -lbpf -lelf -lz -lpthread -o tcp_loader; \
 	else \
 	    echo "WARNING: LIBBPF_INC/LIBBPF_LIB not set — skipping tcp_loader build"; \
 	fi
