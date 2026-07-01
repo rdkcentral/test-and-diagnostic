@@ -378,8 +378,8 @@ void MonitorLatencyMeasurementServices()
 					}
 					else
 					{
-					    // fall back to first PID parsed from ServicePID
-					    IPv4PID = safe_atoi(ServicePID);
+					    /* Default to the first parsed PID token. */
+					    IPv4PID = safe_atoi(pid1 ? pid1 : ServicePID);
 					}
 
 					if (IPv4PID > 0)
