@@ -20,6 +20,7 @@
 #include <signal.h>
 #include <string.h>
 #include <errno.h>
+#include <pthread.h>
 #include <arpa/inet.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
@@ -42,17 +43,12 @@ static int               prog_fd   = -1;
 static int               cgroup_fd = -1;
 static char              g_cgroup_path[512];
 static struct ring_buffer *rb      = NULL;
+static volatile sig_atomic_t running = 1;
 
 static void sig_handler(int sig)
 {
     (void)sig;
-    if (prog_fd >= 0 && cgroup_fd >= 0) {
-        bpf_prog_detach(cgroup_fd, BPF_CGROUP_SOCK_OPS);
-        printf("\nDetached BPF program from cgroup.\n");
-    }
-    if (rb)
-        ring_buffer__free(rb);
-    exit(0);
+    running = 0;  /* signal the event loop to exit cleanly */
 }
 
 /* Read this process's cgroupv2 path from /proc/self/cgroup */
@@ -105,6 +101,24 @@ static int handle_rtt_event(void *ctx, void *data, size_t data_sz)
            e->srtt_us / 1000.0);
     fflush(stdout);
     return 0;
+}
+
+/*
+ * Background thread: drains the ring buffer until running is cleared.
+ * handle_rtt_event() is called here for each event — not in main thread.
+ */
+static void *poll_thread(void *arg)
+{
+    (void)arg;
+    while (running) {
+        int n = ring_buffer__poll(rb, 100 /* ms */);
+        if (n < 0 && errno != EINTR) {
+            fprintf(stderr, "ring_buffer__poll error: %s\n", strerror(errno));
+            running = 0;  /* also stop main thread */
+            break;
+        }
+    }
+    return NULL;
 }
 
 int main(int argc, char *argv[])
@@ -185,18 +199,27 @@ int main(int argc, char *argv[])
     }
 
     /* ------------------------------------------------------------------ */
-    /* 5. Event loop                                                       */
-    /*    ring_buffer__poll() blocks up to 100 ms waiting for new events, */
-    /*    then calls handle_rtt_event() for each one and returns.          */
+    /* 5. Spawn poll thread + hold main via pause()                        */
+    /*    poll_thread drains the ring buffer in the background.            */
+    /*    pause() suspends main until SIGINT/SIGTERM sets running=0,       */
+    /*    at which point the poll thread exits and we join it.             */
     /* ------------------------------------------------------------------ */
-    while (1) {
-        int n = ring_buffer__poll(rb, 100 /* ms timeout */);
-        if (n < 0 && errno != EINTR) {
-            fprintf(stderr, "ring_buffer__poll error: %s\n", strerror(errno));
-            break;
-        }
+    pthread_t poll_tid;
+    if (pthread_create(&poll_tid, NULL, poll_thread, NULL) != 0) {
+        fprintf(stderr, "Failed to create poll thread: %s\n", strerror(errno));
+        return 1;
     }
 
-    sig_handler(0);
+    while (running)
+        pause();  /* sleep until any signal interrupts — then recheck running */
+
+    pthread_join(poll_tid, NULL);
+
+    /* Cleanup runs in normal flow — not inside a signal handler */
+    printf("\nDetaching...\n");
+    bpf_prog_detach(cgroup_fd, BPF_CGROUP_SOCK_OPS);
+    ring_buffer__free(rb);
+    bpf_object__close(obj);
+    close(cgroup_fd);
     return 0;
 }
