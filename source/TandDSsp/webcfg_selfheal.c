@@ -34,6 +34,7 @@
 **********************************************************************/
 
 #include <pthread.h>
+#include <time.h>
 #include "webcfg_selfheal.h"
 
 #define MAX_DOC_FIELD_LEN   256
@@ -653,7 +654,9 @@ static void webcfgForceResetProbeHandler(rbusHandle_t handle, rbusEvent_t const*
 static int Wait_For_Event_Handler_Ready(int *elapsed_out)
 {
     rbusError_t err;
-    time_t start_time = time(NULL);
+    struct timespec ts_start, ts_end;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts_start);
 
     if (g_rbusHandle == NULL)
     {
@@ -677,7 +680,8 @@ static int Wait_For_Event_Handler_Ready(int *elapsed_out)
 
     if (err == RBUS_ERROR_SUCCESS || err == RBUS_ERROR_SUBSCRIPTION_ALREADY_EXIST)
     {
-        int elapsed = (int)(time(NULL) - start_time);
+        clock_gettime(CLOCK_MONOTONIC, &ts_end);
+        int elapsed = (int)(ts_end.tv_sec - ts_start.tv_sec);
         CcspTraceInfo(("%s: Event handler ready (subscribe rc=%d) after %d sec\n",
                        __FUNCTION__, err, elapsed));
         if (err == RBUS_ERROR_SUCCESS)
