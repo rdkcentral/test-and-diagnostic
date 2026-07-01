@@ -54,6 +54,15 @@ all-local:
 	    echo "WARNING: LIBBPF_INC/LIBBPF_LIB not set — skipping tcp_loader build"; \
 	fi
 	@if [ -n "$(CLANG)" ] && [ -n "$(KERNEL_SRC)" ] && [ -n "$(LIBBPF_INC)" ]; then \
+	    CLANG_VER=$$($(CLANG) --version 2>/dev/null | grep -oE 'clang version [0-9]+' | grep -oE '[0-9]+$$'); \
+	    if [ -z "$$CLANG_VER" ]; then \
+	        echo "WARNING: could not determine clang version — proceeding anyway"; \
+	    elif [ "$$CLANG_VER" -lt 10 ]; then \
+	        echo "ERROR: clang $$CLANG_VER is too old for BPF compilation (need >= 10)"; \
+	        exit 1; \
+	    else \
+	        echo "  clang version $$CLANG_VER OK"; \
+	    fi; \
 	    echo "  CLANG    tcp_hello.bpf.o"; \
 	    $(CLANG) -O2 -target bpf \
 	        -I$(KERNEL_SRC)/include/uapi \
