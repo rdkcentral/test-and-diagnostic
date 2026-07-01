@@ -418,8 +418,8 @@ static int Get_Component_Version(const char *subdoc, long long *ver_out) {
     return 0;
 }
 
-#define FORCERESET_SET_RETRY_COUNT    12
-#define FORCERESET_SET_RETRY_DELAY   10
+#define FORCERESET_SET_RETRY_COUNT    60
+#define FORCERESET_SET_RETRY_DELAY    10
 
 static int Set_Webcfg_ForceReset(const char *reset_list)
 {
@@ -618,57 +618,6 @@ static cJSON *Load_WebcfgDB_Array(void) {
     return arr;
 }
 
-static char *g_forceResetList = NULL;
-
-static void webcfgForceResetProbeHandler(rbusHandle_t handle, rbusEvent_t const* event,
-                                         rbusEventSubscription_t* subscription)
-{
-    (void)handle; (void)event; (void)subscription;
-}
-
-/*
- * webcfgSubscribeAsyncCallback() - Called by rbus when the async subscription
- * to webcfgSubdocForceReset succeeds or fails. On success, unsubscribes
- * (this was only a probe) and triggers Set_Webcfg_ForceReset with the
- * stored reset list.
- */
-static void webcfgSubscribeAsyncCallback(rbusHandle_t handle,
-                                         rbusEventSubscription_t* subscription,
-                                         rbusError_t error)
-{
-    (void)handle;
-    (void)subscription;
-
-    if (error == RBUS_ERROR_SUCCESS)
-    {
-        CcspTraceInfo(("%s: Event handler ready, subscription succeeded\n", __FUNCTION__));
-
-        rbusError_t uerr = rbusEvent_Unsubscribe(g_rbusHandle,
-                               "Device.X_RDK_WebConfig.webcfgSubdocForceReset");
-        if (uerr != RBUS_ERROR_SUCCESS)
-        {
-            CcspTraceError(("%s: rbusEvent_Unsubscribe failed, rc=%d\n",
-                            __FUNCTION__, uerr));
-        }
-
-        if (g_forceResetList)
-        {
-            Set_Webcfg_ForceReset(g_forceResetList);
-            free(g_forceResetList);
-            g_forceResetList = NULL;
-        }
-    }
-    else
-    {
-        CcspTraceError(("%s: Async subscribe failed (rc=%d), skipping force reset\n",
-                        __FUNCTION__, error));
-        free(g_forceResetList);
-        g_forceResetList = NULL;
-    }
-
-    CcspTraceInfo(("=== Webconfig Selfheal Completed ===\n"));
-}
-
 static void *webcfg_subdoc_mismatch_boot_check_thread(void *arg)
 {
     (void)arg;
@@ -753,33 +702,18 @@ void webcfg_subdoc_mismatch_boot_check(void) {
         if (g_rbusHandle == NULL)
         {
             CcspTraceError(("g_rbusHandle is NULL, skipping force reset\n"));
-            free(reset_list);
         }
         else
         {
-            g_forceResetList = reset_list;
-
-            CcspTraceInfo(("Subscribing async to webcfgSubdocForceReset event\n"));
-
-            rbusError_t err = rbusEvent_SubscribeAsync(
-                g_rbusHandle,
-                "Device.X_RDK_WebConfig.webcfgSubdocForceReset",
-                webcfgForceResetProbeHandler,
-                webcfgSubscribeAsyncCallback,
-                "TandD_EventReady_Check",
-                0);
-
-            if (err != RBUS_ERROR_SUCCESS)
-            {
-                CcspTraceError(("rbusEvent_SubscribeAsync failed, rc=%d\n", err));
-                free(g_forceResetList);
-                g_forceResetList = NULL;
-            }
+            Set_Webcfg_ForceReset(reset_list);
         }
+
+        free(reset_list);
     } else {
         CcspTraceInfo(("No subdoc version mismatches detected\n"));
         free(reset_list);
     }
 
     cJSON_Delete(arr);
+    CcspTraceInfo(("=== Webconfig Selfheal Completed ===\n"));
 }
