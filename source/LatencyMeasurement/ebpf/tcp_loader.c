@@ -1,10 +1,14 @@
 /*
- * tcp_loader.c - Userspace loader for tcp_hello.bpf.o
+ * tcp_loader.c - Userspace loader for tcp_hello.bpf.o (ring buffer edition)
  *
  * Usage:
  *   ./tcp_loader              # attach to cgroupv2 root (all processes)
  *   ./tcp_loader self         # attach to this process's own cgroup
  *   ./tcp_loader /sys/fs/cgroup/unified/system.slice/...  # specific cgroup
+ *
+ * The BPF program pushes one rtt_event per RTT_CB into a ring buffer.
+ * libbpf mmap()s the ring internally; handle_rtt_event() is called
+ * for each event without extra syscall overhead per read.
  *
  * To stop: Ctrl+C
  */
@@ -23,27 +27,21 @@
 #define CGROUP_ROOT  "/sys/fs/cgroup/unified"
 #define BPF_OBJ_PATH "/usr/bin/ebpf/tcp_hello.bpf.o"
 
-/* Must match struct conn_key in tcp_hello.bpf.c exactly */
-struct conn_key {
+/* Must match struct rtt_event in tcp_hello.bpf.c exactly */
+struct rtt_event {
     __u32 local_ip6[4];
     __u32 remote_ip6[4];
     __u16 local_port;
     __u16 remote_port;
     __u8  family;
     __u8  pad[3];
-};
-
-/* Must match struct rtt_val in tcp_hello.bpf.c exactly */
-struct rtt_val {
     __u32 srtt_us;
-    __u32 min_rtt_us;
-    __u32 max_rtt_us;
-    __u32 samples;
 };
 
-static int  prog_fd   = -1;
-static int  cgroup_fd = -1;
-static char g_cgroup_path[512];
+static int               prog_fd   = -1;
+static int               cgroup_fd = -1;
+static char              g_cgroup_path[512];
+static struct ring_buffer *rb      = NULL;
 
 static void sig_handler(int sig)
 {
@@ -52,6 +50,8 @@ static void sig_handler(int sig)
         bpf_prog_detach(cgroup_fd, BPF_CGROUP_SOCK_OPS);
         printf("\nDetached BPF program from cgroup.\n");
     }
+    if (rb)
+        ring_buffer__free(rb);
     exit(0);
 }
 
@@ -74,43 +74,37 @@ static int get_self_cgroup_path(char *buf, size_t len)
     return -1;
 }
 
-/* Print RTT map — one line per active TCP connection (IPv4 and IPv6) */
-static void print_rtt_map(int map_fd)
+/*
+ * Called by ring_buffer__poll() for each event delivered from the kernel.
+ * Runs in the same thread as the poll loop — no locking needed.
+ */
+static int handle_rtt_event(void *ctx, void *data, size_t data_sz)
 {
-    struct conn_key key = {}, next_key;
-    struct rtt_val  val;
-    char lip[INET6_ADDRSTRLEN], rip[INET6_ADDRSTRLEN];
-    int  found = 0;
+    (void)ctx;
+    if (data_sz < sizeof(struct rtt_event))
+        return 0;
 
-    int ret = bpf_map_get_next_key(map_fd, NULL, &key);
-    while (ret == 0) {
-        if (bpf_map_lookup_elem(map_fd, &key, &val) == 0) {
-            int af = (key.family == AF_INET6) ? AF_INET6 : AF_INET;
-            inet_ntop(af, key.local_ip6,  lip, sizeof(lip));
-            inet_ntop(af, key.remote_ip6, rip, sizeof(rip));
-            /* Wrap IPv6 addresses in brackets so port is unambiguous */
-            char lfmt[INET6_ADDRSTRLEN + 3], rfmt[INET6_ADDRSTRLEN + 3];
-            if (af == AF_INET6) {
-                snprintf(lfmt, sizeof(lfmt), "[%s]", lip);
-                snprintf(rfmt, sizeof(rfmt), "[%s]", rip);
-            } else {
-                snprintf(lfmt, sizeof(lfmt), "%s", lip);
-                snprintf(rfmt, sizeof(rfmt), "%s", rip);
-            }
-            printf("  %s:%-5u -> %s:%-5u  "
-                   "RTT: %5.2f ms  min: %5.2f ms  max: %5.2f ms  samples: %u\n",
-                   lfmt, key.local_port, rfmt, key.remote_port,
-                   val.srtt_us    / 1000.0,
-                   val.min_rtt_us / 1000.0,
-                   val.max_rtt_us / 1000.0,
-                   val.samples);
-            found++;
-        }
-        ret = bpf_map_get_next_key(map_fd, &key, &next_key);
-        key = next_key;
+    const struct rtt_event *e = data;
+    int af = (e->family == AF_INET6) ? AF_INET6 : AF_INET;
+
+    char lip[INET6_ADDRSTRLEN], rip[INET6_ADDRSTRLEN];
+    inet_ntop(af, e->local_ip6,  lip, sizeof(lip));
+    inet_ntop(af, e->remote_ip6, rip, sizeof(rip));
+
+    char lfmt[INET6_ADDRSTRLEN + 3], rfmt[INET6_ADDRSTRLEN + 3];
+    if (af == AF_INET6) {
+        snprintf(lfmt, sizeof(lfmt), "[%s]", lip);
+        snprintf(rfmt, sizeof(rfmt), "[%s]", rip);
+    } else {
+        snprintf(lfmt, sizeof(lfmt), "%s", lip);
+        snprintf(rfmt, sizeof(rfmt), "%s", rip);
     }
-    if (!found)
-        printf("  (no connections seen yet — try: curl http://example.com)\n");
+
+    printf("  %s:%-5u -> %s:%-5u  RTT: %5.2f ms\n",
+           lfmt, e->local_port, rfmt, e->remote_port,
+           e->srtt_us / 1000.0);
+    fflush(stdout);
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -168,27 +162,41 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Failed to attach BPF program to cgroup: %s\n", strerror(errno));
         return 1;
     }
-    printf("Attached successfully. Now run: curl http://example.com\n\n");
+    printf("Attached. Listening for RTT events (Ctrl+C to stop)...\n\n");
 
     signal(SIGINT,  sig_handler);
     signal(SIGTERM, sig_handler);
 
     /* ------------------------------------------------------------------ */
-    /* 4. Poll the RTT hash map and print per-connection stats             */
+    /* 4. Create ring buffer consumer                                      */
+    /*    libbpf calls mmap() on the map fd to share the ring with kernel  */
     /* ------------------------------------------------------------------ */
-    struct bpf_map *map = bpf_object__find_map_by_name(obj, "rtt_map");
+    struct bpf_map *map = bpf_object__find_map_by_name(obj, "rtt_events");
     if (!map) {
-        fprintf(stderr, "Map 'rtt_map' not found.\n");
+        fprintf(stderr, "Map 'rtt_events' not found.\n");
         return 1;
     }
     int map_fd = bpf_map__fd(map);
-    int tick = 0;
 
-    while (1) {
-        printf("\n--- tick %d ---\n", ++tick);
-        print_rtt_map(map_fd);
-        sleep(2);
+    rb = ring_buffer__new(map_fd, handle_rtt_event, NULL, NULL);
+    if (!rb) {
+        fprintf(stderr, "Failed to create ring buffer: %s\n", strerror(errno));
+        return 1;
     }
 
+    /* ------------------------------------------------------------------ */
+    /* 5. Event loop                                                       */
+    /*    ring_buffer__poll() blocks up to 100 ms waiting for new events, */
+    /*    then calls handle_rtt_event() for each one and returns.          */
+    /* ------------------------------------------------------------------ */
+    while (1) {
+        int n = ring_buffer__poll(rb, 100 /* ms timeout */);
+        if (n < 0 && errno != EINTR) {
+            fprintf(stderr, "ring_buffer__poll error: %s\n", strerror(errno));
+            break;
+        }
+    }
+
+    sig_handler(0);
     return 0;
 }

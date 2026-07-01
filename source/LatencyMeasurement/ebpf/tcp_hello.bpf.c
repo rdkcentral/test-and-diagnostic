@@ -3,12 +3,12 @@
  *
  * For each TCP connection (IPv4 and IPv6):
  *   - On ESTABLISHED: opt-in to RTT callbacks
- *   - On RTT_CB: read kernel's smoothed RTT, store min/max/latest in a hash map
+ *   - On RTT_CB: push an rtt_event to the ring buffer
  *
- * Map key:   5-tuple (family, local_ip, remote_ip, local_port, remote_port)
- * Map value: srtt_us (latest), min_rtt_us, max_rtt_us, sample count
+ * The ring buffer is mmap()'d by userspace (via libbpf ring_buffer API),
+ * so each RTT sample is delivered without extra copies.
  *
- * Userspace reads the hash map and displays per-connection RTT stats.
+ * Event: 5-tuple (family, local_ip, remote_ip, local_port, remote_port) + srtt_us
  */
 
 #include <linux/bpf.h>
@@ -19,45 +19,29 @@
 #define AF_INET6 10
 
 /*
- * Connection 5-tuple — map key.
- * local_ip6 / remote_ip6: 128-bit address in network byte order.
- *   For AF_INET:  [0] = IPv4 address, [1-3] = 0
- *   For AF_INET6: full 128-bit address across all four words
- * local_port:  host byte order (as given by skops)
- * remote_port: host byte order (converted from skops with bpf_ntohl)
- * family:      AF_INET (2) or AF_INET6 (10)
- * pad[3]:      explicit zero padding — must stay zeroed for map lookups
+ * RTT event record — one pushed to the ring buffer per RTT_CB fire.
+ * local_ip6 / remote_ip6: 128-bit in network byte order.
+ *   AF_INET:  [0] = IPv4 addr, [1-3] = 0
+ *   AF_INET6: full 128-bit across all four words
  */
-struct conn_key {
+struct rtt_event {
     __u32 local_ip6[4];
     __u32 remote_ip6[4];
-    __u16 local_port;
-    __u16 remote_port;
-    __u8  family;
+    __u16 local_port;       /* host byte order */
+    __u16 remote_port;      /* host byte order */
+    __u8  family;           /* AF_INET or AF_INET6 */
     __u8  pad[3];
+    __u32 srtt_us;          /* smoothed RTT in microseconds */
 };
 
 /*
- * RTT statistics per connection — map value.
- * All RTT values in microseconds.
+ * Ring buffer map — userspace mmap()s this region to read events.
+ * max_entries = ring size in bytes; must be power-of-2 multiple of page size.
+ * Legacy map definition (no BTF) required without CONFIG_DEBUG_INFO_BTF.
  */
-struct rtt_val {
-    __u32 srtt_us;      /* latest kernel smoothed RTT  */
-    __u32 min_rtt_us;   /* minimum RTT seen            */
-    __u32 max_rtt_us;   /* maximum RTT seen            */
-    __u32 samples;      /* number of RTT_CB fires      */
-};
-
-/*
- * Hash map: conn_key → rtt_val
- * Holds up to 256 concurrent TCP connections.
- * Legacy map definition (no BTF) — required without CONFIG_DEBUG_INFO_BTF.
- */
-struct bpf_map_def SEC("maps") rtt_map = {
-    .type        = BPF_MAP_TYPE_HASH,
-    .key_size    = sizeof(struct conn_key),
-    .value_size  = sizeof(struct rtt_val),
-    .max_entries = 256,
+struct bpf_map_def SEC("maps") rtt_events = {
+    .type        = BPF_MAP_TYPE_RINGBUF,
+    .max_entries = 1 << 16,  /* 64 KB — holds ~1000 events before wrap */
 };
 
 SEC("sockops")
@@ -79,45 +63,43 @@ int measure_rtt(struct bpf_sock_ops *skops)
     case BPF_SOCK_OPS_RTT_CB:
         {
             /*
-             * skops->srtt_us is stored as srtt << 3 internally.
-             * Shift right by 3 to get the actual smoothed RTT in microseconds.
+             * Reserve space in the ring buffer.
+             * If the ring is full the event is silently dropped (non-blocking).
              */
-            __u32 rtt_us = skops->srtt_us >> 3;
+            struct rtt_event *e = bpf_ringbuf_reserve(&rtt_events, sizeof(*e), 0);
+            if (!e)
+                break;
 
-            struct conn_key key = {};
-            key.family      = family;
-            key.local_port  = (__u16)skops->local_port;
-            key.remote_port = (__u16)bpf_ntohl(skops->remote_port);
+            e->family      = family;
+            e->pad[0]      = 0;
+            e->pad[1]      = 0;
+            e->pad[2]      = 0;
+            e->local_port  = (__u16)skops->local_port;
+            e->remote_port = (__u16)bpf_ntohl(skops->remote_port);
+            /* srtt_us is stored as srtt << 3 internally; shift right to get us */
+            e->srtt_us     = skops->srtt_us >> 3;
+
             if (family == AF_INET) {
-                key.local_ip6[0]  = skops->local_ip4;
-                key.remote_ip6[0] = skops->remote_ip4;
+                e->local_ip6[0]  = skops->local_ip4;
+                e->local_ip6[1]  = 0;
+                e->local_ip6[2]  = 0;
+                e->local_ip6[3]  = 0;
+                e->remote_ip6[0] = skops->remote_ip4;
+                e->remote_ip6[1] = 0;
+                e->remote_ip6[2] = 0;
+                e->remote_ip6[3] = 0;
             } else {
-                key.local_ip6[0]  = skops->local_ip6[0];
-                key.local_ip6[1]  = skops->local_ip6[1];
-                key.local_ip6[2]  = skops->local_ip6[2];
-                key.local_ip6[3]  = skops->local_ip6[3];
-                key.remote_ip6[0] = skops->remote_ip6[0];
-                key.remote_ip6[1] = skops->remote_ip6[1];
-                key.remote_ip6[2] = skops->remote_ip6[2];
-                key.remote_ip6[3] = skops->remote_ip6[3];
+                e->local_ip6[0]  = skops->local_ip6[0];
+                e->local_ip6[1]  = skops->local_ip6[1];
+                e->local_ip6[2]  = skops->local_ip6[2];
+                e->local_ip6[3]  = skops->local_ip6[3];
+                e->remote_ip6[0] = skops->remote_ip6[0];
+                e->remote_ip6[1] = skops->remote_ip6[1];
+                e->remote_ip6[2] = skops->remote_ip6[2];
+                e->remote_ip6[3] = skops->remote_ip6[3];
             }
 
-            struct rtt_val *existing = bpf_map_lookup_elem(&rtt_map, &key);
-            if (existing) {
-                /* Update in place — direct write safe for HASH map values */
-                existing->srtt_us = rtt_us;
-                existing->samples++;
-                if (rtt_us < existing->min_rtt_us) existing->min_rtt_us = rtt_us;
-                if (rtt_us > existing->max_rtt_us) existing->max_rtt_us = rtt_us;
-            } else {
-                /* First RTT sample for this connection */
-                struct rtt_val val = {};
-                val.srtt_us    = rtt_us;
-                val.min_rtt_us = rtt_us;
-                val.max_rtt_us = rtt_us;
-                val.samples    = 1;
-                bpf_map_update_elem(&rtt_map, &key, &val, BPF_ANY);
-            }
+            bpf_ringbuf_submit(e, 0);
         }
         break;
 
