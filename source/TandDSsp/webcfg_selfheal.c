@@ -637,27 +637,17 @@ static void webcfgSubscribeAsyncCallback(rbusHandle_t handle,
                                          rbusError_t error)
 {
     (void)handle;
-<<<<<<< HEAD
-=======
     (void)subscription;
->>>>>>> ad72ff9 (Checking with 1000 secs wait thread)
 
     if (error == RBUS_ERROR_SUCCESS)
     {
         CcspTraceInfo(("%s: Event handler ready, subscription succeeded\n", __FUNCTION__));
 
-<<<<<<< HEAD
-        rbusError_t uerr = rbusEvent_UnsubscribeEx(g_rbusHandle, subscription, 1);
-        if (uerr != RBUS_ERROR_SUCCESS)
-        {
-            CcspTraceError(("%s: rbusEvent_UnsubscribeEx failed, rc=%d\n",
-=======
         rbusError_t uerr = rbusEvent_Unsubscribe(g_rbusHandle,
                                "Device.X_RDK_WebConfig.webcfgSubdocForceReset");
         if (uerr != RBUS_ERROR_SUCCESS)
         {
             CcspTraceError(("%s: rbusEvent_Unsubscribe failed, rc=%d\n",
->>>>>>> ad72ff9 (Checking with 1000 secs wait thread)
                             __FUNCTION__, uerr));
         }
 
