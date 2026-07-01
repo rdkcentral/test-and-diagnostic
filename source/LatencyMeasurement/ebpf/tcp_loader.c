@@ -1,22 +1,12 @@
 /*
  * tcp_loader.c - Userspace loader for tcp_hello.bpf.o
  *
- * What it does:
- *   1. Loads tcp_hello.bpf.o into the kernel via libbpf
- *   2. Attaches the sock_ops program to cgroupv2 root
- *      (covers ALL TCP connections on the device)
- *   3. Polls the rtt_counter map every second and prints it
- *
  * Usage:
- *   ./tcp_loader
- *   (tcp_hello.bpf.o must be in the same directory)
+ *   ./tcp_loader              # attach to cgroupv2 root (all processes)
+ *   ./tcp_loader self         # attach to this process's own cgroup
+ *   ./tcp_loader /sys/fs/cgroup/unified/system.slice/...  # specific cgroup
  *
- * To stop: Ctrl+C — detaches the BPF program from the cgroup
- *
- * Compile (ARM, via Yocto cross-compiler):
- *   ${CC} ${CFLAGS} ${LDFLAGS} tcp_loader.c \
- *     -I <staging_incdir> -L <staging_libdir> \
- *     -lbpf -lelf -lz -o tcp_loader
+ * To stop: Ctrl+C
  */
 
 #include <stdio.h>
@@ -29,16 +19,13 @@
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 
-/* Path to cgroupv2 on this device (confirmed from mount output) */
-#define CGROUP_PATH "/sys/fs/cgroup/unified"
-
-/* BPF object file — expected in same directory as the loader */
+#define CGROUP_ROOT  "/sys/fs/cgroup/unified"
 #define BPF_OBJ_PATH "/usr/bin/ebpf/tcp_hello.bpf.o"
 
-static int prog_fd   = -1;
-static int cgroup_fd = -1;
+static int  prog_fd   = -1;
+static int  cgroup_fd = -1;
+static char g_cgroup_path[512];
 
-/* Detach cleanly on Ctrl+C */
 static void sig_handler(int sig)
 {
     (void)sig;
@@ -49,8 +36,41 @@ static void sig_handler(int sig)
     exit(0);
 }
 
-int main(void)
+/* Read this process's cgroupv2 path from /proc/self/cgroup */
+static int get_self_cgroup_path(char *buf, size_t len)
 {
+    FILE *f = fopen("/proc/self/cgroup", "r");
+    if (!f) return -1;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "0::", 3) == 0) {
+            char *path = line + 3;
+            path[strcspn(path, "\n")] = '\0';
+            snprintf(buf, len, "%s%s", CGROUP_ROOT, path);
+            fclose(f);
+            return 0;
+        }
+    }
+    fclose(f);
+    return -1;
+}
+
+int main(int argc, char *argv[])
+{
+    /* Resolve cgroup path */
+    if (argc < 2 || strcmp(argv[1], "root") == 0) {
+        snprintf(g_cgroup_path, sizeof(g_cgroup_path), "%s", CGROUP_ROOT);
+    } else if (strcmp(argv[1], "self") == 0) {
+        if (get_self_cgroup_path(g_cgroup_path, sizeof(g_cgroup_path)) < 0) {
+            fprintf(stderr, "Failed to read own cgroup\n"); return 1;
+        }
+    } else {
+        snprintf(g_cgroup_path, sizeof(g_cgroup_path), "%s", argv[1]);
+    }
+    printf("Attaching to: %s\n", g_cgroup_path);
+    printf("Loader's own cgroup: "); fflush(stdout);
+    system("grep '^0::' /proc/self/cgroup");
+    printf("\n");
     /* ------------------------------------------------------------------ */
     /* 1. Load the BPF object                                              */
     /* ------------------------------------------------------------------ */
@@ -80,9 +100,9 @@ int main(void)
     /* ------------------------------------------------------------------ */
     /* 3. Attach to cgroupv2 root — covers all processes on the device    */
     /* ------------------------------------------------------------------ */
-    cgroup_fd = open(CGROUP_PATH, O_RDONLY);
+    cgroup_fd = open(g_cgroup_path, O_RDONLY);
     if (cgroup_fd < 0) {
-        fprintf(stderr, "Failed to open cgroup at %s: %s\n", CGROUP_PATH, strerror(errno));
+        fprintf(stderr, "Failed to open cgroup at %s: %s\n", g_cgroup_path, strerror(errno));
         return 1;
     }
 
@@ -90,29 +110,28 @@ int main(void)
         fprintf(stderr, "Failed to attach BPF program to cgroup: %s\n", strerror(errno));
         return 1;
     }
-    printf("Attached to cgroup: %s\n", CGROUP_PATH);
-    printf("Open a webpage from a LAN device to generate TCP connections.\n\n");
+    printf("Attached successfully. Now run: curl http://example.com\n\n");
 
     signal(SIGINT,  sig_handler);
     signal(SIGTERM, sig_handler);
 
     /* ------------------------------------------------------------------ */
-    /* 4. Poll the counter map and print every second                      */
+    /* 4. Poll all diagnostic counters every second                        */
     /* ------------------------------------------------------------------ */
-    struct bpf_map *map = bpf_object__find_map_by_name(obj, "rtt_counter");
+    struct bpf_map *map = bpf_object__find_map_by_name(obj, "counters");
     if (!map) {
-        fprintf(stderr, "Map 'rtt_counter' not found.\n");
+        fprintf(stderr, "Map 'counters' not found.\n");
         return 1;
     }
     int map_fd = bpf_map__fd(map);
 
-    __u32 key = 0;
-    __u64 val = 0;
+    __u64 val[4] = {0};
     while (1) {
-        if (bpf_map_lookup_elem(map_fd, &key, &val) == 0)
-            printf("\rRTT callbacks fired: %llu   ", val);
-        else
-            printf("\rMap read error: %s", strerror(errno));
+        __u32 k;
+        for (k = 0; k < 4; k++)
+            bpf_map_lookup_elem(map_fd, &k, &val[k]);
+        printf("\r[RTT_CB=%llu] [ACTIVE_ESTAB=%llu] [PASSIVE_ESTAB=%llu] [OTHER=%llu]   ",
+               val[0], val[1], val[2], val[3]);
         fflush(stdout);
         sleep(1);
     }

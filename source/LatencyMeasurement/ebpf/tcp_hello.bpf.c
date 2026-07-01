@@ -22,19 +22,30 @@
 #include <bpf/bpf_helpers.h>
 
 /*
- * Single-entry ARRAY map — key 0 holds the RTT callback counter.
- * Userspace reads this to confirm the BPF program is running.
+ * Diagnostic counters — one per event type.
+ * Key 0: BPF_SOCK_OPS_RTT_CB              (RTT update)
+ * Key 1: BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB  (client-side handshake done)
+ * Key 2: BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB (server-side handshake done)
+ * Key 3: any other op (catch-all — confirms the BPF fn is called at all)
  *
- * Using legacy map definition (SEC("maps") not SEC(".maps")) to avoid
- * BTF dependency. The new BTF-based syntax (SEC(".maps") with __uint/__type)
- * requires CONFIG_DEBUG_INFO_BTF=y in the kernel, which is not set.
+ * If key 3 stays 0 after a TCP connection: BPF program is not being called
+ *   → cgroup attachment issue
+ * If key 1/2 > 0 but key 0 = 0: bpf_sock_ops_cb_flags_set is not working
+ * If key 1/2 > 0 and key 0 > 0: everything works
  */
-struct bpf_map_def SEC("maps") rtt_counter = {
+struct bpf_map_def SEC("maps") counters = {
     .type        = BPF_MAP_TYPE_ARRAY,
     .key_size    = sizeof(__u32),
     .value_size  = sizeof(__u64),
-    .max_entries = 1,
+    .max_entries = 4,
 };
+
+static __always_inline void inc(__u32 key)
+{
+    __u64 *val = bpf_map_lookup_elem(&counters, &key);
+    if (val)
+        (*val)++;
+}
 
 /*
  * count_rtt - called by the kernel TCP stack on sock_ops events.
@@ -57,19 +68,23 @@ int count_rtt(struct bpf_sock_ops *skops)
     switch (skops->op) {
 
     case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:   /* TCP handshake done (client side) */
+        inc(1);
+        bpf_sock_ops_cb_flags_set(skops,
+            skops->bpf_sock_ops_cb_flags | BPF_SOCK_OPS_RTT_CB_FLAG);
+        break;
+
     case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:  /* TCP handshake done (server side) */
-        /* Opt this socket in to RTT callbacks */
+        inc(2);
         bpf_sock_ops_cb_flags_set(skops,
             skops->bpf_sock_ops_cb_flags | BPF_SOCK_OPS_RTT_CB_FLAG);
         break;
 
     case BPF_SOCK_OPS_RTT_CB:  /* RTT updated for an opted-in socket */
-        {
-            __u32 key = 0;
-            __u64 *val = bpf_map_lookup_elem(&rtt_counter, &key);
-            if (val)
-                (*val)++;  /* direct write — ARM32 JIT has no BPF_ATOMIC support */
-        }
+        inc(0);
+        break;
+
+    default:
+        inc(3);  /* catch-all: BPF fn WAS called, just not for our ops */
         break;
     }
     return 1;
