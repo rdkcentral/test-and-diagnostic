@@ -37,28 +37,44 @@ KERNEL_SRC ?=
 LIBBPF_INC ?=
 LIBBPF_LIB ?=
 
-# Install both products under $(bindir)/ebpf/
+# Install destination for both products
 ebpfdir = $(bindir)/ebpf
 
-# tcp_loader — cross-compiled userspace binary
-ebpf_PROGRAMS = tcp_loader
+EXTRA_DIST = tcp_hello.bpf.c tcp_loader.c
 
-tcp_loader_SOURCES  = tcp_loader.c
-tcp_loader_CPPFLAGS = -I$(LIBBPF_INC)
-tcp_loader_LDFLAGS  = -L$(LIBBPF_LIB) -lbpf -lelf -lz -lpthread
+# Build both products only when prerequisites are supplied.
+# Standalone builds (README procedure) that lack clang-native or libbpf
+# will print a warning and skip gracefully instead of failing.
+all-local:
+	@if [ -n "$(LIBBPF_INC)" ] && [ -n "$(LIBBPF_LIB)" ]; then \
+	    echo "  CC       tcp_loader"; \
+	    $(CC) -Wall -O2 -I$(LIBBPF_INC) $(srcdir)/tcp_loader.c \
+	        -L$(LIBBPF_LIB) -lbpf -lelf -lz -lpthread -o tcp_loader; \
+	else \
+	    echo "WARNING: LIBBPF_INC/LIBBPF_LIB not set — skipping tcp_loader build"; \
+	fi
+	@if [ -n "$(CLANG)" ] && [ -n "$(KERNEL_SRC)" ] && [ -n "$(LIBBPF_INC)" ]; then \
+	    echo "  CLANG    tcp_hello.bpf.o"; \
+	    $(CLANG) -O2 -target bpf \
+	        -I$(KERNEL_SRC)/include/uapi \
+	        -I$(KERNEL_SRC)/include \
+	        -I$(LIBBPF_INC) \
+	        -c $(srcdir)/tcp_hello.bpf.c -o tcp_hello.bpf.o; \
+	else \
+	    echo "WARNING: CLANG/KERNEL_SRC/LIBBPF_INC not set — skipping BPF object build"; \
+	fi
 
-# tcp_hello.bpf.o — BPF object installed as a data file alongside the loader
-ebpf_DATA = tcp_hello.bpf.o
+install-exec-local:
+	@if [ -f tcp_loader ]; then \
+	    $(INSTALL) -d $(DESTDIR)$(ebpfdir); \
+	    $(INSTALL) -m 0755 tcp_loader $(DESTDIR)$(ebpfdir)/tcp_loader; \
+	fi
 
-# BPF object must be compiled with clang -target bpf, not $(CC)
-EXTRA_DIST = tcp_hello.bpf.c
-
-tcp_hello.bpf.o: tcp_hello.bpf.c
-	$(CLANG) -O2 -target bpf \
-	    -I$(KERNEL_SRC)/include/uapi \
-	    -I$(KERNEL_SRC)/include \
-	    -I$(LIBBPF_INC) \
-	    -c $< -o $@
+install-data-local:
+	@if [ -f tcp_hello.bpf.o ]; then \
+	    $(INSTALL) -d $(DESTDIR)$(ebpfdir); \
+	    $(INSTALL) -m 0644 tcp_hello.bpf.o $(DESTDIR)$(ebpfdir)/tcp_hello.bpf.o; \
+	fi
 
 clean-local:
-	rm -f tcp_hello.bpf.o
+	rm -f tcp_loader tcp_hello.bpf.o
