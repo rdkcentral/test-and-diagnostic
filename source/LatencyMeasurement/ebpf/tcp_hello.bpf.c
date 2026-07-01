@@ -1,11 +1,11 @@
 /*
  * tcp_hello.bpf.c - eBPF sock_ops program: per-connection RTT measurement
  *
- * For each TCP connection (IPv4):
+ * For each TCP connection (IPv4 and IPv6):
  *   - On ESTABLISHED: opt-in to RTT callbacks
  *   - On RTT_CB: read kernel's smoothed RTT, store min/max/latest in a hash map
  *
- * Map key:   4-tuple (local_ip, remote_ip, local_port, remote_port)
+ * Map key:   5-tuple (family, local_ip, remote_ip, local_port, remote_port)
  * Map value: srtt_us (latest), min_rtt_us, max_rtt_us, sample count
  *
  * Userspace reads the hash map and displays per-connection RTT stats.
@@ -15,19 +15,26 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
-#define AF_INET 2
+#define AF_INET  2
+#define AF_INET6 10
 
 /*
- * Connection 4-tuple — map key.
- * local_ip4 / remote_ip4: network byte order (as given by skops)
+ * Connection 5-tuple — map key.
+ * local_ip6 / remote_ip6: 128-bit address in network byte order.
+ *   For AF_INET:  [0] = IPv4 address, [1-3] = 0
+ *   For AF_INET6: full 128-bit address across all four words
  * local_port:  host byte order (as given by skops)
  * remote_port: host byte order (converted from skops with bpf_ntohl)
+ * family:      AF_INET (2) or AF_INET6 (10)
+ * pad[3]:      explicit zero padding — must stay zeroed for map lookups
  */
 struct conn_key {
-    __u32 local_ip4;
-    __u32 remote_ip4;
+    __u32 local_ip6[4];
+    __u32 remote_ip6[4];
     __u16 local_port;
     __u16 remote_port;
+    __u8  family;
+    __u8  pad[3];
 };
 
 /*
@@ -56,8 +63,8 @@ struct bpf_map_def SEC("maps") rtt_map = {
 SEC("sockops")
 int measure_rtt(struct bpf_sock_ops *skops)
 {
-    /* Only handle IPv4 — IPv6 support can be added later */
-    if (skops->family != AF_INET)
+    __u8 family = (__u8)skops->family;
+    if (family != AF_INET && family != AF_INET6)
         return 1;
 
     switch (skops->op) {
@@ -78,10 +85,22 @@ int measure_rtt(struct bpf_sock_ops *skops)
             __u32 rtt_us = skops->srtt_us >> 3;
 
             struct conn_key key = {};
-            key.local_ip4   = skops->local_ip4;
-            key.remote_ip4  = skops->remote_ip4;
+            key.family      = family;
             key.local_port  = (__u16)skops->local_port;
             key.remote_port = (__u16)bpf_ntohl(skops->remote_port);
+            if (family == AF_INET) {
+                key.local_ip6[0]  = skops->local_ip4;
+                key.remote_ip6[0] = skops->remote_ip4;
+            } else {
+                key.local_ip6[0]  = skops->local_ip6[0];
+                key.local_ip6[1]  = skops->local_ip6[1];
+                key.local_ip6[2]  = skops->local_ip6[2];
+                key.local_ip6[3]  = skops->local_ip6[3];
+                key.remote_ip6[0] = skops->remote_ip6[0];
+                key.remote_ip6[1] = skops->remote_ip6[1];
+                key.remote_ip6[2] = skops->remote_ip6[2];
+                key.remote_ip6[3] = skops->remote_ip6[3];
+            }
 
             struct rtt_val *existing = bpf_map_lookup_elem(&rtt_map, &key);
             if (existing) {

@@ -25,10 +25,12 @@
 
 /* Must match struct conn_key in tcp_hello.bpf.c exactly */
 struct conn_key {
-    __u32 local_ip4;
-    __u32 remote_ip4;
+    __u32 local_ip6[4];
+    __u32 remote_ip6[4];
     __u16 local_port;
     __u16 remote_port;
+    __u8  family;
+    __u8  pad[3];
 };
 
 /* Must match struct rtt_val in tcp_hello.bpf.c exactly */
@@ -72,19 +74,20 @@ static int get_self_cgroup_path(char *buf, size_t len)
     return -1;
 }
 
-/* Print RTT map — one line per active TCP connection */
+/* Print RTT map — one line per active TCP connection (IPv4 and IPv6) */
 static void print_rtt_map(int map_fd)
 {
     struct conn_key key = {}, next_key;
     struct rtt_val  val;
-    char lip[INET_ADDRSTRLEN], rip[INET_ADDRSTRLEN];
+    char lip[INET6_ADDRSTRLEN], rip[INET6_ADDRSTRLEN];
     int  found = 0;
 
     int ret = bpf_map_get_next_key(map_fd, NULL, &key);
     while (ret == 0) {
         if (bpf_map_lookup_elem(map_fd, &key, &val) == 0) {
-            inet_ntop(AF_INET, &key.local_ip4,  lip, sizeof(lip));
-            inet_ntop(AF_INET, &key.remote_ip4, rip, sizeof(rip));
+            int af = (key.family == AF_INET6) ? AF_INET6 : AF_INET;
+            inet_ntop(af, key.local_ip6,  lip, sizeof(lip));
+            inet_ntop(af, key.remote_ip6, rip, sizeof(rip));
             printf("  %s:%-5u -> %s:%-5u  "
                    "RTT: %5.2f ms  min: %5.2f ms  max: %5.2f ms  samples: %u\n",
                    lip, key.local_port, rip, key.remote_port,
@@ -98,7 +101,7 @@ static void print_rtt_map(int map_fd)
         key = next_key;
     }
     if (!found)
-        printf("  (no IPv4 connections seen yet — try: curl http://example.com)\n");
+        printf("  (no connections seen yet — try: curl http://example.com)\n");
 }
 
 int main(int argc, char *argv[])
