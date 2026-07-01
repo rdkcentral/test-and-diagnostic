@@ -88,9 +88,18 @@ static void print_rtt_map(int map_fd)
             int af = (key.family == AF_INET6) ? AF_INET6 : AF_INET;
             inet_ntop(af, key.local_ip6,  lip, sizeof(lip));
             inet_ntop(af, key.remote_ip6, rip, sizeof(rip));
+            /* Wrap IPv6 addresses in brackets so port is unambiguous */
+            char lfmt[INET6_ADDRSTRLEN + 3], rfmt[INET6_ADDRSTRLEN + 3];
+            if (af == AF_INET6) {
+                snprintf(lfmt, sizeof(lfmt), "[%s]", lip);
+                snprintf(rfmt, sizeof(rfmt), "[%s]", rip);
+            } else {
+                snprintf(lfmt, sizeof(lfmt), "%s", lip);
+                snprintf(rfmt, sizeof(rfmt), "%s", rip);
+            }
             printf("  %s:%-5u -> %s:%-5u  "
                    "RTT: %5.2f ms  min: %5.2f ms  max: %5.2f ms  samples: %u\n",
-                   lip, key.local_port, rip, key.remote_port,
+                   lfmt, key.local_port, rfmt, key.remote_port,
                    val.srtt_us    / 1000.0,
                    val.min_rtt_us / 1000.0,
                    val.max_rtt_us / 1000.0,
