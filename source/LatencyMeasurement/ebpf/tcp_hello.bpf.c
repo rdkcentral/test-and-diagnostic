@@ -53,7 +53,7 @@ int count_rtt(struct bpf_sock_ops *skops)
         __u32 key = 0;
         __u64 *val = bpf_map_lookup_elem(&rtt_counter, &key);
         if (val)
-            __sync_fetch_and_add(val, 1);
+            (*val)++;  /* direct write — ARM32 JIT has no BPF_ATOMIC support */
     }
     return 1;
 }
