@@ -232,7 +232,7 @@ static int safe_atoi(const char *s)
         return 0;
     }
 
-    /* Allow trailing whitespace or additional PID tokens (e.g. "1234 5678"). */
+    /* Allow trailing whitespace after the numeric token (e.g. "1234 "). */
     while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r' || *end == '\f' || *end == '\v')
     {
         end++;
