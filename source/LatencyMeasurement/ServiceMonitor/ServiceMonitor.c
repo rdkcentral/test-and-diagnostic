@@ -357,10 +357,9 @@ void MonitorLatencyMeasurementServices()
 				    char pid_copy[BUF_SIZE] = {0};
 				    snprintf(pid_copy, sizeof(pid_copy), "%s", ServicePID);
 
-				    char *save_ptr = NULL;
-				    // token_ipv4 = strtok_r(pid_copy, " ", &save_ptr);
-				    char *pid1 = strtok_r(pid_copy, " ", &save_ptr);
-				    char *pid2 = strtok_r(NULL, " ", &save_ptr);
+                    char *save_ptr = NULL;
+                    char *pid1 = strtok_r(pid_copy, " ", &save_ptr);
+                    char *pid2 = strtok_r(NULL, " ", &save_ptr);
 
 				    CcspTraceInfo(("%s: Parsed PIDs pid1:%s pid2:%s\n",
 						   __FUNCTION__,
