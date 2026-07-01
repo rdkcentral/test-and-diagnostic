@@ -50,6 +50,7 @@
 #include "lowlatency_apis.h"
 #include "current_time.h"
 #include <telemetry_busmessage_sender.h>
+#include "webcfg_selfheal.h"
 
 #ifdef DEVICE_PRIORITIZATION_ENABLED
 #include "device_prio_apis.h"
@@ -365,13 +366,17 @@ int main(int argc, char* argv[])
     /* Init TAD Rbus */
     tadRbusInit();
 
-    // Init LatencyMeasurent
+    // Init LatencyMeasurement
     LatencyMeasurementInit();
 
-    //crate a thread to update time thread for ethwan enable mode
+    // SelfHeal Subdoc Version Mismatch
+    initWebcfgProperties(WEBCFG_PROPERTIES_FILE);
+    webcfg_subdoc_mismatch_boot_check();
+
+    //create a thread to update time thread for ethwan enable mode
     BOOL ethwanEnabled = FALSE;
     ethwanEnabled = IsEthWanEnabled();
-    #ifdef RDKB_EXTENDER_ENABLED
+    #if defined(RDKB_EXTENDER_ENABLED) || defined(PON_GATEWAY)
   	int callUpdate = 1;
     #else
   	int callUpdate = 0;

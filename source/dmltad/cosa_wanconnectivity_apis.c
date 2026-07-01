@@ -570,6 +570,11 @@ ANSC_STATUS CosaWanCnctvtyChk_Remove_Intf (ULONG IntfIndex)
     ANSC_STATUS returnStatus = ANSC_STATUS_SUCCESS;
     pthread_mutex_lock(&gIntfAccessMutex);
     PWANCNCTVTY_CHK_GLOBAL_INTF_INFO gIntfInfo = get_InterfaceList(IntfIndex);
+    if (gIntfInfo == NULL) {
+        WANCHK_LOG_ERROR("%s: No interface with InstanceNumber: %lu\n", __FUNCTION__, IntfIndex);
+        pthread_mutex_unlock(&gIntfAccessMutex);
+        return ANSC_STATUS_FAILURE;
+    }
     gIntfInfo->IPInterface.Enable = FALSE;
 
     //Reset MonitorResult during Stop Test

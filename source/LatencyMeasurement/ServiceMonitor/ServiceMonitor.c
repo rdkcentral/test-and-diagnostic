@@ -52,6 +52,7 @@ int reportInterval_prev=0;
 bool IsPthreadisBusy=false;
 bool IsTR181_triger_at_PthreadisBusy=false;
 bool gLowLatency_Enable=false;
+bool monitor_wakeup_pending=false;
 
 /*adding _SCER11BEL_PRODUCT_REQ_ , because both lan_prefix and ipv6_prefix has same value in XER10 US Device*/
 /*For Example:
@@ -79,6 +80,7 @@ void* isMonitorService_thread_free(void *arg)
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&cond, &SyncAttr);
+    pthread_condattr_destroy(&SyncAttr);
     memset(&ts, 0, sizeof(ts));
     clock_gettime(CLOCK_MONOTONIC, &ts);
     ts.tv_nsec = 0;
@@ -593,6 +595,7 @@ void SendConditional_pthread_cond_signal()
 {
 	CcspTraceInfo(("%s Send conditional signal to monitoring thread\n",__func__));
 	pthread_mutex_lock(&lock);
+	monitor_wakeup_pending = true;
 	pthread_cond_signal(&Monitor_cond);
 	pthread_mutex_unlock(&lock);
 }
@@ -603,6 +606,11 @@ void SendConditional_pthread_cond_signal()
 
 int LatencyMeasurementServiceInit()
 {
+	if (sysevent_fd_g >= 0)
+	{
+		CcspTraceInfo(("sysevent_fd_g already open (%d), skipping sysevent_open.\n", sysevent_fd_g));
+		return 0;
+	}
 	if ((sysevent_fd_g = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "latency_measurement", &sysevent_token_g)) < 0)
 		{
 			CcspTraceInfo(("Failed to open sysevent.\n"));
@@ -744,6 +752,11 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 			}
 		}
 	}
+	if(sysevent_fd >= 0)
+	{
+		sysevent_close(sysevent_fd, sysevent_token);
+		sysevent_fd = -1;
+	}
 	pthread_detach(tid[SYSEVENT_PTHREAD_ID]);
 	CcspTraceInfo(("pthread_detach SYSEVENT_PTHREAD_ID %s\n",__func__));
 	return NULL;
@@ -780,6 +793,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&Monitor_cond, &SyncAttr);
+    pthread_condattr_destroy(&SyncAttr);
     LatencyMeasurementServiceInit();
     sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_ifname", current_wan_ifname, sizeof(strValue));
     sysevent_get(sysevent_fd_g, sysevent_token_g, "current_wan_mode_update", strValue, sizeof(strValue));
@@ -803,7 +817,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
         ts.tv_sec += TIMERINTERVEL;
         pthread_mutex_lock(&lock);
         /* FIX: predicate-guarded timed wait */
-        while(!IsTR181_triger_at_PthreadisBusy)
+	    while(!monitor_wakeup_pending)
         {
             Status = pthread_cond_timedwait(&Monitor_cond, &lock, &ts);
             if(Status == ETIMEDOUT)
@@ -815,12 +829,12 @@ void* LatencyMeasurement_MonitorService(void *arg)
                 CcspTraceInfo(("%s pthread_cond_timedwait failed\n", __func__));
             }
         }
-        IsTR181_triger_at_PthreadisBusy = false;
-        pthread_mutex_unlock(&lock);
+        monitor_wakeup_pending = false;
         if(ROUTER_MODE == Get_Status_of_bridge_mode())
         {
             MonitorLatencyMeasurementServices();
         }
+	    pthread_mutex_unlock(&lock);
         if(IsTR181_triger_at_PthreadisBusy == true)
         {
             sleep(1);

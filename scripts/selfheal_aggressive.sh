@@ -645,6 +645,9 @@ self_heal_interfaces()
         fi
     fi
 
+    # Here LANIPv6GUASupport used to identify the region of the device. For example LANIPv6GUASupport is true for EU region devices and false for NA region devices. 
+    # Eth WAN failover recovery action is taken only for NA region devices.
+    # TODO : LANIPv6GUASupport shouldn't be used here. Need a generic self heal mechanism which is independent of region specific parameters.
     UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
     if [ "$ETHWAN_ENABLED" = "true" ] && [ "$UseLANIFIPV6" != "true" ] ; then
         # Do Not interfere with Auto WAN Hunting for first 15 Minutes of Uptime
