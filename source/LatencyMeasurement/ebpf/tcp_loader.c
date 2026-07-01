@@ -16,11 +16,28 @@
 #include <signal.h>
 #include <string.h>
 #include <errno.h>
+#include <arpa/inet.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 
 #define CGROUP_ROOT  "/sys/fs/cgroup/unified"
 #define BPF_OBJ_PATH "/usr/bin/ebpf/tcp_hello.bpf.o"
+
+/* Must match struct conn_key in tcp_hello.bpf.c exactly */
+struct conn_key {
+    __u32 local_ip4;
+    __u32 remote_ip4;
+    __u16 local_port;
+    __u16 remote_port;
+};
+
+/* Must match struct rtt_val in tcp_hello.bpf.c exactly */
+struct rtt_val {
+    __u32 srtt_us;
+    __u32 min_rtt_us;
+    __u32 max_rtt_us;
+    __u32 samples;
+};
 
 static int  prog_fd   = -1;
 static int  cgroup_fd = -1;
@@ -53,6 +70,35 @@ static int get_self_cgroup_path(char *buf, size_t len)
     }
     fclose(f);
     return -1;
+}
+
+/* Print RTT map — one line per active TCP connection */
+static void print_rtt_map(int map_fd)
+{
+    struct conn_key key = {}, next_key;
+    struct rtt_val  val;
+    char lip[INET_ADDRSTRLEN], rip[INET_ADDRSTRLEN];
+    int  found = 0;
+
+    int ret = bpf_map_get_next_key(map_fd, NULL, &key);
+    while (ret == 0) {
+        if (bpf_map_lookup_elem(map_fd, &key, &val) == 0) {
+            inet_ntop(AF_INET, &key.local_ip4,  lip, sizeof(lip));
+            inet_ntop(AF_INET, &key.remote_ip4, rip, sizeof(rip));
+            printf("  %s:%-5u -> %s:%-5u  "
+                   "RTT: %5.2f ms  min: %5.2f ms  max: %5.2f ms  samples: %u\n",
+                   lip, key.local_port, rip, key.remote_port,
+                   val.srtt_us    / 1000.0,
+                   val.min_rtt_us / 1000.0,
+                   val.max_rtt_us / 1000.0,
+                   val.samples);
+            found++;
+        }
+        ret = bpf_map_get_next_key(map_fd, &key, &next_key);
+        key = next_key;
+    }
+    if (!found)
+        printf("  (no IPv4 connections seen yet — try: curl http://example.com)\n");
 }
 
 int main(int argc, char *argv[])
@@ -90,9 +136,9 @@ int main(int argc, char *argv[])
     /* ------------------------------------------------------------------ */
     /* 2. Get the program fd                                               */
     /* ------------------------------------------------------------------ */
-    struct bpf_program *prog = bpf_object__find_program_by_name(obj, "count_rtt");
+    struct bpf_program *prog = bpf_object__find_program_by_name(obj, "measure_rtt");
     if (!prog) {
-        fprintf(stderr, "BPF program 'count_rtt' not found in object.\n");
+        fprintf(stderr, "BPF program 'measure_rtt' not found in object.\n");
         return 1;
     }
     prog_fd = bpf_program__fd(prog);
@@ -116,24 +162,20 @@ int main(int argc, char *argv[])
     signal(SIGTERM, sig_handler);
 
     /* ------------------------------------------------------------------ */
-    /* 4. Poll all diagnostic counters every second                        */
+    /* 4. Poll the RTT hash map and print per-connection stats             */
     /* ------------------------------------------------------------------ */
-    struct bpf_map *map = bpf_object__find_map_by_name(obj, "counters");
+    struct bpf_map *map = bpf_object__find_map_by_name(obj, "rtt_map");
     if (!map) {
-        fprintf(stderr, "Map 'counters' not found.\n");
+        fprintf(stderr, "Map 'rtt_map' not found.\n");
         return 1;
     }
     int map_fd = bpf_map__fd(map);
+    int tick = 0;
 
-    __u64 val[4] = {0};
     while (1) {
-        __u32 k;
-        for (k = 0; k < 4; k++)
-            bpf_map_lookup_elem(map_fd, &k, &val[k]);
-        printf("\r[RTT_CB=%llu] [ACTIVE_ESTAB=%llu] [PASSIVE_ESTAB=%llu] [OTHER=%llu]   ",
-               val[0], val[1], val[2], val[3]);
-        fflush(stdout);
-        sleep(1);
+        printf("\n--- tick %d ---\n", ++tick);
+        print_rtt_map(map_fd);
+        sleep(2);
     }
 
     return 0;
