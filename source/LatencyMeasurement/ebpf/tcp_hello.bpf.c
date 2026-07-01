@@ -37,23 +37,40 @@ struct bpf_map_def SEC("maps") rtt_counter = {
 };
 
 /*
- * count_rtt - called by the kernel TCP stack on every RTT update.
+ * count_rtt - called by the kernel TCP stack on sock_ops events.
  *
- * skops->op values of interest:
- *   BPF_SOCK_OPS_RTT_CB      : kernel updated srtt for this connection
- *   BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB  : TCP handshake complete (client)
- *   BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB : TCP handshake complete (server)
+ * IMPORTANT: BPF_SOCK_OPS_RTT_CB does NOT fire automatically.
+ * You must opt-in per-connection by setting BPF_SOCK_OPS_RTT_CB_FLAG
+ * when the connection is established. Without this, RTT callbacks
+ * never fire even though the program is attached.
  *
- * skops->srtt_us >> 3 = smoothed RTT in microseconds (kernel internal format)
+ * Flow:
+ *   1. Connection established → ACTIVE/PASSIVE_ESTABLISHED_CB fires
+ *   2. We call bpf_sock_ops_cb_flags_set() to enable RTT_CB for this socket
+ *   3. On each RTT update → RTT_CB fires → we increment the counter
+ *
+ * skops->srtt_us >> 3 = smoothed RTT in microseconds
  */
 SEC("sockops")
 int count_rtt(struct bpf_sock_ops *skops)
 {
-    if (skops->op == BPF_SOCK_OPS_RTT_CB) {
-        __u32 key = 0;
-        __u64 *val = bpf_map_lookup_elem(&rtt_counter, &key);
-        if (val)
-            (*val)++;  /* direct write — ARM32 JIT has no BPF_ATOMIC support */
+    switch (skops->op) {
+
+    case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:   /* TCP handshake done (client side) */
+    case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:  /* TCP handshake done (server side) */
+        /* Opt this socket in to RTT callbacks */
+        bpf_sock_ops_cb_flags_set(skops,
+            skops->bpf_sock_ops_cb_flags | BPF_SOCK_OPS_RTT_CB_FLAG);
+        break;
+
+    case BPF_SOCK_OPS_RTT_CB:  /* RTT updated for an opted-in socket */
+        {
+            __u32 key = 0;
+            __u64 *val = bpf_map_lookup_elem(&rtt_counter, &key);
+            if (val)
+                (*val)++;  /* direct write — ARM32 JIT has no BPF_ATOMIC support */
+        }
+        break;
     }
     return 1;
 }
