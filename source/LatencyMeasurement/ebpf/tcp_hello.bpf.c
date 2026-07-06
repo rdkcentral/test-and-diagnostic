@@ -267,7 +267,10 @@ int measure_rtt_tc(struct __sk_buff *skb)
                 /* WAN server = SYN-ACK src */
                 __builtin_memcpy(e->server_ip, key.src_ip, sizeof(e->server_ip));
                 e->server_port = key.src_port;
-                e->rtt_us      = (__u32)(rtt_ns / 1000);
+                /* Cast to __u32 before dividing: ARM 32-bit BPF JIT does not
+                 * support BPF_ALU64|BPF_DIV (64-bit division).  Safe for all
+                 * realistic RTTs — UINT32_MAX ns ≈ 4.29 s. */
+                e->rtt_us      = (__u32)rtt_ns / 1000;
                 bpf_ringbuf_submit(e, 0);
             }
         }
