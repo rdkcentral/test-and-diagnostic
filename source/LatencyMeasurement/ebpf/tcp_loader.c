@@ -1,78 +1,66 @@
 /*
- * tcp_loader.c - Userspace loader for tcp_hello.bpf.o (ring buffer edition)
+ * tcp_loader.c - Userspace loader for tcp_hello.bpf.o (TC ring-buffer edition)
  *
  * Usage:
- *   ./tcp_loader              # attach to cgroupv2 root (all processes)
- *   ./tcp_loader self         # attach to this process's own cgroup
- *   ./tcp_loader /sys/fs/cgroup/unified/system.slice/...  # specific cgroup
+ *   ./tcp_loader              # attach to brlan0 (default LAN bridge)
+ *   ./tcp_loader brlan0       # explicit interface name
+ *   ./tcp_loader eth1         # any LAN-side interface
  *
- * The BPF program pushes one rtt_event per RTT_CB into a ring buffer.
- * libbpf mmap()s the ring internally; handle_rtt_event() is called
- * for each event without extra syscall overhead per read.
+ * Attaches the TC BPF program to the named interface as both ingress and
+ * egress filters using a clsact qdisc (libbpf TC API).  The BPF program
+ * records a timestamp on every TCP SYN (ingress) and emits an rtt_event
+ * on every matching TCP SYN-ACK (egress).
  *
- * To stop: Ctrl+C
+ * The resulting RTT is the WAN round-trip time as experienced by each
+ * LAN client — measured without the gateway being a TCP endpoint.
+ *
+ * To stop: Ctrl+C  (detaches both filters and destroys the clsact qdisc)
  */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <signal.h>
 #include <string.h>
 #include <errno.h>
+#include <signal.h>
+#include <unistd.h>
 #include <pthread.h>
+#include <net/if.h>
 #include <arpa/inet.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 
-#define CGROUP_ROOT  "/sys/fs/cgroup/unified"
-#define BPF_OBJ_PATH "/usr/bin/ebpf/tcp_hello.bpf.o"
+#define DEFAULT_IFACE  "brlan0"
+#define BPF_OBJ_PATH   "/usr/bin/ebpf/tcp_hello.bpf.o"
 
 /* Must match struct rtt_event in tcp_hello.bpf.c exactly */
 struct rtt_event {
-    __u32 local_ip6[4];
-    __u32 remote_ip6[4];
-    __u16 local_port;
-    __u16 remote_port;
+    __u32 client_ip[4];
+    __u32 server_ip[4];
+    __u16 client_port;
+    __u16 server_port;
     __u8  family;
     __u8  pad[3];
-    __u32 srtt_us;
+    __u32 rtt_us;
 };
 
-static int               prog_fd   = -1;
-static int               cgroup_fd = -1;
-static char              g_cgroup_path[512];
-static struct ring_buffer *rb      = NULL;
-static volatile sig_atomic_t running = 1;
+static struct ring_buffer       *rb      = NULL;
+static volatile sig_atomic_t     running = 1;
+
+/* TC hooks and opts saved for cleanup */
+static struct bpf_tc_hook  ingress_hook;
+static struct bpf_tc_hook  egress_hook;
+static struct bpf_tc_opts  ingress_opts;
+static struct bpf_tc_opts  egress_opts;
 
 static void sig_handler(int sig)
 {
     (void)sig;
-    running = 0;  /* signal the event loop to exit cleanly */
-}
-
-/* Read this process's cgroupv2 path from /proc/self/cgroup */
-static int get_self_cgroup_path(char *buf, size_t len)
-{
-    FILE *f = fopen("/proc/self/cgroup", "r");
-    if (!f) return -1;
-    char line[512];
-    while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, "0::", 3) == 0) {
-            char *path = line + 3;
-            path[strcspn(path, "\n")] = '\0';
-            snprintf(buf, len, "%s%s", CGROUP_ROOT, path);
-            fclose(f);
-            return 0;
-        }
-    }
-    fclose(f);
-    return -1;
+    running = 0;
 }
 
 /*
- * Called by ring_buffer__poll() for each event delivered from the kernel.
- * Runs in the same thread as the poll loop — no locking needed.
+ * Called by ring_buffer__poll() for each RTT event from the kernel.
+ * Runs in the poll thread — no locking needed.
  */
 static int handle_rtt_event(void *ctx, void *data, size_t data_sz)
 {
@@ -83,29 +71,28 @@ static int handle_rtt_event(void *ctx, void *data, size_t data_sz)
     const struct rtt_event *e = data;
     int af = (e->family == AF_INET6) ? AF_INET6 : AF_INET;
 
-    char lip[INET6_ADDRSTRLEN], rip[INET6_ADDRSTRLEN];
-    inet_ntop(af, e->local_ip6,  lip, sizeof(lip));
-    inet_ntop(af, e->remote_ip6, rip, sizeof(rip));
+    char cip[INET6_ADDRSTRLEN], sip[INET6_ADDRSTRLEN];
+    inet_ntop(af, e->client_ip, cip, sizeof(cip));
+    inet_ntop(af, e->server_ip, sip, sizeof(sip));
 
-    char lfmt[INET6_ADDRSTRLEN + 3], rfmt[INET6_ADDRSTRLEN + 3];
+    char cfmt[INET6_ADDRSTRLEN + 3], sfmt[INET6_ADDRSTRLEN + 3];
     if (af == AF_INET6) {
-        snprintf(lfmt, sizeof(lfmt), "[%s]", lip);
-        snprintf(rfmt, sizeof(rfmt), "[%s]", rip);
+        snprintf(cfmt, sizeof(cfmt), "[%s]", cip);
+        snprintf(sfmt, sizeof(sfmt), "[%s]", sip);
     } else {
-        snprintf(lfmt, sizeof(lfmt), "%s", lip);
-        snprintf(rfmt, sizeof(rfmt), "%s", rip);
+        snprintf(cfmt, sizeof(cfmt), "%s", cip);
+        snprintf(sfmt, sizeof(sfmt), "%s", sip);
     }
 
-    printf("  %s:%-5u -> %s:%-5u  RTT: %5.2f ms\n",
-           lfmt, e->local_port, rfmt, e->remote_port,
-           e->srtt_us / 1000.0);
+    printf("  LAN %s:%-5u  ->  WAN %s:%-5u   RTT: %5.2f ms\n",
+           cfmt, e->client_port, sfmt, e->server_port,
+           e->rtt_us / 1000.0);
     fflush(stdout);
     return 0;
 }
 
 /*
  * Background thread: drains the ring buffer until running is cleared.
- * handle_rtt_event() is called here for each event — not in main thread.
  */
 static void *poll_thread(void *arg)
 {
@@ -114,7 +101,7 @@ static void *poll_thread(void *arg)
         int n = ring_buffer__poll(rb, 100 /* ms */);
         if (n < 0 && errno != EINTR) {
             fprintf(stderr, "ring_buffer__poll error: %s\n", strerror(errno));
-            running = 0;  /* also stop main thread */
+            running = 0;
             break;
         }
     }
@@ -123,25 +110,23 @@ static void *poll_thread(void *arg)
 
 int main(int argc, char *argv[])
 {
-    /* Resolve cgroup path */
-    if (argc < 2 || strcmp(argv[1], "root") == 0) {
-        snprintf(g_cgroup_path, sizeof(g_cgroup_path), "%s", CGROUP_ROOT);
-    } else if (strcmp(argv[1], "self") == 0) {
-        if (get_self_cgroup_path(g_cgroup_path, sizeof(g_cgroup_path)) < 0) {
-            fprintf(stderr, "Failed to read own cgroup\n"); return 1;
-        }
-    } else {
-        snprintf(g_cgroup_path, sizeof(g_cgroup_path), "%s", argv[1]);
+    const char *ifname = (argc >= 2) ? argv[1] : DEFAULT_IFACE;
+
+    /* ------------------------------------------------------------------ */
+    /* 0. Resolve interface index                                          */
+    /* ------------------------------------------------------------------ */
+    unsigned int ifindex = if_nametoindex(ifname);
+    if (ifindex == 0) {
+        fprintf(stderr, "Interface '%s' not found: %s\n", ifname, strerror(errno));
+        return 1;
     }
-    printf("Attaching to: %s\n", g_cgroup_path);
-    printf("Loader's own cgroup: "); fflush(stdout);
-    system("grep '^0::' /proc/self/cgroup");
-    printf("\n");
+    printf("Attaching to interface: %s (ifindex %u)\n", ifname, ifindex);
+
     /* ------------------------------------------------------------------ */
     /* 1. Load the BPF object                                              */
     /* ------------------------------------------------------------------ */
     struct bpf_object *obj = bpf_object__open(BPF_OBJ_PATH);
-    /* libbpf returns ERR_PTR on failure, not NULL — must use libbpf_get_error() */
+    /* libbpf returns ERR_PTR on failure — must use libbpf_get_error() */
     if (libbpf_get_error(obj)) {
         fprintf(stderr, "Failed to open %s: %ld\n", BPF_OBJ_PATH, libbpf_get_error(obj));
         return 1;
@@ -151,39 +136,83 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Failed to load BPF object: %s\n", strerror(errno));
         return 1;
     }
-    printf("BPF program loaded successfully.\n");
+    printf("BPF program loaded.\n");
 
     /* ------------------------------------------------------------------ */
-    /* 2. Get the program fd                                               */
+    /* 2. Get the TC program fd                                            */
     /* ------------------------------------------------------------------ */
-    struct bpf_program *prog = bpf_object__find_program_by_name(obj, "measure_rtt");
+    struct bpf_program *prog = bpf_object__find_program_by_name(obj, "measure_rtt_tc");
     if (!prog) {
-        fprintf(stderr, "BPF program 'measure_rtt' not found in object.\n");
+        fprintf(stderr, "BPF program 'measure_rtt_tc' not found in object.\n");
         return 1;
     }
-    prog_fd = bpf_program__fd(prog);
+    int prog_fd = bpf_program__fd(prog);
 
     /* ------------------------------------------------------------------ */
-    /* 3. Attach to cgroupv2 root — covers all processes on the device    */
+    /* 3. Install clsact qdisc + attach to ingress and egress             */
+    /*                                                                     */
+    /*    ingress: timestamps TCP SYNs from LAN clients                   */
+    /*    egress:  on TCP SYN-ACK, computes and emits RTT event           */
+    /*                                                                     */
+    /*    bpf_tc_hook_create() returns -EEXIST if clsact is already       */
+    /*    present — safe to ignore.                                       */
     /* ------------------------------------------------------------------ */
-    cgroup_fd = open(g_cgroup_path, O_RDONLY);
-    if (cgroup_fd < 0) {
-        fprintf(stderr, "Failed to open cgroup at %s: %s\n", g_cgroup_path, strerror(errno));
+    memset(&ingress_hook, 0, sizeof(ingress_hook));
+    ingress_hook.sz           = sizeof(ingress_hook);
+    ingress_hook.ifindex      = (int)ifindex;
+    ingress_hook.attach_point = BPF_TC_INGRESS;
+
+    int err = bpf_tc_hook_create(&ingress_hook);
+    if (err && err != -EEXIST) {
+        fprintf(stderr, "Failed to create TC hook (ingress): %s\n", strerror(-err));
         return 1;
     }
 
-    if (bpf_prog_attach(prog_fd, cgroup_fd, BPF_CGROUP_SOCK_OPS, 0)) {
-        fprintf(stderr, "Failed to attach BPF program to cgroup: %s\n", strerror(errno));
+    memset(&ingress_opts, 0, sizeof(ingress_opts));
+    ingress_opts.sz      = sizeof(ingress_opts);
+    ingress_opts.prog_fd = prog_fd;
+    err = bpf_tc_attach(&ingress_hook, &ingress_opts);
+    if (err) {
+        fprintf(stderr, "Failed to attach BPF to ingress: %s\n", strerror(-err));
+        bpf_tc_hook_destroy(&ingress_hook);
         return 1;
     }
-    printf("Attached. Listening for RTT events (Ctrl+C to stop)...\n\n");
+
+    memset(&egress_hook, 0, sizeof(egress_hook));
+    egress_hook.sz           = sizeof(egress_hook);
+    egress_hook.ifindex      = (int)ifindex;
+    egress_hook.attach_point = BPF_TC_EGRESS;
+
+    /* clsact qdisc is shared — hook_create for egress will return -EEXIST */
+    err = bpf_tc_hook_create(&egress_hook);
+    if (err && err != -EEXIST) {
+        fprintf(stderr, "Failed to create TC hook (egress): %s\n", strerror(-err));
+        bpf_tc_detach(&ingress_hook, &ingress_opts);
+        bpf_tc_hook_destroy(&ingress_hook);
+        return 1;
+    }
+
+    memset(&egress_opts, 0, sizeof(egress_opts));
+    egress_opts.sz      = sizeof(egress_opts);
+    egress_opts.prog_fd = prog_fd;
+    err = bpf_tc_attach(&egress_hook, &egress_opts);
+    if (err) {
+        fprintf(stderr, "Failed to attach BPF to egress: %s\n", strerror(-err));
+        bpf_tc_detach(&ingress_hook, &ingress_opts);
+        bpf_tc_hook_destroy(&ingress_hook);
+        return 1;
+    }
+
+    printf("TC filters attached (ingress + egress).\n");
+    printf("Streaming LAN client RTT events (Ctrl+C to stop)...\n\n");
 
     signal(SIGINT,  sig_handler);
     signal(SIGTERM, sig_handler);
 
     /* ------------------------------------------------------------------ */
     /* 4. Create ring buffer consumer                                      */
-    /*    libbpf calls mmap() on the map fd to share the ring with kernel  */
+    /*    libbpf mmap()s the ring map so events arrive without per-event  */
+    /*    syscall overhead.                                               */
     /* ------------------------------------------------------------------ */
     struct bpf_map *map = bpf_object__find_map_by_name(obj, "rtt_events");
     if (!map) {
@@ -199,10 +228,7 @@ int main(int argc, char *argv[])
     }
 
     /* ------------------------------------------------------------------ */
-    /* 5. Spawn poll thread + hold main via pause()                        */
-    /*    poll_thread drains the ring buffer in the background.            */
-    /*    pause() suspends main until SIGINT/SIGTERM sets running=0,       */
-    /*    at which point the poll thread exits and we join it.             */
+    /* 5. Spawn poll thread; main sleeps until SIGINT/SIGTERM             */
     /* ------------------------------------------------------------------ */
     pthread_t poll_tid;
     if (pthread_create(&poll_tid, NULL, poll_thread, NULL) != 0) {
@@ -211,15 +237,23 @@ int main(int argc, char *argv[])
     }
 
     while (running)
-        pause();  /* sleep until any signal interrupts — then recheck running */
+        pause();  /* woken by signal; recheck running */
 
     pthread_join(poll_tid, NULL);
 
-    /* Cleanup runs in normal flow — not inside a signal handler */
-    printf("\nDetaching...\n");
-    bpf_prog_detach(cgroup_fd, BPF_CGROUP_SOCK_OPS);
+    /* ------------------------------------------------------------------ */
+    /* 6. Cleanup — runs in normal flow, not inside a signal handler      */
+    /*                                                                     */
+    /*    Detach individual filters before destroying the qdisc so that   */
+    /*    any other TC programs on the interface are not disturbed.       */
+    /* ------------------------------------------------------------------ */
+    printf("\nDetaching TC filters...\n");
+    bpf_tc_detach(&egress_hook,  &egress_opts);
+    bpf_tc_detach(&ingress_hook, &ingress_opts);
+    /* Destroy the clsact qdisc (ingress_hook ifindex is sufficient) */
+    bpf_tc_hook_destroy(&ingress_hook);
+
     ring_buffer__free(rb);
     bpf_object__close(obj);
-    close(cgroup_fd);
     return 0;
 }
