@@ -215,7 +215,13 @@ static __always_inline int parse_tcp(void *data, void *data_end,
     return -1;
 }
 
-SEC("tc")
+/*
+ * SEC("classifier") keeps expected_attach_type = 0 (old-style TC/cls_bpf).
+ * SEC("tc") in libbpf >= 1.3 sets expected_attach_type = BPF_TCX_INGRESS (28),
+ * which kernels older than 6.6 reject with ENOTSUPP post-verifier.
+ * The bpf_tc_hook_create/bpf_tc_attach loader API requires the old-style type.
+ */
+SEC("classifier")
 int measure_rtt_tc(struct __sk_buff *skb)
 {
     void *data     = (void *)(long)skb->data;
