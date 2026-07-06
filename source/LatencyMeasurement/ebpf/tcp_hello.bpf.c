@@ -26,16 +26,82 @@
  */
 
 #include <linux/bpf.h>
-#include <linux/pkt_cls.h>
-#include <linux/if_ether.h>
-#include <linux/ip.h>
-#include <linux/ipv6.h>
-#include <linux/tcp.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
+/*
+ * Self-contained network header definitions.
+ *
+ * linux/ip.h, linux/ipv6.h, linux/tcp.h, linux/if_ether.h and
+ * linux/pkt_cls.h are intentionally NOT included.  Those kernel UAPI
+ * headers pull in asm/byteorder.h from the cross-compilation sysroot,
+ * which chains back to linux/swab.h and requires __attribute_const__
+ * from linux/compiler.h — a file that is outside the UAPI tree and
+ * never reachable in this include path.  Defining the handful of
+ * structs and constants we actually need avoids the conflict entirely.
+ */
+
 #define AF_INET  2
 #define AF_INET6 10
+
+/* TC return code ---------------------------------------------------------- */
+#define TC_ACT_OK 0
+
+/* Ethernet ---------------------------------------------------------------- */
+#define ETH_P_IP   0x0800
+#define ETH_P_IPV6 0x86DD
+#define ETH_ALEN   6
+
+struct ethhdr {
+    __u8  h_dest[ETH_ALEN];
+    __u8  h_source[ETH_ALEN];
+    __u16 h_proto;              /* network byte order */
+} __attribute__((packed));
+
+/* IPv4 -------------------------------------------------------------------- */
+#define IPPROTO_TCP 6
+
+struct iphdr {
+    __u8  ihl_version;          /* high nibble = version, low nibble = IHL */
+    __u8  tos;
+    __u16 tot_len;
+    __u16 id;
+    __u16 frag_off;
+    __u8  ttl;
+    __u8  protocol;
+    __u16 check;
+    __u32 saddr;                /* network byte order */
+    __u32 daddr;
+} __attribute__((packed));
+
+/* IPv6 -------------------------------------------------------------------- */
+struct ipv6hdr {
+    __u8  version_prio;         /* high nibble = version */
+    __u8  flow_lbl[3];
+    __u16 payload_len;
+    __u8  nexthdr;
+    __u8  hop_limit;
+    __u8  saddr[16];            /* network byte order */
+    __u8  daddr[16];
+} __attribute__((packed));
+
+/* TCP --------------------------------------------------------------------- */
+struct tcphdr {
+    __u16 source;               /* network byte order */
+    __u16 dest;
+    __u32 seq;
+    __u32 ack_seq;
+    __u8  doff_res;             /* high nibble = data offset */
+    __u8  flags;                /* bit0=FIN bit1=SYN bit2=RST bit3=PSH bit4=ACK */
+    __u16 window;
+    __u16 check;
+    __u16 urg_ptr;
+} __attribute__((packed));
+
+#define TCP_FLAG_FIN 0x01
+#define TCP_FLAG_SYN 0x02
+#define TCP_FLAG_RST 0x04
+#define TCP_FLAG_ACK 0x10
 
 /*
  * Five-tuple key used to match a SYN with its returning SYN-ACK.
@@ -109,7 +175,7 @@ static __always_inline int parse_tcp(void *data, void *data_end,
         if (iph->protocol != IPPROTO_TCP)
             return -1;
 
-        __u32 ihl = iph->ihl * 4;
+        __u32 ihl = (iph->ihl_version & 0x0F) * 4;
         if (ihl < 20)  /* minimum IP header length */
             return -1;
         struct tcphdr *tcph = (void *)iph + ihl;
@@ -138,8 +204,8 @@ static __always_inline int parse_tcp(void *data, void *data_end,
 
         __builtin_memset(key, 0, sizeof(*key));
         key->family = AF_INET6;
-        __builtin_memcpy(key->src_ip, &ip6h->saddr, 16);
-        __builtin_memcpy(key->dst_ip, &ip6h->daddr, 16);
+        __builtin_memcpy(key->src_ip, ip6h->saddr, 16);
+        __builtin_memcpy(key->dst_ip, ip6h->daddr, 16);
         key->src_port = bpf_ntohs(tcph->source);
         key->dst_port = bpf_ntohs(tcph->dest);
         *tcph_out = tcph;
@@ -161,13 +227,19 @@ int measure_rtt_tc(struct __sk_buff *skb)
     if (parse_tcp(data, data_end, &key, &tcph) < 0)
         return TC_ACT_OK;
 
+    /*
+     * Mask the four control bits we care about; ECE/CWR (bits 6-7) are
+     * ignored so ECN-capable SYN-ACKs are still matched correctly.
+     */
+    __u8 ctl = tcph->flags & (TCP_FLAG_SYN | TCP_FLAG_ACK | TCP_FLAG_RST | TCP_FLAG_FIN);
+
     /* Pure SYN: LAN client opening a new connection (ingress path) */
-    if (tcph->syn && !tcph->ack && !tcph->rst && !tcph->fin) {
+    if (ctl == TCP_FLAG_SYN) {
         __u64 ts = bpf_ktime_get_ns();
         bpf_map_update_elem(&syn_timestamps, &key, &ts, BPF_ANY);
 
     /* SYN-ACK: WAN server reply heading back to LAN client (egress path) */
-    } else if (tcph->syn && tcph->ack && !tcph->rst && !tcph->fin) {
+    } else if (ctl == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
         /*
          * Reverse the five-tuple to find the original SYN entry:
          *   SYN was recorded as  src=client  dst=server
