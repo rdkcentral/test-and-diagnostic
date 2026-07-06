@@ -51,6 +51,7 @@
 #define ETH_P_IP   0x0800
 #define ETH_P_IPV6 0x86DD
 #define ETH_ALEN   6
+#define ETH_HLEN   14   /* 6 (dst) + 6 (src) + 2 (type) */
 
 struct ethhdr {
     __u8  h_dest[ETH_ALEN];
@@ -153,62 +154,68 @@ struct bpf_map_def SEC("maps") rtt_events = {
 };
 
 /*
- * Parse an Ethernet-framed IPv4 or IPv6 TCP packet.
- * Fills *key with the five-tuple and sets *tcph_out to the TCP header.
- * Returns 0 on success, -1 if the packet is not IPv4/IPv6 TCP or if any
- * bounds check fails.
+ * Parse an Ethernet-framed IPv4 or IPv6 TCP packet using bpf_skb_load_bytes().
+ *
+ * bpf_skb_load_bytes() copies header bytes into stack-local structs.
+ * This deliberately avoids skb->data / skb->data_end pointer arithmetic
+ * ("direct packet access"), which sets fp->aux->pkt_access and causes the
+ * ARM 32-bit BPF JIT to refuse the program with ENOTSUPP post-verifier.
+ *
+ * Fills *key with the five-tuple and *flags_out with the TCP flags byte.
+ * Returns 0 on success, -1 otherwise.
  */
-static __always_inline int parse_tcp(void *data, void *data_end,
-                                      struct flow_key *key,
-                                      struct tcphdr  **tcph_out)
+static __always_inline int parse_tcp(struct __sk_buff *skb,
+                                      struct flow_key *key, __u8 *flags_out)
 {
-    struct ethhdr *eth = data;
-    if ((void *)(eth + 1) > data_end)
+    __u16 proto;
+    /* EtherType sits at byte offset 12 in the Ethernet header */
+    if (bpf_skb_load_bytes(skb, 12, &proto, sizeof(proto)) < 0)
         return -1;
-
-    __u16 proto = bpf_ntohs(eth->h_proto);
+    proto = bpf_ntohs(proto);
 
     if (proto == ETH_P_IP) {
-        struct iphdr *iph = (void *)(eth + 1);
-        if ((void *)(iph + 1) > data_end)
+        struct iphdr iph;
+        if (bpf_skb_load_bytes(skb, ETH_HLEN, &iph, sizeof(iph)) < 0)
             return -1;
-        if (iph->protocol != IPPROTO_TCP)
+        if (iph.protocol != IPPROTO_TCP)
             return -1;
 
-        __u32 ihl = (iph->ihl_version & 0x0F) * 4;
-        if (ihl < 20)  /* minimum IP header length */
+        __u32 ihl = (iph.ihl_version & 0x0F) * 4;
+        if (ihl < 20)
             return -1;
-        struct tcphdr *tcph = (void *)iph + ihl;
-        if ((void *)(tcph + 1) > data_end)
+
+        struct tcphdr tcph;
+        if (bpf_skb_load_bytes(skb, ETH_HLEN + ihl, &tcph, sizeof(tcph)) < 0)
             return -1;
 
         __builtin_memset(key, 0, sizeof(*key));
         key->family    = AF_INET;
-        key->src_ip[0] = iph->saddr;  /* network byte order */
-        key->dst_ip[0] = iph->daddr;
-        key->src_port  = bpf_ntohs(tcph->source);
-        key->dst_port  = bpf_ntohs(tcph->dest);
-        *tcph_out = tcph;
+        key->src_ip[0] = iph.saddr;   /* network byte order */
+        key->dst_ip[0] = iph.daddr;
+        key->src_port  = bpf_ntohs(tcph.source);
+        key->dst_port  = bpf_ntohs(tcph.dest);
+        *flags_out = tcph.flags;
         return 0;
 
     } else if (proto == ETH_P_IPV6) {
-        struct ipv6hdr *ip6h = (void *)(eth + 1);
-        if ((void *)(ip6h + 1) > data_end)
+        struct ipv6hdr ip6h;
+        if (bpf_skb_load_bytes(skb, ETH_HLEN, &ip6h, sizeof(ip6h)) < 0)
             return -1;
-        if (ip6h->nexthdr != IPPROTO_TCP)  /* extension headers not supported */
+        if (ip6h.nexthdr != IPPROTO_TCP)   /* extension headers not followed */
             return -1;
 
-        struct tcphdr *tcph = (void *)(ip6h + 1);
-        if ((void *)(tcph + 1) > data_end)
+        struct tcphdr tcph;
+        __u32 tcp_off = ETH_HLEN + (__u32)sizeof(ip6h);
+        if (bpf_skb_load_bytes(skb, tcp_off, &tcph, sizeof(tcph)) < 0)
             return -1;
 
         __builtin_memset(key, 0, sizeof(*key));
         key->family = AF_INET6;
-        __builtin_memcpy(key->src_ip, ip6h->saddr, 16);
-        __builtin_memcpy(key->dst_ip, ip6h->daddr, 16);
-        key->src_port = bpf_ntohs(tcph->source);
-        key->dst_port = bpf_ntohs(tcph->dest);
-        *tcph_out = tcph;
+        __builtin_memcpy(key->src_ip, ip6h.saddr, 16);
+        __builtin_memcpy(key->dst_ip, ip6h.daddr, 16);
+        key->src_port = bpf_ntohs(tcph.source);
+        key->dst_port = bpf_ntohs(tcph.dest);
+        *flags_out = tcph.flags;
         return 0;
     }
 
@@ -224,20 +231,17 @@ static __always_inline int parse_tcp(void *data, void *data_end,
 SEC("classifier")
 int measure_rtt_tc(struct __sk_buff *skb)
 {
-    void *data     = (void *)(long)skb->data;
-    void *data_end = (void *)(long)skb->data_end;
+    struct flow_key key = {};
+    __u8 flags = 0;
 
-    struct flow_key key  = {};
-    struct tcphdr  *tcph = NULL;
-
-    if (parse_tcp(data, data_end, &key, &tcph) < 0)
+    if (parse_tcp(skb, &key, &flags) < 0)
         return TC_ACT_OK;
 
     /*
      * Mask the four control bits we care about; ECE/CWR (bits 6-7) are
      * ignored so ECN-capable SYN-ACKs are still matched correctly.
      */
-    __u8 ctl = tcph->flags & (TCP_FLAG_SYN | TCP_FLAG_ACK | TCP_FLAG_RST | TCP_FLAG_FIN);
+    __u8 ctl = flags & (TCP_FLAG_SYN | TCP_FLAG_ACK | TCP_FLAG_RST | TCP_FLAG_FIN);
 
     /* Pure SYN: LAN client opening a new connection (ingress path) */
     if (ctl == TCP_FLAG_SYN) {
