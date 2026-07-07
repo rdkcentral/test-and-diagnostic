@@ -40,7 +40,7 @@ LIBBPF_LIB ?=
 # Install destination for both products
 ebpfdir = $(bindir)/ebpf
 
-EXTRA_DIST = tcp_hello.bpf.c tcp_loader.c
+EXTRA_DIST = tcp_rtt.h tcp_hello.bpf.c tcp_loader.c
 
 # Build both products only when prerequisites are supplied.
 # Standalone builds (README procedure) that lack clang-native or libbpf

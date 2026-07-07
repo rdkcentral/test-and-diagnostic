@@ -41,16 +41,7 @@
 #define DEFAULT_IFACE  "brlan0"
 #define BPF_OBJ_PATH   "/usr/bin/ebpf/tcp_hello.bpf.o"
 
-/* Must match struct rtt_event in tcp_hello.bpf.c exactly */
-struct rtt_event {
-    __u32 client_ip[4];
-    __u32 server_ip[4];
-    __u16 client_port;
-    __u16 server_port;
-    __u8  family;
-    __u8  pad[3];
-    __u32 rtt_ns;   /* raw SYN→SYN-ACK delta in nanoseconds (lower 32 bits) */
-};
+#include "tcp_rtt.h"  /* struct rtt_event (shared with tcp_hello.bpf.c) */
 
 static int                       sock_fd  = -1;  /* AF_PACKET socket */
 static int                       rtt_map_fd = -1; /* rtt_events ARRAY map */
