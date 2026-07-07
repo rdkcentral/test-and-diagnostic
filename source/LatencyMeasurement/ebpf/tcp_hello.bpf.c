@@ -258,9 +258,8 @@ static __always_inline int parse_tcp(struct __sk_buff *skb,
  * created by tcp_loader.  AF_PACKET is the same hook point used by libpcap
  * and is NOT bypassed by Broadcom ARCHER hardware offload, unlike TC hooks.
  *
- * The return value is the number of bytes to deliver to the socket's receive
- * buffer.  We return 0 (discard) since all output goes via perf_event_output;
- * no packet data needs to be queued for userspace to read from the socket.
+    /* SEC comment updated: we return 0 for most packets, ETH_HLEN only when
+     * an RTT event is written so the socket wakes userspace precisely. */
  */
 SEC("socket_filter")
 int measure_rtt_tc(struct __sk_buff *skb)
@@ -275,7 +274,7 @@ int measure_rtt_tc(struct __sk_buff *skb)
         *cnt = *cnt + 1;
 
     if (parse_tcp(skb, &key, &flags) < 0)
-        return ETH_HLEN;
+        return 0;  /* not TCP — discard from socket receive buffer */
 
     /* [1] successfully parsed as TCP */
     idx = 1;
@@ -346,6 +345,11 @@ int measure_rtt_tc(struct __sk_buff *skb)
             /* [6/7] track success for diagnostic */
             idx = 6; cnt = bpf_map_lookup_elem(&pkt_count, &idx);
             if (cnt) *cnt = *cnt + 1;
+
+            /* Return ETH_HLEN to queue one frame to the AF_PACKET socket.
+             * This wakes the blocking recv() in the loader immediately
+             * without any polling delay. All other packets return 0. */
+            return ETH_HLEN;
         } else {
             /* [5] SYN-ACK lookup failed — key mismatch or SYN never seen */
             idx = 5; cnt = bpf_map_lookup_elem(&pkt_count, &idx);
@@ -353,7 +357,7 @@ int measure_rtt_tc(struct __sk_buff *skb)
         }
     }
 
-    return ETH_HLEN;  /* keep Ethernet header bytes in receive queue */
+    return 0;  /* discard — no RTT event, no wakeup needed */
 }
 
 char _license[] SEC("license") = "GPL";

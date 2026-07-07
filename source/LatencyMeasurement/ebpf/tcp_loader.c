@@ -110,11 +110,29 @@ static void *poll_thread(void *arg)
     __u32 read_cursor = 0;
 
     while (running) {
-        /* Poll the rtt_write_idx to see if BPF wrote any new events */
+        /*
+         * Block until the BPF program queues a frame to the socket.
+         * BPF returns ETH_HLEN (queuing a wakeup byte) ONLY when it
+         * writes an RTT event — so recv() wakes exactly on RTT events,
+         * not on every packet.  EINTR means a signal arrived; re-check
+         * running and loop.
+         */
+        char buf[1];
+        ssize_t r = recv(sock_fd, buf, sizeof(buf), MSG_TRUNC);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            fprintf(stderr, "recv error: %s\n", strerror(errno));
+            running = 0;
+            break;
+        }
+
+        /* Drain any back-to-back wakeup frames (multiple RTT events) */
+        while (recv(sock_fd, buf, sizeof(buf), MSG_DONTWAIT | MSG_TRUNC) > 0) {}
+
+        /* Read all new RTT events written since last wake */
         if (widx_fd >= 0) {
             __u32 widx_key = 0, write_cursor = 0;
             bpf_map_lookup_elem(widx_fd, &widx_key, &write_cursor);
-
             while (read_cursor != write_cursor) {
                 __u32 slot = read_cursor % 32;
                 struct rtt_event ev = {};
@@ -124,8 +142,6 @@ static void *poll_thread(void *arg)
                 read_cursor++;
             }
         }
-
-        usleep(10000);  /* 10 ms poll interval */
     }
     return NULL;
 }
