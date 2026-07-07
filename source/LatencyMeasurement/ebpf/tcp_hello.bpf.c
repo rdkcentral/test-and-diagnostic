@@ -45,24 +45,28 @@
 #define AF_INET  2
 #define AF_INET6 10
 
-/* Socket_filter return codes --------------------------------------------- */
-/* Returning 0 discards the packet from the socket receive buffer.          */
-/* Returning ETH_HLEN queues the packet, waking the blocking recv().        */
-
-/* Ethernet ---------------------------------------------------------------- */
-#define ETH_P_IP   0x0800
-#define ETH_P_IPV6 0x86DD
-#define ETH_ALEN   6
-#define ETH_HLEN   14   /* 6 (dst) + 6 (src) + 2 (type) */
-
-struct ethhdr {
-    __u8  h_dest[ETH_ALEN];
-    __u8  h_source[ETH_ALEN];
-    __u16 h_proto;              /* network byte order */
-} __attribute__((packed));
+/* Ethernet ----------------------------------------------------------------
+ * Pulled from the standard kernel UAPI header; safe to include because
+ * linux/if_ether.h has no bitfield structs and no problematic include chain.
+ */
+#include <linux/if_ether.h>
 
 /* IPv4 -------------------------------------------------------------------- */
 #define IPPROTO_TCP 6
+
+/*
+ * Custom struct definitions for iphdr, ipv6hdr, and tcphdr are kept
+ * intentionally instead of including linux/ip.h, linux/ipv6.h, linux/tcp.h.
+ *
+ * The standard kernel headers use bitfields for multi-bit fields (ihl:4,
+ * version:4, syn:1, ack:1 …).  For clang -target bpf, the bitfield layout
+ * depends on __BIG_ENDIAN_BITFIELD vs __LITTLE_ENDIAN_BITFIELD, which is
+ * ambiguous for the BPF target and is a known source of subtle endianness
+ * bugs in BPF programs.
+ *
+ * These custom structs use plain bytes/shorts — correct and unambiguous
+ * regardless of the compilation target's byte order.
+ */
 
 struct iphdr {
     __u8  ihl_version;          /* high nibble = version, low nibble = IHL */
@@ -130,24 +134,7 @@ struct rtt_event {
     __u16 server_port;
     __u8  family;       /* AF_INET or AF_INET6 */
     __u8  pad[3];
-    __u32 rtt_us;       /* raw nanoseconds (lower 32 bits of SYN→SYN-ACK delta) */
-};
-
-/*
- * pkt_count[0] = total Ethernet frames seen
- * pkt_count[1] = frames successfully parsed as IPv4/IPv6 TCP
- * pkt_count[2] = TCP SYN frames detected
- * pkt_count[3] = TCP SYN-ACK frames detected
- * pkt_count[4] = TCP SYN-ACK: matching SYN found (RTT computed + written)
- * pkt_count[5] = TCP SYN-ACK: no matching SYN (key mismatch or SYN missed)
- * pkt_count[6] = RTT events successfully written to rtt_events map
- * pkt_count[7] = (reserved)
- */
-struct bpf_map_def SEC("maps") pkt_count = {
-    .type        = BPF_MAP_TYPE_ARRAY,
-    .key_size    = sizeof(__u32),
-    .value_size  = sizeof(__u64),
-    .max_entries = 8,
+    __u32 rtt_ns;       /* raw SYN→SYN-ACK delta in nanoseconds (lower 32 bits) */
 };
 
 /*
@@ -260,30 +247,23 @@ static __always_inline int parse_tcp(struct __sk_buff *skb,
  * created by tcp_loader.  AF_PACKET is the same hook point used by libpcap
  * and is NOT bypassed by Broadcom ARCHER hardware offload, unlike TC hooks.
  *
-    /* SEC comment updated: we return 0 for most packets, ETH_HLEN only when
-     * an RTT event is written so the socket wakes userspace precisely. */     * bpf_perf_event_output returns ENOTSUPP (-524) for SOCKET_FILTER in
-     * softirq context on the BCM3390 vendor kernel; bpf_map_update_elem
-     * works correctly from softirq and is used instead. */
+ * Return values:
+ *   0         — discard from socket receive buffer (no userspace wakeup).
+ *   ETH_HLEN  — queue frame to socket, waking the blocking recv() in the
+ *               loader.  Used only when an RTT event is written to the map.
+ *
+ * Note: bpf_perf_event_output returns ENOTSUPP (-524) for SOCKET_FILTER in
+ * softirq context on the BCM3390 vendor kernel; bpf_map_update_elem works
+ * correctly from softirq and is used instead.
+ */
 SEC("socket_filter")
 int measure_rtt_tc(struct __sk_buff *skb)
 {
     struct flow_key key = {};
     __u8 flags = 0;
 
-    /* [0] total frames */
-    __u32 idx = 0;
-    __u64 *cnt = bpf_map_lookup_elem(&pkt_count, &idx);
-    if (cnt)
-        *cnt = *cnt + 1;
-
     if (parse_tcp(skb, &key, &flags) < 0)
-        return 0;  /* not TCP — discard from socket receive buffer */
-
-    /* [1] successfully parsed as TCP */
-    idx = 1;
-    cnt = bpf_map_lookup_elem(&pkt_count, &idx);
-    if (cnt)
-        *cnt = *cnt + 1;
+        return 0;  /* not TCP -- discard from socket receive buffer */
 
     /*
      * Mask the four control bits we care about; ECE/CWR (bits 6-7) are
@@ -291,21 +271,13 @@ int measure_rtt_tc(struct __sk_buff *skb)
      */
     __u8 ctl = flags & (TCP_FLAG_SYN | TCP_FLAG_ACK | TCP_FLAG_RST | TCP_FLAG_FIN);
 
-    /* Pure SYN: LAN client opening a new connection (ingress path) */
+    /* Pure SYN: LAN client opening a new connection */
     if (ctl == TCP_FLAG_SYN) {
-        /* [2] SYN counter */
-        idx = 2;
-        cnt = bpf_map_lookup_elem(&pkt_count, &idx);
-        if (cnt) *cnt = *cnt + 1;
-
         __u64 ts = bpf_ktime_get_ns();
         bpf_map_update_elem(&syn_timestamps, &key, &ts, BPF_ANY);
 
     } else if (ctl == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
-        /* [3] SYN-ACK counter */
-        idx = 3;
-        cnt = bpf_map_lookup_elem(&pkt_count, &idx);
-        if (cnt) *cnt = *cnt + 1;
+        /* SYN-ACK: look up the matching SYN and compute RTT */
         struct flow_key syn_key = {};
         syn_key.family   = key.family;
         __builtin_memcpy(syn_key.src_ip, key.dst_ip, sizeof(syn_key.src_ip));
@@ -315,9 +287,6 @@ int measure_rtt_tc(struct __sk_buff *skb)
 
         __u64 *syn_ts = bpf_map_lookup_elem(&syn_timestamps, &syn_key);
         if (syn_ts) {
-            /* [4] SYN-ACK match found — RTT will be computed */
-            idx = 4; cnt = bpf_map_lookup_elem(&pkt_count, &idx);
-            if (cnt) *cnt = *cnt + 1;
             __u64 rtt_ns = bpf_ktime_get_ns() - *syn_ts;
             bpf_map_delete_elem(&syn_timestamps, &syn_key);
 
@@ -329,14 +298,14 @@ int measure_rtt_tc(struct __sk_buff *skb)
             /* WAN server = SYN-ACK src */
             __builtin_memcpy(ev.server_ip, key.src_ip, sizeof(ev.server_ip));
             ev.server_port = key.src_port;
-            /* Store raw nanoseconds (lower 32 bits) — no division in BPF.
-             * Safe for RTTs up to UINT32_MAX ns ≈ 4.29 s.
+            /* Store raw nanoseconds (lower 32 bits).
+             * Safe for RTTs up to UINT32_MAX ns (~4.29 s).
              * Exact ms conversion is done in userspace. */
-            ev.rtt_us      = (__u32)rtt_ns;
+            ev.rtt_ns      = (__u32)rtt_ns;
 
-            /* Write to the rtt_events array ring.
-             * bpf_map_update_elem works in softirq context (confirmed);
-             * bpf_perf_event_output returns ENOTSUPP here (softirq). */
+            /* Write to the rtt_events ARRAY ring, then return ETH_HLEN to
+             * queue one frame to the AF_PACKET socket.  This wakes the
+             * blocking recv() in the loader -- zero polling delay. */
             __u32 widx_key = 0;
             __u32 *wp = bpf_map_lookup_elem(&rtt_write_idx, &widx_key);
             if (wp) {
@@ -344,23 +313,11 @@ int measure_rtt_tc(struct __sk_buff *skb)
                 bpf_map_update_elem(&rtt_events, &slot, &ev, BPF_ANY);
                 *wp = *wp + 1;  /* advance write cursor (non-atomic: ok for PoC) */
             }
-
-            /* [6/7] track success for diagnostic */
-            idx = 6; cnt = bpf_map_lookup_elem(&pkt_count, &idx);
-            if (cnt) *cnt = *cnt + 1;
-
-            /* Return ETH_HLEN to queue one frame to the AF_PACKET socket.
-             * This wakes the blocking recv() in the loader immediately
-             * without any polling delay. All other packets return 0. */
             return ETH_HLEN;
-        } else {
-            /* [5] SYN-ACK lookup failed — key mismatch or SYN never seen */
-            idx = 5; cnt = bpf_map_lookup_elem(&pkt_count, &idx);
-            if (cnt) *cnt = *cnt + 1;
         }
     }
 
-    return 0;  /* discard — no RTT event, no wakeup needed */
+    return 0;  /* discard -- no RTT event, no wakeup needed */
 }
 
 char _license[] SEC("license") = "GPL";

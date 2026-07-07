@@ -49,7 +49,7 @@ struct rtt_event {
     __u16 server_port;
     __u8  family;
     __u8  pad[3];
-    __u32 rtt_us;   /* raw nanoseconds (lower 32 bits of SYN→SYN-ACK delta) */
+    __u32 rtt_ns;   /* raw SYN→SYN-ACK delta in nanoseconds (lower 32 bits) */
 };
 
 static int                       sock_fd  = -1;  /* AF_PACKET socket */
@@ -93,7 +93,7 @@ static void print_rtt_event(const struct rtt_event *e)
     }
     printf("  LAN %s:%-5u  ->  WAN %s:%-5u   RTT: %5.2f ms\n",
            cfmt, e->client_port, sfmt, e->server_port,
-           e->rtt_us / 1000000.0);
+           e->rtt_ns / 1000000.0);
     fflush(stdout);
 }
 
@@ -137,7 +137,7 @@ static void *poll_thread(void *arg)
                 __u32 slot = read_cursor % 32;
                 struct rtt_event ev = {};
                 if (bpf_map_lookup_elem(rtt_map_fd, &slot, &ev) == 0
-                    && ev.rtt_us > 0)
+                    && ev.rtt_ns > 0)
                     print_rtt_event(&ev);
                 read_cursor++;
             }

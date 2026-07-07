@@ -65,6 +65,8 @@ all-local:
 	    fi; \
 	    echo "  CLANG    tcp_hello.bpf.o"; \
 	    $(CLANG) -O2 -target bpf \
+	        -D__KERNEL__ \
+	        -Wno-deprecated-declarations \
 	        -I$(KERNEL_SRC)/include/uapi \
 	        -I$(KERNEL_SRC)/include \
 	        -I$(LIBBPF_INC) \
