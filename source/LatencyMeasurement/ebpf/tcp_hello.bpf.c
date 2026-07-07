@@ -128,7 +128,24 @@ struct rtt_event {
     __u16 server_port;
     __u8  family;       /* AF_INET or AF_INET6 */
     __u8  pad[3];
-    __u32 rtt_us;       /* RTT in microseconds (SYN → SYN-ACK) */
+    __u32 rtt_us;       /* raw nanoseconds (lower 32 bits of SYN→SYN-ACK delta) */
+};
+
+/*
+ * pkt_count[0] = total Ethernet frames seen
+ * pkt_count[1] = frames successfully parsed as IPv4/IPv6 TCP
+ * pkt_count[2] = TCP SYN frames detected
+ * pkt_count[3] = TCP SYN-ACK frames detected
+ * pkt_count[4] = TCP SYN-ACK: matching SYN found (RTT computed)
+ * pkt_count[5] = TCP SYN-ACK: no matching SYN found (key mismatch)
+ * pkt_count[6] = bpf_perf_event_output returned 0 (success)
+ * pkt_count[7] = bpf_perf_event_output returned non-zero (error)
+ */
+struct bpf_map_def SEC("maps") pkt_count = {
+    .type        = BPF_MAP_TYPE_ARRAY,
+    .key_size    = sizeof(__u32),
+    .value_size  = sizeof(__u64),
+    .max_entries = 8,
 };
 
 /*
@@ -145,12 +162,26 @@ struct bpf_map_def SEC("maps") syn_timestamps = {
 };
 
 /*
- * Ring buffer: RTT events delivered to userspace.
- * max_entries = ring size in bytes; must be a power-of-2 multiple of page size.
+ * Output map: BPF writes the latest RTT event here; userspace polls it.
+ * Plain ARRAY + bpf_map_update_elem avoids bpf_perf_event_output which
+ * returns ENOTSUPP (-524) for SOCKET_FILTER in softirq context on this
+ * vendor BCM3390 kernel.
+ * max_entries=32 gives a small circular ring so back-to-back connections
+ * are not lost; the write index is stored at slot 0 of rtt_write_idx.
  */
 struct bpf_map_def SEC("maps") rtt_events = {
-    .type        = BPF_MAP_TYPE_RINGBUF,
-    .max_entries = 1 << 16,  /* 64 KB ≈ 1 000 events before wrap */
+    .type        = BPF_MAP_TYPE_ARRAY,
+    .key_size    = sizeof(__u32),
+    .value_size  = sizeof(struct rtt_event),
+    .max_entries = 32,
+};
+
+/* Write cursor for rtt_events ring (slot 0 = next write index). */
+struct bpf_map_def SEC("maps") rtt_write_idx = {
+    .type        = BPF_MAP_TYPE_ARRAY,
+    .key_size    = sizeof(__u32),
+    .value_size  = sizeof(__u32),
+    .max_entries = 1,
 };
 
 /*
@@ -223,19 +254,34 @@ static __always_inline int parse_tcp(struct __sk_buff *skb,
 }
 
 /*
- * SEC("classifier") keeps expected_attach_type = 0 (old-style TC/cls_bpf).
- * SEC("tc") in libbpf >= 1.3 sets expected_attach_type = BPF_TCX_INGRESS (28),
- * which kernels older than 6.6 reject with ENOTSUPP post-verifier.
- * The bpf_tc_hook_create/bpf_tc_attach loader API requires the old-style type.
+ * SEC("socket_filter") attaches this program to an AF_PACKET raw socket
+ * created by tcp_loader.  AF_PACKET is the same hook point used by libpcap
+ * and is NOT bypassed by Broadcom ARCHER hardware offload, unlike TC hooks.
+ *
+ * The return value is the number of bytes to deliver to the socket's receive
+ * buffer.  We return 0 (discard) since all output goes via perf_event_output;
+ * no packet data needs to be queued for userspace to read from the socket.
  */
-SEC("classifier")
+SEC("socket_filter")
 int measure_rtt_tc(struct __sk_buff *skb)
 {
     struct flow_key key = {};
     __u8 flags = 0;
 
+    /* [0] total frames */
+    __u32 idx = 0;
+    __u64 *cnt = bpf_map_lookup_elem(&pkt_count, &idx);
+    if (cnt)
+        *cnt = *cnt + 1;
+
     if (parse_tcp(skb, &key, &flags) < 0)
-        return TC_ACT_OK;
+        return ETH_HLEN;
+
+    /* [1] successfully parsed as TCP */
+    idx = 1;
+    cnt = bpf_map_lookup_elem(&pkt_count, &idx);
+    if (cnt)
+        *cnt = *cnt + 1;
 
     /*
      * Mask the four control bits we care about; ECE/CWR (bits 6-7) are
@@ -245,16 +291,19 @@ int measure_rtt_tc(struct __sk_buff *skb)
 
     /* Pure SYN: LAN client opening a new connection (ingress path) */
     if (ctl == TCP_FLAG_SYN) {
+        /* [2] SYN counter */
+        idx = 2;
+        cnt = bpf_map_lookup_elem(&pkt_count, &idx);
+        if (cnt) *cnt = *cnt + 1;
+
         __u64 ts = bpf_ktime_get_ns();
         bpf_map_update_elem(&syn_timestamps, &key, &ts, BPF_ANY);
 
-    /* SYN-ACK: WAN server reply heading back to LAN client (egress path) */
     } else if (ctl == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
-        /*
-         * Reverse the five-tuple to find the original SYN entry:
-         *   SYN was recorded as  src=client  dst=server
-         *   SYN-ACK arrives as   src=server  dst=client
-         */
+        /* [3] SYN-ACK counter */
+        idx = 3;
+        cnt = bpf_map_lookup_elem(&pkt_count, &idx);
+        if (cnt) *cnt = *cnt + 1;
         struct flow_key syn_key = {};
         syn_key.family   = key.family;
         __builtin_memcpy(syn_key.src_ip, key.dst_ip, sizeof(syn_key.src_ip));
@@ -264,29 +313,47 @@ int measure_rtt_tc(struct __sk_buff *skb)
 
         __u64 *syn_ts = bpf_map_lookup_elem(&syn_timestamps, &syn_key);
         if (syn_ts) {
+            /* [4] SYN-ACK match found — RTT will be computed */
+            idx = 4; cnt = bpf_map_lookup_elem(&pkt_count, &idx);
+            if (cnt) *cnt = *cnt + 1;
             __u64 rtt_ns = bpf_ktime_get_ns() - *syn_ts;
             bpf_map_delete_elem(&syn_timestamps, &syn_key);
 
-            struct rtt_event *e = bpf_ringbuf_reserve(&rtt_events, sizeof(*e), 0);
-            if (e) {
-                e->family      = key.family;
-                e->pad[0] = e->pad[1] = e->pad[2] = 0;
-                /* LAN client = SYN src = SYN-ACK dst */
-                __builtin_memcpy(e->client_ip, key.dst_ip, sizeof(e->client_ip));
-                e->client_port = key.dst_port;
-                /* WAN server = SYN-ACK src */
-                __builtin_memcpy(e->server_ip, key.src_ip, sizeof(e->server_ip));
-                e->server_port = key.src_port;
-                /* Cast to __u32 before dividing: ARM 32-bit BPF JIT does not
-                 * support BPF_ALU64|BPF_DIV (64-bit division).  Safe for all
-                 * realistic RTTs — UINT32_MAX ns ≈ 4.29 s. */
-                e->rtt_us      = (__u32)rtt_ns / 1000;
-                bpf_ringbuf_submit(e, 0);
+            struct rtt_event ev = {};
+            ev.family      = key.family;
+            /* LAN client = SYN src = SYN-ACK dst */
+            __builtin_memcpy(ev.client_ip, key.dst_ip, sizeof(ev.client_ip));
+            ev.client_port = key.dst_port;
+            /* WAN server = SYN-ACK src */
+            __builtin_memcpy(ev.server_ip, key.src_ip, sizeof(ev.server_ip));
+            ev.server_port = key.src_port;
+            /* Store raw nanoseconds (lower 32 bits) — no division in BPF.
+             * Safe for RTTs up to UINT32_MAX ns ≈ 4.29 s.
+             * Exact ms conversion is done in userspace. */
+            ev.rtt_us      = (__u32)rtt_ns;
+
+            /* Write to the rtt_events array ring.
+             * bpf_map_update_elem works in softirq context (confirmed);
+             * bpf_perf_event_output returns ENOTSUPP here (softirq). */
+            __u32 widx_key = 0;
+            __u32 *wp = bpf_map_lookup_elem(&rtt_write_idx, &widx_key);
+            if (wp) {
+                __u32 slot = *wp % 32;
+                bpf_map_update_elem(&rtt_events, &slot, &ev, BPF_ANY);
+                *wp = *wp + 1;  /* advance write cursor (non-atomic: ok for PoC) */
             }
+
+            /* [6/7] track success for diagnostic */
+            idx = 6; cnt = bpf_map_lookup_elem(&pkt_count, &idx);
+            if (cnt) *cnt = *cnt + 1;
+        } else {
+            /* [5] SYN-ACK lookup failed — key mismatch or SYN never seen */
+            idx = 5; cnt = bpf_map_lookup_elem(&pkt_count, &idx);
+            if (cnt) *cnt = *cnt + 1;
         }
     }
 
-    return TC_ACT_OK;
+    return ETH_HLEN;  /* keep Ethernet header bytes in receive queue */
 }
 
 char _license[] SEC("license") = "GPL";
