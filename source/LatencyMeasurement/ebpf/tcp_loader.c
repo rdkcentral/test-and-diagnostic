@@ -69,7 +69,8 @@ static void sig_handler(int sig)
 static int libbpf_print_fn(enum libbpf_print_level level,
                             const char *format, va_list args)
 {
-    (void)level;   /* print everything: DEBUG, INFO, WARN */
+    if (level > LIBBPF_WARN)
+        return 0;  /* suppress INFO and DEBUG; show only warnings/errors */
     return vfprintf(stderr, format, args);
 }
 
@@ -105,11 +106,8 @@ static void print_rtt_event(const struct rtt_event *e)
  */
 static void *poll_thread(void *arg)
 {
-    struct bpf_object *obj = (struct bpf_object *)arg;
-    struct bpf_map *cmap = bpf_object__find_map_by_name(obj, "pkt_count");
-    int cmap_fd = cmap ? bpf_map__fd(cmap) : -1;
-    time_t last_report = time(NULL);
-    __u32 read_cursor = 0;  /* next slot to read from */
+    (void)arg;
+    __u32 read_cursor = 0;
 
     while (running) {
         /* Poll the rtt_write_idx to see if BPF wrote any new events */
@@ -128,47 +126,6 @@ static void *poll_thread(void *arg)
         }
 
         usleep(10000);  /* 10 ms poll interval */
-
-        /* Every 5 s: dump BPF packet counter and socket recv queue size */
-        if (time(NULL) - last_report >= 5) {
-            last_report = time(NULL);
-            if (cmap_fd >= 0) {
-                __u32 key = 0; __u64 v0=0,v1=0,v2=0,v3=0,v4=0,v5=0,v6=0,v7=0;
-                bpf_map_lookup_elem(cmap_fd,&key,&v0); key=1;
-                bpf_map_lookup_elem(cmap_fd,&key,&v1); key=2;
-                bpf_map_lookup_elem(cmap_fd,&key,&v2); key=3;
-                bpf_map_lookup_elem(cmap_fd,&key,&v3); key=4;
-                bpf_map_lookup_elem(cmap_fd,&key,&v4); key=5;
-                bpf_map_lookup_elem(cmap_fd,&key,&v5); key=6;
-                bpf_map_lookup_elem(cmap_fd,&key,&v6); key=7;
-                bpf_map_lookup_elem(cmap_fd,&key,&v7);
-                fprintf(stderr,
-                    "[diag] frames=%llu TCP=%llu SYN=%llu SYN-ACK=%llu "
-                    "match_ok=%llu match_fail=%llu perf_ok=%llu perf_errno=%llu(%s)\n",
-                    (unsigned long long)v0,(unsigned long long)v1,
-                    (unsigned long long)v2,(unsigned long long)v3,
-                    (unsigned long long)v4,(unsigned long long)v5,
-                    (unsigned long long)v6,(unsigned long long)v7,
-                    v7 ? strerror((int)v7) : "none");
-                if (v3>0 && v4==0)
-                    fprintf(stderr,
-                        "       SYN-ACKs seen but NONE matched a stored SYN\n"
-                        "       => key mismatch (DNAT not applied yet? different conn?)\n");
-                if (v4>0 && v5==0)
-                    fprintf(stderr,
-                        "       All SYN-ACKs matched — perf_event_output issue\n");
-            }
-            /* Also drain recv queue and count queued packets */
-            int queued = 0;
-            char buf[1];
-            ssize_t r;
-            while ((r = recv(sock_fd, buf, sizeof(buf),
-                             MSG_DONTWAIT | MSG_TRUNC)) > 0)
-                queued++;
-            if (queued)
-                fprintf(stderr, "[diag] %d packets drained from socket receive "
-                        "queue (BPF returns ETH_HLEN for every frame)\n", queued);
-        }
     }
     return NULL;
 }
@@ -299,7 +256,7 @@ int main(int argc, char *argv[])
     /* 5. Spawn poll thread; main sleeps until SIGINT/SIGTERM             */
     /* ------------------------------------------------------------------ */
     pthread_t poll_tid;
-    if (pthread_create(&poll_tid, NULL, poll_thread, obj) != 0) {
+    if (pthread_create(&poll_tid, NULL, poll_thread, NULL) != 0) {
         fprintf(stderr, "Failed to create poll thread: %s\n", strerror(errno));
         return 1;
     }
