@@ -1,28 +1,29 @@
 /*
- * tcp_hello.bpf.c - eBPF TC program: LAN-client RTT via TCP handshake timing
+ * tcp_hello.bpf.c - eBPF socket_filter: LAN-client RTT via TCP handshake timing
  *
- * Attach to the LAN bridge interface (e.g. brlan0) as both ingress and
- * egress TC filters using the same compiled object:
- *
- *   tc qdisc  add dev brlan0 clsact
- *   tc filter add dev brlan0 ingress bpf obj tcp_hello.bpf.o sec tc da
- *   tc filter add dev brlan0 egress  bpf obj tcp_hello.bpf.o sec tc da
- *
- * (tcp_loader handles all of the above automatically.)
+ * Attached to an AF_PACKET raw socket on the LAN interface (e.g. brlan0
+ * or the physical port eth1) by tcp_loader using SO_ATTACH_BPF.
+ * AF_PACKET is the same hook point as libpcap and is visible even on
+ * platforms where hardware offload (e.g. BCM3390 Runner) bypasses TC.
  *
  * How it works
  * ─────────────
- *   ingress (packet FROM LAN client → WAN):
- *     TCP SYN  →  store flow_key → ktime_ns in syn_timestamps hash map
+ *   Every packet on the interface runs through this program.
  *
- *   egress (packet TO LAN client ← WAN):
- *     TCP SYN-ACK → reverse the flow key, look up the SYN timestamp,
- *                   compute RTT = now − SYN_ts, emit rtt_event to ring buffer
+ *   TCP SYN  (from LAN client → WAN):
+ *     Store flow_key → ktime_ns in syn_timestamps LRU hash map.
+ *     Return 0 (discard from socket receive buffer, no userspace wakeup).
  *
- * The SYN→SYN-ACK delta is the WAN RTT as experienced by the LAN client.
+ *   TCP SYN-ACK (from WAN → LAN client):
+ *     Reverse the flow key, look up the stored SYN timestamp.
+ *     Compute RTT = now − SYN_ts, write rtt_event to rtt_events ARRAY map.
+ *     Return ETH_HLEN to queue one frame to the AF_PACKET socket, which
+ *     wakes the blocking recv() in the loader — zero-latency notification.
  *
- * Stale SYN entries (no SYN-ACK ever arrives) are evicted automatically
- * by the LRU hash map once it reaches max_entries.
+ *   All other packets: return 0 (no wakeup, no map write).
+ *
+ * The SYN→SYN-ACK delta is the WAN RTT as seen by the LAN client.
+ * Stale SYN entries are evicted by the LRU map once it reaches max_entries.
  */
 
 #include <linux/bpf.h>
@@ -44,8 +45,9 @@
 #define AF_INET  2
 #define AF_INET6 10
 
-/* TC return code ---------------------------------------------------------- */
-#define TC_ACT_OK 0
+/* Socket_filter return codes --------------------------------------------- */
+/* Returning 0 discards the packet from the socket receive buffer.          */
+/* Returning ETH_HLEN queues the packet, waking the blocking recv().        */
 
 /* Ethernet ---------------------------------------------------------------- */
 #define ETH_P_IP   0x0800
@@ -118,7 +120,7 @@ struct flow_key {
 };
 
 /*
- * RTT event pushed to the userspace ring buffer.
+ * RTT event written to rtt_events ARRAY map; userspace reads via poll.
  * client_* = LAN-side host;  server_* = WAN-side peer.
  */
 struct rtt_event {
@@ -136,10 +138,10 @@ struct rtt_event {
  * pkt_count[1] = frames successfully parsed as IPv4/IPv6 TCP
  * pkt_count[2] = TCP SYN frames detected
  * pkt_count[3] = TCP SYN-ACK frames detected
- * pkt_count[4] = TCP SYN-ACK: matching SYN found (RTT computed)
- * pkt_count[5] = TCP SYN-ACK: no matching SYN found (key mismatch)
- * pkt_count[6] = bpf_perf_event_output returned 0 (success)
- * pkt_count[7] = bpf_perf_event_output returned non-zero (error)
+ * pkt_count[4] = TCP SYN-ACK: matching SYN found (RTT computed + written)
+ * pkt_count[5] = TCP SYN-ACK: no matching SYN (key mismatch or SYN missed)
+ * pkt_count[6] = RTT events successfully written to rtt_events map
+ * pkt_count[7] = (reserved)
  */
 struct bpf_map_def SEC("maps") pkt_count = {
     .type        = BPF_MAP_TYPE_ARRAY,
@@ -259,8 +261,9 @@ static __always_inline int parse_tcp(struct __sk_buff *skb,
  * and is NOT bypassed by Broadcom ARCHER hardware offload, unlike TC hooks.
  *
     /* SEC comment updated: we return 0 for most packets, ETH_HLEN only when
-     * an RTT event is written so the socket wakes userspace precisely. */
- */
+     * an RTT event is written so the socket wakes userspace precisely. */     * bpf_perf_event_output returns ENOTSUPP (-524) for SOCKET_FILTER in
+     * softirq context on the BCM3390 vendor kernel; bpf_map_update_elem
+     * works correctly from softirq and is used instead. */
 SEC("socket_filter")
 int measure_rtt_tc(struct __sk_buff *skb)
 {

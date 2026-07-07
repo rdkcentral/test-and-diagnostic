@@ -9,9 +9,11 @@
  * AF_PACKET is the same hook point used by libpcap — it is NOT bypassed by
  * Broadcom ARCHER hardware offload, unlike TC (clsact) hooks.
  *
- * The BPF program sees both TX (SYN) and RX (SYN-ACK) frames on the
- * interface, timestamps the SYN, and emits an RTT event on the SYN-ACK
- * via bpf_perf_event_output.
+ * The BPF program timestamps TCP SYNs and emits RTT events to a
+ * BPF_MAP_TYPE_ARRAY ring (rtt_events) when SYN-ACKs are matched.
+ * The loader is woken via a blocking recv() on the same AF_PACKET
+ * socket: the BPF program returns ETH_HLEN only on RTT events, so
+ * the socket queues exactly one frame per event — zero polling overhead.
  *
  * To stop: Ctrl+C
  */
@@ -62,15 +64,13 @@ static void sig_handler(int sig)
 }
 
 /*
- * Print all libbpf messages including DEBUG level.
- * DEBUG output shows individual map create / prog load syscalls and
- * lets us see if any map fd comes back as -1 (silent creation failure).
+ * Suppress libbpf INFO/DEBUG output; only warnings and above are shown.
  */
 static int libbpf_print_fn(enum libbpf_print_level level,
                             const char *format, va_list args)
 {
     if (level > LIBBPF_WARN)
-        return 0;  /* suppress INFO and DEBUG; show only warnings/errors */
+        return 0;
     return vfprintf(stderr, format, args);
 }
 
@@ -150,9 +150,7 @@ int main(int argc, char *argv[])
 {
     const char *ifname = (argc >= 2) ? argv[1] : DEFAULT_IFACE;
 
-    /* Enable full libbpf debug output so every map create and prog load
-     * syscall is logged.  This shows exactly where bpf_object__load()
-     * fails and whether any map fd comes back as -1.               */
+    /* Restrict libbpf output to warnings and errors only. */
     libbpf_set_print(libbpf_print_fn);
 
     /* ------------------------------------------------------------------ */
@@ -197,7 +195,7 @@ int main(int argc, char *argv[])
     printf("BPF program loaded.\n");
 
     /* ------------------------------------------------------------------ */
-    /* 2. Get the TC program fd                                            */
+    /* 2. Get the socket_filter program fd                                 */
     /* ------------------------------------------------------------------ */
     struct bpf_program *prog = bpf_object__find_program_by_name(obj, "measure_rtt_tc");
     if (!prog) {
@@ -283,10 +281,8 @@ int main(int argc, char *argv[])
     pthread_join(poll_tid, NULL);
 
     /* ------------------------------------------------------------------ */
-    /* 6. Cleanup — runs in normal flow, not inside a signal handler      */
-    /*                                                                     */
-    /*    Detach individual filters before destroying the qdisc so that   */
-    /*    any other TC programs on the interface are not disturbed.       */
+    /* 6. Cleanup                                                          */
+    /*    Closing the AF_PACKET socket automatically removes SO_ATTACH_BPF */
     /* ------------------------------------------------------------------ */
     printf("\nDetaching...\n");
     close(sock_fd);   /* removing SO_ATTACH_BPF is automatic on socket close */
