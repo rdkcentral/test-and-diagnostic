@@ -120,7 +120,10 @@ static void *poll_thread(void *arg)
         char buf[1];
         ssize_t r = recv(sock_fd, buf, sizeof(buf), MSG_TRUNC);
         if (r < 0) {
-            if (errno == EINTR) continue;
+            /* EINTR = interrupted by signal; EAGAIN/EWOULDBLOCK = SO_RCVTIMEO
+             * expired.  Both are normal -- just recheck running and loop. */
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+                continue;
             fprintf(stderr, "recv error: %s\n", strerror(errno));
             running = 0;
             break;
@@ -228,6 +231,12 @@ int main(int argc, char *argv[])
         close(sock_fd);
         return 1;
     }
+
+    /* 1-second receive timeout so the poll thread can notice running=0
+     * when Ctrl+C sets it.  Without this, recv() blocks forever and
+     * pthread_join() hangs. */
+    struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
+    setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     /* Promiscuous mode: ensure we see all frames including those not     */
     /* destined for the gateway's own MAC                                 */
