@@ -24,8 +24,6 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 #include <stdarg.h>
-#include <sys/syscall.h>
-#include <linux/bpf.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 
@@ -45,13 +43,12 @@ static void sig_handler(int sig)
 }
 
 /*
- * Suppress libbpf DEBUG output; show INFO and above for initial debugging.
- * Change LIBBPF_INFO to LIBBPF_WARN once kprobe operation is confirmed.
+ * libbpf logging: show warnings and errors only.
  */
 static int libbpf_print_fn(enum libbpf_print_level level,
                             const char *format, va_list args)
 {
-    if (level > LIBBPF_DEBUG)  /* show all: WARN + INFO + DEBUG (verifier log) */
+    if (level > LIBBPF_WARN)
         return 0;
     return vfprintf(stderr, format, args);
 }
@@ -99,43 +96,6 @@ static void *poll_thread(void *arg)
             running = 0;
             break;
         }
-
-        /* Debug: every 5 s print how many times the kprobes fired.
-         * This confirms kprobe attachment is working even if no
-         * RTT events appear yet (e.g. wrong SKBUFF_DATA_OFFSET).
-         * Remove once operation is confirmed. */
-        static time_t last_dbg = 0;
-        time_t now = time(NULL);
-        if (now - last_dbg >= 5) {
-            last_dbg = now;
-            struct bpf_object *o = (struct bpf_object *)arg;
-            __u64 v[6] = {};
-            struct bpf_map *cm = bpf_object__find_map_by_name(o, "dbg_kprobe_count");
-            if (cm) {
-                int fd = bpf_map__fd(cm);
-                __u32 i;
-                for (i = 0; i < 6; i++)
-                    bpf_map_lookup_elem(fd, &i, &v[i]);
-                fprintf(stderr,
-                    "[dbg] ip_fwd=%llu ip6_fwd=%llu "
-                    "iph_ok=%llu tcp=%llu syn=%llu synack=%llu\n",
-                    (unsigned long long)v[0], (unsigned long long)v[1],
-                    (unsigned long long)v[2], (unsigned long long)v[3],
-                    (unsigned long long)v[4], (unsigned long long)v[5]);
-                if (v[0] == 0 && v[1] == 0)
-                    fprintf(stderr, "      ip_fwd=0: kprobe not firing\n");
-                else if (v[2] == 0)
-                    fprintf(stderr, "      iph_ok=0: SKBUFF_DATA_OFFSET=%d wrong\n",
-                            204 /* SKBUFF_DATA_OFFSET */);
-                else if (v[3] == 0)
-                    fprintf(stderr, "      tcp=0: no TCP packets forwarded\n");
-                else if (v[4] == 0)
-                    fprintf(stderr, "      syn=0: no TCP SYN packets seen\n");
-            }
-
-            /* No offset scan map (removed after SKBUFF_DATA_OFFSET=188 confirmed). */
-            (void)0;
-        }
     }
     return NULL;
 }
@@ -148,48 +108,6 @@ int main(int argc, char *argv[])
     libbpf_set_print(libbpf_print_fn);
 
     /* ------------------------------------------------------------------ */
-    /* 0. Probe: can the kernel load ANY BPF_PROG_TYPE_KPROBE program?     */
-    /* ------------------------------------------------------------------ */
-    {
-        /* r0 = 0; exit  -- the simplest valid BPF program */
-        struct bpf_insn insns[2] = {
-            { .code  = BPF_ALU64 | BPF_MOV | BPF_K,
-              .dst_reg = BPF_REG_0, .src_reg = 0,
-              .off = 0, .imm = 0 },
-            { .code  = BPF_JMP | BPF_EXIT,
-              .dst_reg = 0, .src_reg = 0,
-              .off = 0, .imm = 0 },
-        };
-        static char probe_log[4096];
-        union bpf_attr attr;
-        int pfd;
-        memset(&attr, 0, sizeof(attr));
-        attr.prog_type = BPF_PROG_TYPE_KPROBE;
-        attr.insns     = (__u64)(uintptr_t)insns;
-        attr.insn_cnt  = 2;
-        attr.license   = (__u64)(uintptr_t)"GPL";
-        attr.log_level = 1;
-        attr.log_buf   = (__u64)(uintptr_t)probe_log;
-        attr.log_size  = sizeof(probe_log);
-        pfd = (int)syscall(__NR_bpf, BPF_PROG_LOAD, &attr, sizeof(attr));
-        if (pfd < 0) {
-            fprintf(stderr, "[probe] BPF_PROG_TYPE_KPROBE NOT supported: %s\n",
-                    strerror(errno));
-            if (probe_log[0])
-                fprintf(stderr, "[probe] verifier log:\n%s\n", probe_log);
-            else
-                fprintf(stderr, "[probe] empty verifier log "
-                        "-- program type not registered in kernel\n");
-        } else {
-            fprintf(stderr, "[probe] BPF_PROG_TYPE_KPROBE supported (fd=%d)"  
-                    " -- failure must be in our BPF bytecode\n", pfd);
-            if (probe_log[0])
-                fprintf(stderr, "[probe] verifier log:\n%s\n", probe_log);
-            close(pfd);
-        }
-    }
-
-    /* ------------------------------------------------------------------ */
     /* 1. Load the BPF object                                              */
     /* ------------------------------------------------------------------ */
     struct bpf_object *obj = bpf_object__open(BPF_OBJ_PATH);
@@ -197,14 +115,6 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Failed to open %s: %ld\n",
                 BPF_OBJ_PATH, libbpf_get_error(obj));
         return 1;
-    }
-
-    /* Request full verifier log from the kernel for every program so that
-     * on load failure the verifier output is captured and printed. */
-    {
-        struct bpf_program *prog;
-        bpf_object__for_each_program(prog, obj)
-            bpf_program__set_log_level(prog, 1);
     }
 
     if (bpf_object__load(obj)) {
@@ -271,7 +181,7 @@ int main(int argc, char *argv[])
     /* 4. Spawn poll thread; main sleeps until SIGINT/SIGTERM             */
     /* ------------------------------------------------------------------ */
     pthread_t poll_tid;
-    if (pthread_create(&poll_tid, NULL, poll_thread, obj) != 0) {
+    if (pthread_create(&poll_tid, NULL, poll_thread, NULL) != 0) {
         fprintf(stderr, "Failed to create poll thread: %s\n", strerror(errno));
         goto cleanup;
     }

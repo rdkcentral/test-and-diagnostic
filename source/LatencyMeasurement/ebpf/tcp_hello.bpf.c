@@ -152,18 +152,6 @@ struct flow_key {
 };
 
 /*
- * Debug counter: incremented every time ip_forward/ip6_forward fires.
- * Check via tcp_loader's 5-second diag output.
- * Remove once kprobe operation is confirmed.
- */
-struct bpf_map_def SEC("maps") dbg_kprobe_count = {
-    .type        = BPF_MAP_TYPE_ARRAY,
-    .key_size    = sizeof(__u32),
-    .value_size  = sizeof(__u64),
-    .max_entries = 6,  /* [0]=ip_fwd [1]=ip6_fwd [2]=iph_ok [3]=tcp [4]=syn [5]=synack */
-};
-
-/*
  * Hash map: in-flight SYN flows -> arrival timestamp (nanoseconds).
  * LRU so oldest entries are evicted instead of blocking new insertions.
  */
@@ -192,12 +180,8 @@ static __always_inline int handle_v4(struct pt_regs *ctx, const void *data)
     struct iphdr iph;
     if (bpf_probe_read_kernel(&iph, sizeof(iph), data))
         return 0;
-    /* [2] skb->data was readable: SKBUFF_DATA_OFFSET is correct */
-    { __u32 _k = 2; __u64 *_c = bpf_map_lookup_elem(&dbg_kprobe_count, &_k); if (_c) *_c = *_c + 1; }
     if (iph.protocol != IPPROTO_TCP)
         return 0;
-    /* [3] TCP packet */
-    { __u32 _k = 3; __u64 *_c = bpf_map_lookup_elem(&dbg_kprobe_count, &_k); if (_c) *_c = *_c + 1; }
 
     __u32 ihl = (iph.ihl_version & 0x0F) * 4;
     if (ihl < 20)
@@ -218,14 +202,10 @@ static __always_inline int handle_v4(struct pt_regs *ctx, const void *data)
     key.dst_port  = bpf_ntohs(tcph.dest);
 
     if (ctl == TCP_FLAG_SYN) {
-        /* [4] SYN */
-        { __u32 _k = 4; __u64 *_c = bpf_map_lookup_elem(&dbg_kprobe_count, &_k); if (_c) *_c = *_c + 1; }
         __u64 ts = bpf_ktime_get_ns();
         bpf_map_update_elem(&syn_timestamps, &key, &ts, BPF_ANY);
 
     } else if (ctl == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
-        /* [5] SYN-ACK */
-        { __u32 _k = 5; __u64 *_c = bpf_map_lookup_elem(&dbg_kprobe_count, &_k); if (_c) *_c = *_c + 1; }
         struct flow_key syn_key = {};
         syn_key.family   = key.family;
         __builtin_memcpy(syn_key.src_ip, key.dst_ip, sizeof(syn_key.src_ip));
@@ -255,10 +235,6 @@ static __always_inline int handle_v4(struct pt_regs *ctx, const void *data)
 SEC("kprobe/ip_forward")
 int BPF_KPROBE(kprobe_ip_fwd_v4, struct sk_buff *skb)
 {
-    /* debug: count every ip_forward() invocation */
-    __u32 k = 0; __u64 *c = bpf_map_lookup_elem(&dbg_kprobe_count, &k);
-    if (c) *c = *c + 1;
-
     void *data;
     if (bpf_probe_read_kernel(&data, sizeof(data),
                                (const char *)skb + SKBUFF_DATA_OFFSET))
@@ -326,10 +302,6 @@ static __always_inline int handle_v6(struct pt_regs *ctx, const void *data)
 SEC("kprobe/ip6_forward")
 int BPF_KPROBE(kprobe_ip_fwd_v6, struct sk_buff *skb)
 {
-    /* debug: count every ip6_forward() invocation */
-    __u32 k = 1; __u64 *c = bpf_map_lookup_elem(&dbg_kprobe_count, &k);
-    if (c) *c = *c + 1;
-
     void *data;
     if (bpf_probe_read_kernel(&data, sizeof(data),
                                (const char *)skb + SKBUFF_DATA_OFFSET))
