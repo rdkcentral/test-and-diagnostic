@@ -31,7 +31,7 @@
 
 #include "tcp_rtt.h"  /* struct rtt_event (shared with tcp_hello.bpf.c) */
 
-static struct perf_buffer       *pb      = NULL;
+static struct ring_buffer       *rb      = NULL;
 static struct bpf_link          *link_v4 = NULL;
 static struct bpf_link          *link_v6 = NULL;
 static volatile sig_atomic_t     running = 1;
@@ -54,13 +54,14 @@ static int libbpf_print_fn(enum libbpf_print_level level,
 }
 
 /*
- * perf_buffer callback: called for each RTT event from the kernel.
+ * ring_buffer callback: called for each RTT event from the kernel.
+ * Must return 0 to continue consuming, negative to stop.
  */
-static void handle_rtt_event(void *ctx, int cpu, void *data, __u32 data_sz)
+static int handle_rtt_event(void *ctx, void *data, size_t data_sz)
 {
-    (void)ctx; (void)cpu;
+    (void)ctx;
     if (data_sz < sizeof(struct rtt_event))
-        return;
+        return 0;
 
     const struct rtt_event *e = data;
     int af = (e->family == AF_INET6) ? AF_INET6 : AF_INET;
@@ -79,20 +80,22 @@ static void handle_rtt_event(void *ctx, int cpu, void *data, __u32 data_sz)
            cfmt, e->client_port, sfmt, e->server_port,
            e->rtt_ns / 1000000.0);
     fflush(stdout);
+    return 0;
 }
 
 /*
- * Background thread: polls the perf ring buffer for RTT events.
- * perf_buffer__poll() with a 1-second timeout acts as a natural
- * check on the running flag for Ctrl+C handling.
+ * Background thread: polls the ring buffer for RTT events.
+ * ring_buffer__poll() blocks (epoll_wait) until data arrives or timeout.
+ * The 1-second timeout is only for checking the running flag (Ctrl+C);
+ * events are delivered within microseconds of bpf_ringbuf_output().
  */
 static void *poll_thread(void *arg)
 {
     (void)arg;
     while (running) {
-        int n = perf_buffer__poll(pb, 1000 /* ms */);
+        int n = ring_buffer__poll(rb, 1000 /* ms */);
         if (n < 0 && errno != EINTR) {
-            fprintf(stderr, "perf_buffer__poll error: %s\n", strerror(errno));
+            fprintf(stderr, "ring_buffer__poll error: %s\n", strerror(errno));
             running = 0;
             break;
         }
@@ -162,7 +165,7 @@ int main(int argc, char *argv[])
     signal(SIGTERM, sig_handler);
 
     /* ------------------------------------------------------------------ */
-    /* 3. Create perf buffer consumer                                      */
+    /* 3. Create ring buffer consumer                                      */
     /* ------------------------------------------------------------------ */
     struct bpf_map *rtt_map = bpf_object__find_map_by_name(obj, "rtt_events");
     if (!rtt_map) {
@@ -170,10 +173,9 @@ int main(int argc, char *argv[])
         goto cleanup;
     }
 
-    pb = perf_buffer__new(bpf_map__fd(rtt_map), 64 /* pages per CPU */,
-                          handle_rtt_event, NULL, NULL, NULL);
-    if (libbpf_get_error(pb)) {
-        fprintf(stderr, "Failed to create perf buffer: %s\n", strerror(errno));
+    rb = ring_buffer__new(bpf_map__fd(rtt_map), handle_rtt_event, NULL, NULL);
+    if (libbpf_get_error(rb)) {
+        fprintf(stderr, "Failed to create ring buffer: %s\n", strerror(errno));
         goto cleanup;
     }
 
@@ -196,7 +198,7 @@ cleanup:
     /* 5. Cleanup                                                          */
     /* ------------------------------------------------------------------ */
     printf("\nDetaching kprobes...\n");
-    if (pb)        perf_buffer__free(pb);
+    if (rb)        ring_buffer__free(rb);
     if (link_v6)   bpf_link__destroy(link_v6);
     if (link_v4)   bpf_link__destroy(link_v4);
     bpf_object__close(obj);

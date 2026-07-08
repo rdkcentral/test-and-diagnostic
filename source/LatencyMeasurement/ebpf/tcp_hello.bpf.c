@@ -163,19 +163,18 @@ struct bpf_map_def SEC("maps") syn_timestamps = {
 };
 
 /*
- * Perf event array: delivers rtt_event structs to userspace.
- * bpf_perf_event_output works for kprobe programs (process context).
+ * Ring buffer: delivers rtt_event structs to userspace.
+ * Single shared ring (no per-CPU split), one fd in epoll.
+ * bpf_ringbuf_output works for kprobe programs (process context).
  */
 struct bpf_map_def SEC("maps") rtt_events = {
-    .type        = BPF_MAP_TYPE_PERF_EVENT_ARRAY,
-    .key_size    = sizeof(__u32),
-    .value_size  = sizeof(__u32),
-    .max_entries = 128,
+    .type        = BPF_MAP_TYPE_RINGBUF,
+    .max_entries = 256 * 1024,  /* 256 KB ring; power-of-2, multiple of page size */
 };
 
 /* ---- IPv4 forwarding kprobe -------------------------------------------- */
 
-static __always_inline int handle_v4(struct pt_regs *ctx, const void *data)
+static __always_inline int handle_v4(const void *data)
 {
     struct iphdr iph;
     if (bpf_probe_read_kernel(&iph, sizeof(iph), data))
@@ -225,8 +224,7 @@ static __always_inline int handle_v4(struct pt_regs *ctx, const void *data)
             __builtin_memcpy(ev.server_ip, key.src_ip, sizeof(ev.server_ip));
             ev.server_port = key.src_port;
             ev.rtt_ns      = (__u32)rtt_ns;
-            bpf_perf_event_output(ctx, &rtt_events, BPF_F_CURRENT_CPU,
-                                  &ev, sizeof(ev));
+            bpf_ringbuf_output(&rtt_events, &ev, sizeof(ev), 0);
         }
     }
     return 0;
@@ -241,12 +239,12 @@ int BPF_KPROBE(kprobe_ip_fwd_v4, struct sk_buff *skb)
         return 0;
     if (!data)
         return 0;
-    return handle_v4(ctx, data);
+    return handle_v4(data);
 }
 
 /* ---- IPv6 forwarding kprobe -------------------------------------------- */
 
-static __always_inline int handle_v6(struct pt_regs *ctx, const void *data)
+static __always_inline int handle_v6(const void *data)
 {
     struct ipv6hdr ip6h;
     if (bpf_probe_read_kernel(&ip6h, sizeof(ip6h), data))
@@ -292,8 +290,7 @@ static __always_inline int handle_v6(struct pt_regs *ctx, const void *data)
             __builtin_memcpy(ev.server_ip, key.src_ip, sizeof(ev.server_ip));
             ev.server_port = key.src_port;
             ev.rtt_ns = (__u32)rtt_ns;
-            bpf_perf_event_output(ctx, &rtt_events, BPF_F_CURRENT_CPU,
-                                  &ev, sizeof(ev));
+            bpf_ringbuf_output(&rtt_events, &ev, sizeof(ev), 0);
         }
     }
     return 0;
@@ -308,7 +305,7 @@ int BPF_KPROBE(kprobe_ip_fwd_v6, struct sk_buff *skb)
         return 0;
     if (!data)
         return 0;
-    return handle_v6(ctx, data);
+    return handle_v6(data);
 }
 
 char _license[] SEC("license") = "GPL";
