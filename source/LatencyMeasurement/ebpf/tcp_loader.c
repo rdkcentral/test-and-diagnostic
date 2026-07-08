@@ -1,19 +1,16 @@
 /*
- * tcp_loader.c - Userspace loader for tcp_hello.bpf.o (AF_PACKET socket edition)
+ * tcp_loader.c - Userspace loader for tcp_hello.bpf.o (kprobe edition)
  *
  * Usage:
- *   ./tcp_loader              # attach to brlan0 (default LAN bridge)
- *   ./tcp_loader erouter0     # WAN interface (for Broadcom ARCHER platforms)
+ *   ./tcp_loader              # attach kprobes and stream RTT events
  *
- * Attaches the BPF program as a socket_filter on an AF_PACKET raw socket.
- * AF_PACKET is the same hook point used by libpcap — it is NOT bypassed by
- * Broadcom ARCHER hardware offload, unlike TC (clsact) hooks.
+ * Attaches BPF kprobes on ip_forward() (IPv4) and ip6_forward() (IPv6).
+ * RTT events are delivered via bpf_perf_event_output (process context)
+ * and consumed through the standard perf_buffer API.
  *
- * The BPF program timestamps TCP SYNs and emits RTT events to a
- * BPF_MAP_TYPE_ARRAY ring (rtt_events) when SYN-ACKs are matched.
- * The loader is woken via a blocking recv() on the same AF_PACKET
- * socket: the BPF program returns ETH_HLEN only on RTT events, so
- * the socket queues exactly one frame per event — zero polling overhead.
+ * Advantages over the socket_filter approach:
+ *   - No interface-specific binding: all LAN clients covered automatically
+ *   - Clean perf_buffer delivery: no ARRAY map ring or recv() wakeup trick
  *
  * To stop: Ctrl+C
  */
@@ -25,28 +22,21 @@
 #include <signal.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <net/if.h>
 #include <arpa/inet.h>
 #include <stdarg.h>
+#include <sys/syscall.h>
+#include <linux/bpf.h>
 #include <bpf/libbpf.h>
-#include <time.h>
 #include <bpf/bpf.h>
-#include <sys/socket.h>
-#include <netpacket/packet.h>   /* struct sockaddr_ll, struct packet_mreq */
 
-#ifndef ETH_P_ALL
-#define ETH_P_ALL 0x0003        /* all protocols — avoids pulling in kernel UAPI */
-#endif
-
-#define DEFAULT_IFACE  "brlan0"
 #define BPF_OBJ_PATH   "/usr/bin/ebpf/tcp_hello.bpf.o"
 
 #include "tcp_rtt.h"  /* struct rtt_event (shared with tcp_hello.bpf.c) */
 
-static int                       sock_fd  = -1;  /* AF_PACKET socket */
-static int                       rtt_map_fd = -1; /* rtt_events ARRAY map */
-static int                       widx_fd  = -1;  /* rtt_write_idx map */
-static volatile sig_atomic_t     running  = 1;
+static struct perf_buffer       *pb      = NULL;
+static struct bpf_link          *link_v4 = NULL;
+static struct bpf_link          *link_v6 = NULL;
+static volatile sig_atomic_t     running = 1;
 
 static void sig_handler(int sig)
 {
@@ -55,21 +45,27 @@ static void sig_handler(int sig)
 }
 
 /*
- * Suppress libbpf INFO/DEBUG output; only warnings and above are shown.
+ * Suppress libbpf DEBUG output; show INFO and above for initial debugging.
+ * Change LIBBPF_INFO to LIBBPF_WARN once kprobe operation is confirmed.
  */
 static int libbpf_print_fn(enum libbpf_print_level level,
                             const char *format, va_list args)
 {
-    if (level > LIBBPF_WARN)
+    if (level > LIBBPF_DEBUG)  /* show all: WARN + INFO + DEBUG (verifier log) */
         return 0;
     return vfprintf(stderr, format, args);
 }
 
 /*
- * Print an RTT event.
+ * perf_buffer callback: called for each RTT event from the kernel.
  */
-static void print_rtt_event(const struct rtt_event *e)
+static void handle_rtt_event(void *ctx, int cpu, void *data, __u32 data_sz)
 {
+    (void)ctx; (void)cpu;
+    if (data_sz < sizeof(struct rtt_event))
+        return;
+
+    const struct rtt_event *e = data;
     int af = (e->family == AF_INET6) ? AF_INET6 : AF_INET;
     char cip[INET6_ADDRSTRLEN], sip[INET6_ADDRSTRLEN];
     inet_ntop(af, e->client_ip, cip, sizeof(cip));
@@ -89,52 +85,56 @@ static void print_rtt_event(const struct rtt_event *e)
 }
 
 /*
- * Background thread: polls the rtt_events ARRAY map for new events and
- * logs the BPF diagnostic counters every 5 seconds.
- * Uses bpf_map_update_elem output instead of bpf_perf_event_output because
- * bpf_perf_event_output returns ENOTSUPP for SOCKET_FILTER in softirq on
- * this vendor BCM3390 kernel.
+ * Background thread: polls the perf ring buffer for RTT events.
+ * perf_buffer__poll() with a 1-second timeout acts as a natural
+ * check on the running flag for Ctrl+C handling.
  */
 static void *poll_thread(void *arg)
 {
     (void)arg;
-    __u32 read_cursor = 0;
-
     while (running) {
-        /*
-         * Block until the BPF program queues a frame to the socket.
-         * BPF returns ETH_HLEN (queuing a wakeup byte) ONLY when it
-         * writes an RTT event — so recv() wakes exactly on RTT events,
-         * not on every packet.  EINTR means a signal arrived; re-check
-         * running and loop.
-         */
-        char buf[1];
-        ssize_t r = recv(sock_fd, buf, sizeof(buf), MSG_TRUNC);
-        if (r < 0) {
-            /* EINTR = interrupted by signal; EAGAIN/EWOULDBLOCK = SO_RCVTIMEO
-             * expired.  Both are normal -- just recheck running and loop. */
-            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-                continue;
-            fprintf(stderr, "recv error: %s\n", strerror(errno));
+        int n = perf_buffer__poll(pb, 1000 /* ms */);
+        if (n < 0 && errno != EINTR) {
+            fprintf(stderr, "perf_buffer__poll error: %s\n", strerror(errno));
             running = 0;
             break;
         }
 
-        /* Drain any back-to-back wakeup frames (multiple RTT events) */
-        while (recv(sock_fd, buf, sizeof(buf), MSG_DONTWAIT | MSG_TRUNC) > 0) {}
-
-        /* Read all new RTT events written since last wake */
-        if (widx_fd >= 0) {
-            __u32 widx_key = 0, write_cursor = 0;
-            bpf_map_lookup_elem(widx_fd, &widx_key, &write_cursor);
-            while (read_cursor != write_cursor) {
-                __u32 slot = read_cursor % 32;
-                struct rtt_event ev = {};
-                if (bpf_map_lookup_elem(rtt_map_fd, &slot, &ev) == 0
-                    && ev.rtt_ns > 0)
-                    print_rtt_event(&ev);
-                read_cursor++;
+        /* Debug: every 5 s print how many times the kprobes fired.
+         * This confirms kprobe attachment is working even if no
+         * RTT events appear yet (e.g. wrong SKBUFF_DATA_OFFSET).
+         * Remove once operation is confirmed. */
+        static time_t last_dbg = 0;
+        time_t now = time(NULL);
+        if (now - last_dbg >= 5) {
+            last_dbg = now;
+            struct bpf_object *o = (struct bpf_object *)arg;
+            __u64 v[6] = {};
+            struct bpf_map *cm = bpf_object__find_map_by_name(o, "dbg_kprobe_count");
+            if (cm) {
+                int fd = bpf_map__fd(cm);
+                __u32 i;
+                for (i = 0; i < 6; i++)
+                    bpf_map_lookup_elem(fd, &i, &v[i]);
+                fprintf(stderr,
+                    "[dbg] ip_fwd=%llu ip6_fwd=%llu "
+                    "iph_ok=%llu tcp=%llu syn=%llu synack=%llu\n",
+                    (unsigned long long)v[0], (unsigned long long)v[1],
+                    (unsigned long long)v[2], (unsigned long long)v[3],
+                    (unsigned long long)v[4], (unsigned long long)v[5]);
+                if (v[0] == 0 && v[1] == 0)
+                    fprintf(stderr, "      ip_fwd=0: kprobe not firing\n");
+                else if (v[2] == 0)
+                    fprintf(stderr, "      iph_ok=0: SKBUFF_DATA_OFFSET=%d wrong\n",
+                            204 /* SKBUFF_DATA_OFFSET */);
+                else if (v[3] == 0)
+                    fprintf(stderr, "      tcp=0: no TCP packets forwarded\n");
+                else if (v[4] == 0)
+                    fprintf(stderr, "      syn=0: no TCP SYN packets seen\n");
             }
+
+            /* No offset scan map (removed after SKBUFF_DATA_OFFSET=188 confirmed). */
+            (void)0;
         }
     }
     return NULL;
@@ -142,151 +142,154 @@ static void *poll_thread(void *arg)
 
 int main(int argc, char *argv[])
 {
-    const char *ifname = (argc >= 2) ? argv[1] : DEFAULT_IFACE;
+    (void)argc; (void)argv;
 
     /* Restrict libbpf output to warnings and errors only. */
     libbpf_set_print(libbpf_print_fn);
 
     /* ------------------------------------------------------------------ */
-    /* 0. Resolve interface index                                          */
+    /* 0. Probe: can the kernel load ANY BPF_PROG_TYPE_KPROBE program?     */
     /* ------------------------------------------------------------------ */
-    unsigned int ifindex = if_nametoindex(ifname);
-    if (ifindex == 0) {
-        fprintf(stderr, "Interface '%s' not found: %s\n", ifname, strerror(errno));
-        return 1;
+    {
+        /* r0 = 0; exit  -- the simplest valid BPF program */
+        struct bpf_insn insns[2] = {
+            { .code  = BPF_ALU64 | BPF_MOV | BPF_K,
+              .dst_reg = BPF_REG_0, .src_reg = 0,
+              .off = 0, .imm = 0 },
+            { .code  = BPF_JMP | BPF_EXIT,
+              .dst_reg = 0, .src_reg = 0,
+              .off = 0, .imm = 0 },
+        };
+        static char probe_log[4096];
+        union bpf_attr attr;
+        int pfd;
+        memset(&attr, 0, sizeof(attr));
+        attr.prog_type = BPF_PROG_TYPE_KPROBE;
+        attr.insns     = (__u64)(uintptr_t)insns;
+        attr.insn_cnt  = 2;
+        attr.license   = (__u64)(uintptr_t)"GPL";
+        attr.log_level = 1;
+        attr.log_buf   = (__u64)(uintptr_t)probe_log;
+        attr.log_size  = sizeof(probe_log);
+        pfd = (int)syscall(__NR_bpf, BPF_PROG_LOAD, &attr, sizeof(attr));
+        if (pfd < 0) {
+            fprintf(stderr, "[probe] BPF_PROG_TYPE_KPROBE NOT supported: %s\n",
+                    strerror(errno));
+            if (probe_log[0])
+                fprintf(stderr, "[probe] verifier log:\n%s\n", probe_log);
+            else
+                fprintf(stderr, "[probe] empty verifier log "
+                        "-- program type not registered in kernel\n");
+        } else {
+            fprintf(stderr, "[probe] BPF_PROG_TYPE_KPROBE supported (fd=%d)"  
+                    " -- failure must be in our BPF bytecode\n", pfd);
+            if (probe_log[0])
+                fprintf(stderr, "[probe] verifier log:\n%s\n", probe_log);
+            close(pfd);
+        }
     }
-    printf("Attaching to interface: %s (ifindex %u)\n", ifname, ifindex);
 
     /* ------------------------------------------------------------------ */
     /* 1. Load the BPF object                                              */
     /* ------------------------------------------------------------------ */
     struct bpf_object *obj = bpf_object__open(BPF_OBJ_PATH);
-    /* libbpf returns ERR_PTR on failure — must use libbpf_get_error() */
     if (libbpf_get_error(obj)) {
-        fprintf(stderr, "Failed to open %s: %ld\n", BPF_OBJ_PATH, libbpf_get_error(obj));
+        fprintf(stderr, "Failed to open %s: %ld\n",
+                BPF_OBJ_PATH, libbpf_get_error(obj));
         return 1;
+    }
+
+    /* Request full verifier log from the kernel for every program so that
+     * on load failure the verifier output is captured and printed. */
+    {
+        struct bpf_program *prog;
+        bpf_object__for_each_program(prog, obj)
+            bpf_program__set_log_level(prog, 1);
     }
 
     if (bpf_object__load(obj)) {
-        int load_errno = errno;
         fprintf(stderr, "Failed to load BPF object: errno=%d (%s)\n",
-                load_errno, strerror(load_errno));
-
-        /* Dump every map fd — fd==-1 means that map's creation failed
-         * silently, which means THAT map type is the blocker, not the
-         * program instructions.                                      */
-        fprintf(stderr, "\nMap fd dump (fd==-1 => map creation failed):\n");
-        struct bpf_map *m;
-        bpf_object__for_each_map(m, obj) {
-            fprintf(stderr, "  %-22s  type=%-3d  fd=%d\n",
-                    bpf_map__name(m),
-                    bpf_map__type(m),
-                    bpf_map__fd(m));
-        }
+                errno, strerror(errno));
         bpf_object__close(obj);
         return 1;
     }
-    printf("BPF program loaded.\n");
+    printf("BPF programs loaded.\n");
 
     /* ------------------------------------------------------------------ */
-    /* 2. Get the socket_filter program fd                                 */
+    /* 2. Attach kprobes on ip_forward (IPv4) and ip6_forward (IPv6)      */
     /* ------------------------------------------------------------------ */
-    struct bpf_program *prog = bpf_object__find_program_by_name(obj, "measure_rtt_tc");
-    if (!prog) {
-        fprintf(stderr, "BPF program 'measure_rtt_tc' not found in object.\n");
-        return 1;
-    }
-    int prog_fd = bpf_program__fd(prog);
-
-    /* ------------------------------------------------------------------ */
-    /* 3. Create AF_PACKET raw socket and attach BPF socket_filter        */
-    /*                                                                     */
-    /*    AF_PACKET with SOCK_RAW + ETH_P_ALL delivers all frames         */
-    /*    (both TX and RX) to our BPF program.  This is the same hook     */
-    /*    point used by libpcap and is visible even on platforms where     */
-    /*    hardware offload (e.g. Broadcom ARCHER) bypasses TC hooks.      */
-    /* ------------------------------------------------------------------ */
-    sock_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-    if (sock_fd < 0) {
-        fprintf(stderr, "Failed to create AF_PACKET socket: %s\n", strerror(errno));
+    struct bpf_program *prog_v4 =
+        bpf_object__find_program_by_name(obj, "kprobe_ip_fwd_v4");
+    struct bpf_program *prog_v6 =
+        bpf_object__find_program_by_name(obj, "kprobe_ip_fwd_v6");
+    if (!prog_v4 || !prog_v6) {
+        fprintf(stderr, "BPF programs not found in object.\n");
+        bpf_object__close(obj);
         return 1;
     }
 
-    /* Bind to the chosen interface */
-    struct sockaddr_ll sll = {};
-    sll.sll_family   = AF_PACKET;
-    sll.sll_protocol = htons(ETH_P_ALL);
-    sll.sll_ifindex  = (int)ifindex;
-    if (bind(sock_fd, (struct sockaddr *)&sll, sizeof(sll)) < 0) {
-        fprintf(stderr, "Failed to bind AF_PACKET socket: %s\n", strerror(errno));
-        close(sock_fd);
+    link_v4 = bpf_program__attach_kprobe(prog_v4, false, "ip_forward");
+    if (libbpf_get_error(link_v4)) {
+        fprintf(stderr, "Failed to attach kprobe/ip_forward: %ld\n",
+                libbpf_get_error(link_v4));
+        bpf_object__close(obj);
         return 1;
     }
 
-    /* 1-second receive timeout so the poll thread can notice running=0
-     * when Ctrl+C sets it.  Without this, recv() blocks forever and
-     * pthread_join() hangs. */
-    struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
-    setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    /* Promiscuous mode: ensure we see all frames including those not     */
-    /* destined for the gateway's own MAC                                 */
-    struct packet_mreq mr = {};
-    mr.mr_ifindex = (int)ifindex;
-    mr.mr_type    = PACKET_MR_PROMISC;
-    if (setsockopt(sock_fd, SOL_PACKET, PACKET_ADD_MEMBERSHIP,
-                   &mr, sizeof(mr)) < 0) {
-        fprintf(stderr, "Warning: failed to set promiscuous mode: %s\n",
-                strerror(errno));  /* non-fatal: we may still see enough traffic */
-    }
-
-    /* Attach the BPF socket_filter program */
-    if (setsockopt(sock_fd, SOL_SOCKET, SO_ATTACH_BPF,
-                   &prog_fd, sizeof(prog_fd)) < 0) {
-        fprintf(stderr, "Failed to attach BPF to socket: %s\n", strerror(errno));
-        close(sock_fd);
+    link_v6 = bpf_program__attach_kprobe(prog_v6, false, "ip6_forward");
+    if (libbpf_get_error(link_v6)) {
+        fprintf(stderr, "Failed to attach kprobe/ip6_forward: %ld\n",
+                libbpf_get_error(link_v6));
+        bpf_link__destroy(link_v4);
+        bpf_object__close(obj);
         return 1;
     }
 
-    printf("BPF socket_filter attached on %s (AF_PACKET).\n", ifname);
+    printf("kprobes attached: ip_forward + ip6_forward\n");
     printf("Streaming LAN client RTT events (Ctrl+C to stop)...\n\n");
 
     signal(SIGINT,  sig_handler);
     signal(SIGTERM, sig_handler);
 
     /* ------------------------------------------------------------------ */
-    /* 4. Open RTT output maps (ARRAY-based, no perf events needed)       */
+    /* 3. Create perf buffer consumer                                      */
     /* ------------------------------------------------------------------ */
     struct bpf_map *rtt_map = bpf_object__find_map_by_name(obj, "rtt_events");
-    struct bpf_map *widx_map = bpf_object__find_map_by_name(obj, "rtt_write_idx");
-    if (!rtt_map || !widx_map) {
-        fprintf(stderr, "Map 'rtt_events' or 'rtt_write_idx' not found.\n");
-        return 1;
+    if (!rtt_map) {
+        fprintf(stderr, "Map 'rtt_events' not found.\n");
+        goto cleanup;
     }
-    rtt_map_fd = bpf_map__fd(rtt_map);
-    widx_fd    = bpf_map__fd(widx_map);
+
+    pb = perf_buffer__new(bpf_map__fd(rtt_map), 64 /* pages per CPU */,
+                          handle_rtt_event, NULL, NULL, NULL);
+    if (libbpf_get_error(pb)) {
+        fprintf(stderr, "Failed to create perf buffer: %s\n", strerror(errno));
+        goto cleanup;
+    }
 
     /* ------------------------------------------------------------------ */
-    /* 5. Spawn poll thread; main sleeps until SIGINT/SIGTERM             */
+    /* 4. Spawn poll thread; main sleeps until SIGINT/SIGTERM             */
     /* ------------------------------------------------------------------ */
     pthread_t poll_tid;
-    if (pthread_create(&poll_tid, NULL, poll_thread, NULL) != 0) {
+    if (pthread_create(&poll_tid, NULL, poll_thread, obj) != 0) {
         fprintf(stderr, "Failed to create poll thread: %s\n", strerror(errno));
-        return 1;
+        goto cleanup;
     }
 
     while (running)
-        pause();  /* woken by signal; recheck running */
+        pause();
 
     pthread_join(poll_tid, NULL);
 
+cleanup:
     /* ------------------------------------------------------------------ */
-    /* 6. Cleanup                                                          */
-    /*    Closing the AF_PACKET socket automatically removes SO_ATTACH_BPF */
+    /* 5. Cleanup                                                          */
     /* ------------------------------------------------------------------ */
-    printf("\nDetaching...\n");
-    close(sock_fd);   /* removing SO_ATTACH_BPF is automatic on socket close */
-
+    printf("\nDetaching kprobes...\n");
+    if (pb)        perf_buffer__free(pb);
+    if (link_v6)   bpf_link__destroy(link_v6);
+    if (link_v4)   bpf_link__destroy(link_v4);
     bpf_object__close(obj);
     return 0;
 }
+
