@@ -56,42 +56,11 @@ struct sk_buff;
 #define IPPROTO_TCP 6
 
 /*
- * Byte offset of the 'data' pointer field inside struct sk_buff.
- * This BCM3390/RDKB vendor kernel (Linux 5.15 ARM32) has extra fields
- * beyond mainline that push 'data' to offset 188:
- *
- *   +0    next, prev, dev          (12)
- *   +12   sk                       ( 4)
- *   +16   tstamp                   ( 8)
- *   +24   cb[48]                   (48)
- *   +72   _skb_refdst, destructor  ( 8)
- *   +80   _nfct (NF_CONNTRACK)     ( 4)
- *   +84   dev_in (BCM NF_OFFLOAD)  ( 4)  BCM_KF_CM + NF_CONNTRACK_OFFLOAD
- *   +88   len, data_len            ( 8)
- *   +96   mac_len, hdr_len         ( 4)
- *   +100  queue_mapping            ( 2)
- *   +102  cloned/active_ext bytes  ( 2)
- *   +104  bitfields (pkt_type etc) ( 6)  includes BCM recycle+flooded bits
- *   +110  tc_index (NET_SCHED)     ( 2)
- *   +112  csum                     ( 4)
- *   +116  priority                 ( 4)
- *   +120  skb_iif                  ( 4)
- *   +124  hash                     ( 4)
- *   +128  vlan_proto, vlan_tci     ( 4)
- *   +132  napi_id (NET_RX_BUSY)    ( 4)  CONFIG_NET_RX_BUSY_POLL=y
- *   +136  mark                     ( 4)  no secmark (NETWORK_SECMARK=n)
- *   +140  inner_protocol+inner headers+proto/transport/network/mac (16)
- *   +156  [pad to 4-byte align]    ( 4)
- *   +160  recycle (BCM SKB_RECYCLE)( 4)
- *   +164  recycle_arg              ( 4)
- *   +168  recycle_shinfo           ( 4)
- *   +172  [pad to 8-byte align]    ( 4)  for tail pointer
- *   +176  tail                     ( 4)  (ANDROID_KABI_RESERVE=n: 0 bytes)
- *   +180  end                      ( 4)
- *   +184  head                     ( 4)
- *   +188  data  <-- confirmed by offset scan (offset 188: hits matched ip_fwd count)
+ * sk_buff->data byte offset — computed from kernel config options.
+ * See skbuff_offset.h for the full breakdown.
+ * Requires: -include $(KERNEL_SRC)/include/generated/autoconf.h in Makefile.
  */
-#define SKBUFF_DATA_OFFSET  188
+#include "skbuff_offset.h"
 
 /*
  * Custom struct definitions for iphdr, ipv6hdr, and tcphdr.

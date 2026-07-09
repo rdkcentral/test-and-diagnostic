@@ -24,23 +24,26 @@
 #   tcp_loader       — ARM binary:   Yocto cross-compiler $(CC)
 #
 # Non-standard variables — passed in at build time:
-#   CLANG        clang binary from clang-native sysroot
-#   KERNEL_SRC   kernel source tree root (for include/uapi headers)
-#   LIBBPF_INC   libbpf include directory
-#   LIBBPF_LIB   libbpf library directory
+#   CLANG         clang binary from clang-native sysroot
+#   KERNEL_SRC    kernel source tree root (for include/uapi headers)
+#   KERNEL_BUILD  kernel build directory  (for include/generated/autoconf.h)
+#                 In Yocto: $(STAGING_KERNEL_BUILDDIR)
+#   LIBBPF_INC    libbpf include directory
+#   LIBBPF_LIB    libbpf library directory
 #
 # In Yocto: supply via EXTRA_OEMAKE in the .bbappend.
-# Manually:  make CLANG=... KERNEL_SRC=... LIBBPF_INC=... LIBBPF_LIB=...
+# Manually:  make CLANG=... KERNEL_SRC=... KERNEL_BUILD=... LIBBPF_INC=... LIBBPF_LIB=...
 
-CLANG      ?= clang
-KERNEL_SRC ?=
-LIBBPF_INC ?=
-LIBBPF_LIB ?=
+CLANG        ?= clang
+KERNEL_SRC   ?=
+KERNEL_BUILD ?= $(KERNEL_SRC)
+LIBBPF_INC   ?=
+LIBBPF_LIB   ?=
 
 # Install destination for both products
 ebpfdir = $(bindir)/ebpf
 
-EXTRA_DIST = tcp_rtt.h tcp_hello.bpf.c tcp_loader.c
+EXTRA_DIST = tcp_rtt.h skbuff_offset.h tcp_hello.bpf.c tcp_loader.c
 
 # Build both products only when prerequisites are supplied.
 # Standalone builds (README procedure) that lack clang-native or libbpf
@@ -68,6 +71,7 @@ all-local:
 	        -D__KERNEL__ \
 	        -D__TARGET_ARCH_arm \
 	        -Wno-deprecated-declarations \
+	        -include $(STAGING_KERNEL_BUILDDIR)/include/generated/autoconf.h \
 	        -I$(KERNEL_SRC)/include/uapi \
 	        -I$(KERNEL_SRC)/include \
 	        -I$(KERNEL_SRC)/arch/arm/include \
