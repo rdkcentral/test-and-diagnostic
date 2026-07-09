@@ -43,7 +43,7 @@ LIBBPF_LIB   ?=
 # Install destination for both products
 ebpfdir = $(bindir)/ebpf
 
-EXTRA_DIST = tcp_rtt.h skbuff_offset.h tcp_hello.bpf.c tcp_loader.c
+EXTRA_DIST = tcp_rtt.h bpf_net_defs.h skbuff_offset.h tcp_hello.bpf.c tcp_loader.c
 
 # Build both products only when prerequisites are supplied.
 # Standalone builds (README procedure) that lack clang-native or libbpf
@@ -71,10 +71,12 @@ all-local:
 	        -D__KERNEL__ \
 	        -D__TARGET_ARCH_arm \
 	        -Wno-deprecated-declarations \
-	        -include $(STAGING_KERNEL_BUILDDIR)/include/generated/autoconf.h \
+	        $(if $(KERNEL_BUILD),-include $(KERNEL_BUILD)/include/generated/autoconf.h) \
 	        -I$(KERNEL_SRC)/include/uapi \
+	        -I$(KERNEL_SRC)/arch/arm/include/uapi \
 	        -I$(KERNEL_SRC)/include \
 	        -I$(KERNEL_SRC)/arch/arm/include \
+	        $(if $(KERNEL_BUILD),-I$(KERNEL_BUILD)/arch/arm/include/generated) \
 	        -I$(LIBBPF_INC) \
 	        -c $(srcdir)/tcp_hello.bpf.c -o tcp_hello.bpf.o; \
 	else \

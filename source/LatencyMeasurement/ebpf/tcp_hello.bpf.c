@@ -42,6 +42,8 @@ struct pt_regs {
 
 #include <bpf/bpf_tracing.h>   /* BPF_KPROBE, PT_REGS_PARM1 */
 #include "tcp_rtt.h"            /* struct rtt_event (shared with tcp_loader.c) */
+#include "bpf_net_defs.h"       /* iphdr, ipv6hdr, tcphdr, flow_key, TCP_FLAG_* */
+#include "skbuff_offset.h"      /* SKBUFF_DATA_OFFSET (config-computed) */
 
 /*
  * Global forward declaration so BPF_KPROBE's two macro expansions (forward
@@ -50,75 +52,6 @@ struct pt_regs {
  * "conflicting types" error.
  */
 struct sk_buff;
-
-#define AF_INET   2
-#define AF_INET6  10
-#define IPPROTO_TCP 6
-
-/*
- * sk_buff->data byte offset — computed from kernel config options.
- * See skbuff_offset.h for the full breakdown.
- * Requires: -include $(KERNEL_SRC)/include/generated/autoconf.h in Makefile.
- */
-#include "skbuff_offset.h"
-
-/*
- * Custom struct definitions for iphdr, ipv6hdr, and tcphdr.
- * Standard kernel headers use bitfields whose layout is ambiguous for
- * clang -target bpf.  Plain bytes/shorts are correct regardless of
- * byte order and avoid that entire class of bug.
- */
-struct iphdr {
-    __u8  ihl_version;   /* high nibble = version, low nibble = IHL */
-    __u8  tos;
-    __u16 tot_len;
-    __u16 id;
-    __u16 frag_off;
-    __u8  ttl;
-    __u8  protocol;
-    __u16 check;
-    __u32 saddr;         /* network byte order */
-    __u32 daddr;
-} __attribute__((packed));
-
-struct ipv6hdr {
-    __u8  version_prio;  /* high nibble = version */
-    __u8  flow_lbl[3];
-    __u16 payload_len;
-    __u8  nexthdr;
-    __u8  hop_limit;
-    __u8  saddr[16];     /* network byte order */
-    __u8  daddr[16];
-} __attribute__((packed));
-
-struct tcphdr {
-    __u16 source;        /* network byte order */
-    __u16 dest;
-    __u32 seq;
-    __u32 ack_seq;
-    __u8  doff_res;      /* high nibble = data offset */
-    __u8  flags;         /* bit0=FIN bit1=SYN bit2=RST bit3=PSH bit4=ACK */
-    __u16 window;
-    __u16 check;
-    __u16 urg_ptr;
-} __attribute__((packed));
-
-#define TCP_FLAG_FIN 0x01
-#define TCP_FLAG_SYN 0x02
-#define TCP_FLAG_RST 0x04
-#define TCP_FLAG_ACK 0x10
-
-/*
- * Five-tuple key: matches a SYN with its returning SYN-ACK.
- */
-struct flow_key {
-    __u32 src_ip[4];  /* AF_INET: [0]=addr, [1-3]=0  AF_INET6: full 128-bit */
-    __u32 dst_ip[4];  /* network byte order */
-    __u16 src_port;   /* host byte order */
-    __u16 dst_port;
-    __u8  family;     /* AF_INET or AF_INET6 */
-    __u8  pad[3];
-};
 
 /*
  * Hash map: in-flight SYN flows -> arrival timestamp (nanoseconds).
@@ -151,16 +84,13 @@ static __always_inline int handle_v4(const void *data)
     if (iph.protocol != IPPROTO_TCP)
         return 0;
 
-    __u32 ihl = (iph.ihl_version & 0x0F) * 4;
+    __u32 ihl = iph.ihl * 4;
     if (ihl < 20)
         return 0;
 
     struct tcphdr tcph;
     if (bpf_probe_read_kernel(&tcph, sizeof(tcph), data + ihl))
         return 0;
-
-    __u8 ctl = tcph.flags &
-               (TCP_FLAG_SYN | TCP_FLAG_ACK | TCP_FLAG_RST | TCP_FLAG_FIN);
 
     struct flow_key key = {};
     key.family    = AF_INET;
@@ -169,11 +99,12 @@ static __always_inline int handle_v4(const void *data)
     key.src_port  = bpf_ntohs(tcph.source);
     key.dst_port  = bpf_ntohs(tcph.dest);
 
-    if (ctl == TCP_FLAG_SYN) {
+    /* SYN only (no ACK/RST/FIN) */
+    if (tcph.syn && !tcph.ack && !tcph.rst && !tcph.fin) {
         __u64 ts = bpf_ktime_get_ns();
         bpf_map_update_elem(&syn_timestamps, &key, &ts, BPF_ANY);
 
-    } else if (ctl == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
+    } else if (tcph.syn && tcph.ack && !tcph.rst && !tcph.fin) {  /* SYN-ACK */
         struct flow_key syn_key = {};
         syn_key.family   = key.family;
         __builtin_memcpy(syn_key.src_ip, key.dst_ip, sizeof(syn_key.src_ip));
@@ -225,21 +156,18 @@ static __always_inline int handle_v6(const void *data)
     if (bpf_probe_read_kernel(&tcph, sizeof(tcph), data + sizeof(ip6h)))
         return 0;
 
-    __u8 ctl = tcph.flags &
-               (TCP_FLAG_SYN | TCP_FLAG_ACK | TCP_FLAG_RST | TCP_FLAG_FIN);
-
     struct flow_key key = {};
     key.family = AF_INET6;
-    __builtin_memcpy(key.src_ip, ip6h.saddr, 16);
-    __builtin_memcpy(key.dst_ip, ip6h.daddr, 16);
+    __builtin_memcpy(key.src_ip, &ip6h.saddr, 16);
+    __builtin_memcpy(key.dst_ip, &ip6h.daddr, 16);
     key.src_port = bpf_ntohs(tcph.source);
     key.dst_port = bpf_ntohs(tcph.dest);
 
-    if (ctl == TCP_FLAG_SYN) {
+    if (tcph.syn && !tcph.ack && !tcph.rst && !tcph.fin) {
         __u64 ts = bpf_ktime_get_ns();
         bpf_map_update_elem(&syn_timestamps, &key, &ts, BPF_ANY);
 
-    } else if (ctl == (TCP_FLAG_SYN | TCP_FLAG_ACK)) {
+    } else if (tcph.syn && tcph.ack && !tcph.rst && !tcph.fin) {  /* SYN-ACK */
         struct flow_key syn_key = {};
         syn_key.family   = key.family;
         __builtin_memcpy(syn_key.src_ip, key.dst_ip, sizeof(syn_key.src_ip));
