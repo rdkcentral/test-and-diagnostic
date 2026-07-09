@@ -189,4 +189,22 @@
                              + _SKB_OFF_KABI         \
                              + _SKB_OFF_TAIL_HEAD    )
 
+/*
+ * Sanity check: if no CONFIG_xxx macros were defined (autoconf.h was not
+ * included), the computed offset will be too small (< 150).  In that case
+ * fall back to the known-good value for this platform so the build
+ * succeeds and produces a working binary.
+ *
+ * The warning is printed at compile time via a deliberately long macro name
+ * that clang will include in the expansion trace (-Weverything or -v).
+ * Re-run the build with KERNEL_BUILD set to get the config-computed value.
+ */
+#if SKBUFF_DATA_OFFSET < 150
+# undef  SKBUFF_DATA_OFFSET
+# define SKBUFF_DATA_OFFSET  188   /* BCM3390 RDKB Linux 5.15 ARM32 fallback */
+# define SKBUFF_OFFSET_USED_FALLBACK  1
+# warning "autoconf.h not found: SKBUFF_DATA_OFFSET using hardcoded fallback 188."
+# warning "Set KERNEL_BUILD=$(STAGING_KERNEL_BUILDDIR) in EXTRA_OEMAKE to enable config-computed offset."
+#endif
+
 #endif /* __SKBUFF_OFFSET_H */
