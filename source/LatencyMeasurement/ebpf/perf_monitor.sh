@@ -108,7 +108,7 @@ printf "%-5s  %-10s %-10s %-10s %-8s %-10s\n" \
 
 # ── initial snapshot ─────────────────────────────────────────────────────────
 PSYS=$(sys_stat)
-PPID=$(pid_jiff)
+PREV_PID=$(pid_jiff)
 PF4=$(fwd4)
 PF6=$(fwd6)
 
@@ -132,7 +132,7 @@ while [ "$i" -lt "$DURATION" ]; do
 
     LINE=$(awk \
         -v ps="$PSYS" -v cs="$CSYS" \
-        -v pp="$PPID" -v cp="$CPID" \
+        -v pp="$PREV_PID" -v cp="$CPID" \
         -v pf4="$PF4" -v cf4="$CF4" \
         -v pf6="$PF6" -v cf6="$CF6" \
         -v rss="$RSS" -v sec="$i" \
@@ -163,7 +163,7 @@ while [ "$i" -lt "$DURATION" ]; do
     grep "^SAMPLE" "$TMPFILE.row" | sed 's/^SAMPLE //' >> "$TMPFILE"
     rm -f "$TMPFILE.row"
 
-    PSYS="$CSYS"; PPID="$CPID"; PF4="$CF4"; PF6="$CF6"
+    PSYS="$CSYS"; PREV_PID="$CPID"; PF4="$CF4"; PF6="$CF6"
 done
 
 show_summary
