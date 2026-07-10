@@ -1,0 +1,92 @@
+Prebuilt BPF objects
+====================
+
+This directory holds the pre-compiled BPF object and its source checksum.
+Both files are committed to the repository so that CI/CD environments and
+platforms without a clang toolchain can still build and install the feature.
+
+Why prebuilt instead of building clang-native via Yocto?
+---------------------------------------------------------
+Building clang-native from source via the Yocto build system is not
+practical for production builds:
+
+  - clang-native is not a default package in most RDKB platform layers.
+    Adding it to DEPENDS causes "Nothing PROVIDES 'clang-native'" failures
+    on platforms that don't carry the recipe.
+  - Even when the recipe exists, compiling LLVM/Clang from source takes
+    2–4 hours per build server run — prohibitive for routine image builds.
+  - tcp_hello.bpf.c changes infrequently (only on BPF logic changes or
+    kernel struct layout changes).
+
+The prebuilt pattern is standard practice for BPF objects in production
+(used by the Linux kernel itself for tools/bpf/ test objects).
+
+Files
+-----
+  tcp_hello.bpf.o  — Compiled BPF object (clang -target bpf, ARM32 kernel)
+  SHA256SUMS       — SHA-256 checksums of the source files used to produce
+                     tcp_hello.bpf.o.  Used at build time to warn when sources
+                     have changed but the prebuilt has not been regenerated.
+
+Developer workflow (system clang, not Yocto clang-native)
+----------------------------------------------------------
+Use the clang already installed on your development machine (not Yocto's
+clang-native).  The Makefile checks [ -x "$(CLANG)" ] and uses system
+clang if available.
+
+  Prerequisites:
+    clang >= 10  (check: clang --version)
+
+  Standalone (developer machine):
+    cd source/LatencyMeasurement/ebpf
+    make CLANG=clang \
+         KERNEL_SRC=/path/to/kernel/source \
+         KERNEL_BUILD=/path/to/kernel/build \
+         LIBBPF_INC=/path/to/libbpf/include \
+         LIBBPF_LIB=/path/to/libbpf/lib
+
+  Yocto dev VM (if STAGING variables are already set in the environment):
+    bitbake test-and-diagnostic -C compile
+
+  The build automatically:
+    1. Compiles tcp_hello.bpf.c → tcp_hello.bpf.o
+    2. Copies the result to prebuilt/tcp_hello.bpf.o
+    3. Regenerates prebuilt/SHA256SUMS from the source files
+
+  Commit all three files:
+    git add source/LatencyMeasurement/ebpf/tcp_hello.bpf.c
+    git add source/LatencyMeasurement/ebpf/prebuilt/tcp_hello.bpf.o
+    git add source/LatencyMeasurement/ebpf/prebuilt/SHA256SUMS
+    git commit -m "ebpf: update prebuilt BPF object"
+
+  To regenerate SHA256SUMS manually (e.g. after copying a prebuilt from
+  another machine without going through the full Makefile build):
+    cd source/LatencyMeasurement/ebpf
+    sha256sum tcp_hello.bpf.c bpf_net_defs.h skbuff_offset.h tcp_rtt.h \
+        > prebuilt/SHA256SUMS
+
+Platform without clang (CI/CD, restricted build environments)
+--------------------------------------------------------------
+The Makefile detects that clang is unavailable (or KERNEL_SRC is not set)
+and falls back to copying prebuilt/tcp_hello.bpf.o to the build directory.
+SHA256SUMS is verified at this point:
+
+  [eBPF] VERIFY  prebuilt SHA256SUMS OK — sources unchanged
+    => prebuilt is fresh; safe to use.
+
+  [eBPF] WARNING: prebuilt/SHA256SUMS mismatch
+    => sources were changed after the last prebuilt compile.
+    => The image will still build using the existing prebuilt, but the
+       installed BPF object may not match the current source.
+    => A developer with system clang should regenerate and commit
+       the prebuilt.
+
+Re-compilation triggers
+-----------------------
+Regenerate the prebuilt whenever any of these change:
+  - tcp_hello.bpf.c          (BPF program logic)
+  - bpf_net_defs.h            (network struct definitions)
+  - skbuff_offset.h           (sk_buff->data offset computation)
+  - tcp_rtt.h                 (shared event struct)
+  - Kernel config change      (may shift SKBUFF_DATA_OFFSET)
+  - Kernel version upgrade    (verify SKBUFF_DATA_OFFSET via scan tool first)
