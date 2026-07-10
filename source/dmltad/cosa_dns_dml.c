@@ -963,6 +963,7 @@ NSLookupDiagnostics_Validate
                     rc = strcpy_s(pReturnParamName, *puLength , "HostName");
                     ERR_CHK(rc);
                     pNSLookupDiagInfo->DiagnosticState = DSLH_DIAG_STATE_TYPE_None;
+                    AnscFreeMemory(pDomainName);
                     return FALSE;
                 }
                 else if ( p[1] == '0' || p[1] == '.' )
@@ -970,6 +971,7 @@ NSLookupDiagnostics_Validate
                     rc = strcpy_s(pReturnParamName, *puLength , "HostName");
                     ERR_CHK(rc);
                     pNSLookupDiagInfo->DiagnosticState = DSLH_DIAG_STATE_TYPE_None;
+                    AnscFreeMemory(pDomainName);
                     return FALSE;
                 }
             }
@@ -978,6 +980,7 @@ NSLookupDiagnostics_Validate
                 rc = strcpy_s(pReturnParamName, *puLength , "HostName");
                 ERR_CHK(rc);
                 pNSLookupDiagInfo->DiagnosticState = DSLH_DIAG_STATE_TYPE_None;
+                AnscFreeMemory(pDomainName);
                 return FALSE;
             }
         }
@@ -988,9 +991,11 @@ NSLookupDiagnostics_Validate
                 rc = strcpy_s(pReturnParamName, *puLength , "HostName");
                 ERR_CHK(rc);
                 pNSLookupDiagInfo->DiagnosticState = DSLH_DIAG_STATE_TYPE_None;
+                AnscFreeMemory(pDomainName);
                 return FALSE;
             }
         }
+        AnscFreeMemory(pDomainName);
     }
 
     if ( pNSLookupDiagInfo->DiagnosticState == DSLH_DIAG_STATE_TYPE_Requested || AnscSizeOfString(pNSLookupDiagInfo->DNSServer) > 0  )
@@ -1029,13 +1034,23 @@ NSLookupDiagnostics_Validate
             }
         if(isValidIPv4Address(pNSLookupDiagInfo->DNSServer))
         {
-            rc = strcpy_s(pNSLookupDiagInfo->IfAddr, sizeof(pNSLookupDiagInfo->IfAddr) ,CosaGetInterfaceAddrByName("Device.DeviceInfo.X_COMCAST-COM_WAN_IP"));
-            ERR_CHK(rc);
+            char *wan_ip = CosaGetInterfaceAddrByName("Device.DeviceInfo.X_COMCAST-COM_WAN_IP");
+            if (wan_ip != NULL)
+            {
+                rc = strcpy_s(pNSLookupDiagInfo->IfAddr, sizeof(pNSLookupDiagInfo->IfAddr), wan_ip);
+                ERR_CHK(rc);
+                AnscFreeMemory(wan_ip);
+            }
         }
         else if(isValidIPv6Address(pNSLookupDiagInfo->DNSServer))
         {
-            rc = strcpy_s(pNSLookupDiagInfo->IfAddr, sizeof(pNSLookupDiagInfo->IfAddr) ,CosaGetInterfaceAddrByName("Device.DeviceInfo.X_COMCAST-COM_WAN_IPv6"));
-            ERR_CHK(rc);
+            char *wan_ipv6 = CosaGetInterfaceAddrByName("Device.DeviceInfo.X_COMCAST-COM_WAN_IPv6");
+            if (wan_ipv6 != NULL)
+            {
+                rc = strcpy_s(pNSLookupDiagInfo->IfAddr, sizeof(pNSLookupDiagInfo->IfAddr), wan_ipv6);
+                ERR_CHK(rc);
+                AnscFreeMemory(wan_ipv6);
+            }
         }	
     }
 

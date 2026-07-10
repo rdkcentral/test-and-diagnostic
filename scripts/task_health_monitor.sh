@@ -35,6 +35,9 @@ fi
 
 SelfHeal_Support=`sysevent get SelfhelpWANConnectionDiagSupport`
 HomeSecuritySupport=`sysevent get HomeSecuritySupport`
+# Here LANIPv6GUASupport used to identify the region of the device. For example LANIPv6GUASupport is true for EU region devices and false for NA region devices. 
+# Eth WAN failover recovery action is taken only for NA region devices.
+# TODO : DHCP selfheal mechanisms used here are outdated and dhcp should be controlled from and Wanmanager and the DHCPManager.
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
 
 DIBBLER_SERVER_CONF="/etc/dibbler/server.conf"
@@ -1538,6 +1541,15 @@ else
                             ;;
                         esac
                     fi  # [ -f $ADVSEC_PATH ]
+                    # cujo-qosd
+                    NI_ENABLED=$(dmcli eRT retv Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.NetworkIntelligence.Enable)
+                    if [ "$NI_ENABLED" = "true" ]; then
+                        NI_PID=$(pidof cujo-qosd)
+                        if [ "$NI_PID" = "" ] ; then
+                            echo_t "RDKB_PROCESS_CRASHED : cujo-qosd process is not running, need restart"
+                            resetNeeded "" cujo-qosd
+                        fi
+                    fi
                 fi  # [ "$advsec_bridge_mode" != "2" ]
 fi #BWG
 case $SELFHEAL_TYPE in
@@ -5000,7 +5012,7 @@ self_heal_ethwan_mode_recover()
     fi
 }
 
-if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$MODEL_NUM" = "SCER11BEL" ] || [ "$MODEL_NUM" = "SR203" ] || [ "$MODEL_NUM" = "SR213" ]; then
+if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$MODEL_NUM" = "SCER11BEL" ] || [ "$MODEL_NUM" = "SR203" ] || [ "$MODEL_NUM" = "SR213" ] || [ "$MODEL_NUM" = "CGA4332COM" ]; then
     mesh_optimization_mode=$(deviceinfo.sh -optimization)
     mesh_enable=$(syscfg get mesh_enable)
     if [[ "$mesh_optimization_mode" == "monitor" || "$mesh_optimization_mode" == "enable" ]] && ! [[ "$mesh_enable" == "true" && "$mesh_optimization_mode" == "enable" ]] && ! [[ "$mesh_enable" == "false" && "$mesh_optimization_mode" == "monitor" ]]

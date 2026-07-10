@@ -916,6 +916,11 @@ resetNeeded()
                     advsec_restart_agent
                 fi
 
+            elif [ "$ProcessName" = "cujo-qosd" ]; then
+                echo_t "RDKB_SELFHEAL : Resetting process $ProcessName"
+                systemctl start cujo-ni
+                t2CountNotify "SYS_SH_CUJO_NI_restart"
+
             elif [ "$ProcessName" = "PING" ]; then
                 REBOOTINTERVAL=$(syscfg get router_reboot_Interval)
                 LAST_REBOOT=$(syscfg get last_router_reboot_time)

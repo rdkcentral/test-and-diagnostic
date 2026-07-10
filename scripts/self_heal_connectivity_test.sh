@@ -29,6 +29,9 @@ exec 3>&1 4>&2 >>$SELFHEALFILE 2>&1
 WAN_INTERFACE=$(getWanInterfaceName)
 WAN_INTERFACE_IPV4=$(getWanInterfaceName)
 
+# In this script LANIPv6GUASupport flag indicates whether the device uses IPoE-based health checks for WAN validation
+# instead of direct ping tests on erouter0. When true, we rely on ipoe_health_check_* events.
+# TODO: Replace with a generic IPoE feature detection method instead of LANIPv6GUASupport or product flags.
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
 
 calcRandom=1
