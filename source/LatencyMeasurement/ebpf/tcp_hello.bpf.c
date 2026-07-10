@@ -65,6 +65,33 @@ struct bpf_map_def SEC("maps") syn_timestamps = {
 };
 
 /*
+ * Intermediate state stored when SYN-ACK is seen, keyed by the canonical
+ * (client→server) flow key.  Consumed when the subsequent ACK arrives to
+ * compute LAN latency (SYN-ACK → ACK).
+ * Max age: if ACK does not arrive within MAX_SYNACK_AGE_NS the entry is
+ * ignored (evicted by LRU or stale-detected at ACK time).
+ */
+#define MAX_SYNACK_AGE_NS (5ULL * 1000000000ULL)  /* 5 seconds */
+
+struct synack_state {
+    __u32 client_ip[4];
+    __u32 server_ip[4];
+    __u16 client_port;
+    __u16 server_port;
+    __u8  family;
+    __u8  pad[3];
+    __u64 synack_time_ns;  /* ktime when SYN-ACK was forwarded */
+    __u32 wan_rtt_ns;      /* SYN → SYN-ACK already computed */
+};
+
+struct bpf_map_def SEC("maps") synack_states = {
+    .type        = BPF_MAP_TYPE_LRU_HASH,
+    .key_size    = sizeof(struct flow_key),
+    .value_size  = sizeof(struct synack_state),
+    .max_entries = 8192,
+};
+
+/*
  * Ring buffer: delivers rtt_event structs to userspace.
  * Single shared ring (no per-CPU split), one fd in epoll.
  * bpf_ringbuf_output works for kprobe programs (process context).
@@ -114,16 +141,38 @@ static __always_inline int handle_v4(const void *data)
 
         __u64 *syn_ts = bpf_map_lookup_elem(&syn_timestamps, &syn_key);
         if (syn_ts) {
-            __u64 rtt_ns = bpf_ktime_get_ns() - *syn_ts;
+            __u64 now       = bpf_ktime_get_ns();
+            __u32 wan_rtt   = (__u32)(now - *syn_ts);
             bpf_map_delete_elem(&syn_timestamps, &syn_key);
+
+            /* Store state for ACK matching */
+            struct synack_state sa = {};
+            sa.family         = AF_INET;
+            __builtin_memcpy(sa.client_ip, key.dst_ip, sizeof(sa.client_ip));
+            sa.client_port    = key.dst_port;
+            __builtin_memcpy(sa.server_ip, key.src_ip, sizeof(sa.server_ip));
+            sa.server_port    = key.src_port;
+            sa.synack_time_ns = now;
+            sa.wan_rtt_ns     = wan_rtt;
+            bpf_map_update_elem(&synack_states, &syn_key, &sa, BPF_ANY);
+        }
+
+    } else if (!tcph.syn && tcph.ack && !tcph.rst && !tcph.fin) {  /* ACK */
+        /* Match against a pending synack_state (connection-setup ACK only;
+         * data-transfer ACKs will find no entry and return quickly). */
+        struct synack_state *sa = bpf_map_lookup_elem(&synack_states, &key);
+        if (sa && (bpf_ktime_get_ns() - sa->synack_time_ns) < MAX_SYNACK_AGE_NS) {
+            __u32 lan_rtt = (__u32)(bpf_ktime_get_ns() - sa->synack_time_ns);
+            bpf_map_delete_elem(&synack_states, &key);
 
             struct rtt_event ev = {};
             ev.family      = AF_INET;
-            __builtin_memcpy(ev.client_ip, key.dst_ip, sizeof(ev.client_ip));
-            ev.client_port = key.dst_port;
-            __builtin_memcpy(ev.server_ip, key.src_ip, sizeof(ev.server_ip));
-            ev.server_port = key.src_port;
-            ev.rtt_ns      = (__u32)rtt_ns;
+            __builtin_memcpy(ev.client_ip, sa->client_ip, sizeof(ev.client_ip));
+            ev.client_port = sa->client_port;
+            __builtin_memcpy(ev.server_ip, sa->server_ip, sizeof(ev.server_ip));
+            ev.server_port = sa->server_port;
+            ev.wan_rtt_ns  = sa->wan_rtt_ns;
+            ev.lan_rtt_ns  = lan_rtt;
             bpf_ringbuf_output(&rtt_events, &ev, sizeof(ev), 0);
         }
     }
@@ -177,16 +226,35 @@ static __always_inline int handle_v6(const void *data)
 
         __u64 *syn_ts = bpf_map_lookup_elem(&syn_timestamps, &syn_key);
         if (syn_ts) {
-            __u64 rtt_ns = bpf_ktime_get_ns() - *syn_ts;
+            __u64 now     = bpf_ktime_get_ns();
+            __u32 wan_rtt = (__u32)(now - *syn_ts);
             bpf_map_delete_elem(&syn_timestamps, &syn_key);
 
+            struct synack_state sa = {};
+            sa.family         = AF_INET6;
+            __builtin_memcpy(sa.client_ip, key.dst_ip, sizeof(sa.client_ip));
+            sa.client_port    = key.dst_port;
+            __builtin_memcpy(sa.server_ip, key.src_ip, sizeof(sa.server_ip));
+            sa.server_port    = key.src_port;
+            sa.synack_time_ns = now;
+            sa.wan_rtt_ns     = wan_rtt;
+            bpf_map_update_elem(&synack_states, &syn_key, &sa, BPF_ANY);
+        }
+
+    } else if (!tcph.syn && tcph.ack && !tcph.rst && !tcph.fin) {  /* ACK */
+        struct synack_state *sa = bpf_map_lookup_elem(&synack_states, &key);
+        if (sa && (bpf_ktime_get_ns() - sa->synack_time_ns) < MAX_SYNACK_AGE_NS) {
+            __u32 lan_rtt = (__u32)(bpf_ktime_get_ns() - sa->synack_time_ns);
+            bpf_map_delete_elem(&synack_states, &key);
+
             struct rtt_event ev = {};
-            ev.family = AF_INET6;
-            __builtin_memcpy(ev.client_ip, key.dst_ip, sizeof(ev.client_ip));
-            ev.client_port = key.dst_port;
-            __builtin_memcpy(ev.server_ip, key.src_ip, sizeof(ev.server_ip));
-            ev.server_port = key.src_port;
-            ev.rtt_ns = (__u32)rtt_ns;
+            ev.family      = AF_INET6;
+            __builtin_memcpy(ev.client_ip, sa->client_ip, sizeof(ev.client_ip));
+            ev.client_port = sa->client_port;
+            __builtin_memcpy(ev.server_ip, sa->server_ip, sizeof(ev.server_ip));
+            ev.server_port = sa->server_port;
+            ev.wan_rtt_ns  = sa->wan_rtt_ns;
+            ev.lan_rtt_ns  = lan_rtt;
             bpf_ringbuf_output(&rtt_events, &ev, sizeof(ev), 0);
         }
     }

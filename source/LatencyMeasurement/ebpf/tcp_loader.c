@@ -76,9 +76,10 @@ static int handle_rtt_event(void *ctx, void *data, size_t data_sz)
         snprintf(cfmt, sizeof(cfmt), "%s", cip);
         snprintf(sfmt, sizeof(sfmt), "%s", sip);
     }
-    printf("  LAN %s:%-5u  ->  WAN %s:%-5u   RTT: %5.2f ms\n",
+    printf("  LAN %s:%-5u  ->  WAN %s:%-5u   WAN RTT: %5.2f ms  LAN RTT: %5.2f ms\n",
            cfmt, e->client_port, sfmt, e->server_port,
-           e->rtt_ns / 1000000.0);
+           e->wan_rtt_ns / 1000000.0,
+           e->lan_rtt_ns / 1000000.0);
     fflush(stdout);
     return 0;
 }

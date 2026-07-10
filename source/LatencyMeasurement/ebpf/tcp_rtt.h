@@ -14,10 +14,11 @@
  * RTT event: written to the rtt_events ARRAY map by the BPF program;
  * read from the same map by tcp_loader's poll thread.
  *
- * client_*  = LAN-side host (source of the TCP SYN)
- * server_*  = WAN-side peer (destination of the TCP SYN)
- * rtt_ns    = SYN->SYN-ACK delta in nanoseconds (lower 32 bits; safe up
- *             to ~4.29 s which covers all realistic TCP handshake RTTs)
+ * client_*    = LAN-side host (source of the TCP SYN)
+ * server_*    = WAN-side peer (destination of the TCP SYN)
+ * wan_rtt_ns  = SYN → SYN-ACK delta in nanoseconds (gateway ↔ WAN server RTT)
+ * lan_rtt_ns  = SYN-ACK → ACK delta in nanoseconds (client response time)
+ *               Both are stored as lower 32 bits; safe up to ~4.29 s.
  */
 struct rtt_event {
     __u32 client_ip[4];  /* AF_INET:  [0]=addr, [1-3]=0
@@ -27,7 +28,8 @@ struct rtt_event {
     __u16 server_port;
     __u8  family;        /* AF_INET (2) or AF_INET6 (10) */
     __u8  pad[3];        /* explicit padding for struct alignment */
-    __u32 rtt_ns;
+    __u32 wan_rtt_ns;    /* SYN → SYN-ACK  (network RTT to server) */
+    __u32 lan_rtt_ns;    /* SYN-ACK → ACK  (LAN client response time) */
 };
 
 #endif /* TCP_RTT_H */
