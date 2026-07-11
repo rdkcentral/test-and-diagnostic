@@ -49,16 +49,11 @@
 #include <bpf/bpf_endian.h>
 
 /*
- * ARM32: struct pt_regs must be fully defined before bpf_tracing.h so that
- * the BPF_KPROBE / PT_REGS_PARMn macros can access uregs[].  With
- * "-target bpf" the arch-specific ptrace.h is not included automatically.
+ * ARM32: -D__TARGET_ARCH_arm (passed by the Makefile) tells bpf_tracing.h to
+ * emit the ARM-specific PT_REGS_PARMn macros (uregs[n] accessors).  Without
+ * it, "-target bpf" compilation picks a wrong-arch or generic fallback and
+ * the verifier rejects the program.
  */
-#ifndef __ASSEMBLY__
-struct pt_regs {
-    unsigned long uregs[18];
-};
-#endif
-
 #include <bpf/bpf_tracing.h>   /* BPF_KPROBE, PT_REGS_PARM1 */
 #include "tcp_rtt.h"            /* struct rtt_event (shared with tcp_loader.c) */
 #include "bpf_net_defs.h"       /* iphdr, ipv6hdr, tcphdr, flow_key, TCP_FLAG_* */
