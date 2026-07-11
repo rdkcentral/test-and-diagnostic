@@ -79,7 +79,7 @@ all-local:
 	        -c $(srcdir)/tcp_hello.bpf.c -o tcp_hello.bpf.o; \
 	    if [ -f tcp_hello.bpf.o ]; then \
 	        echo "[eBPF] EMBED    tcp_hello_bpf_o.h (od)"; \
-	        { cat "$(srcdir)/prebuilt/LICENSE_HEADER"; \
+	        { cat "$(srcdir)/prebuilt/LICENSE_HEADER" | tr -d '\r'; \
 	          printf 'static const unsigned char tcp_hello_bpf_o[] = {\n'; \
 	          od -v -An -tx1 tcp_hello.bpf.o | awk '{for(i=1;i<=NF;i++) printf "0x%s,", $$i}'; \
 	          printf '\n};\nstatic const unsigned int tcp_hello_bpf_o_len = %u;\n' \
