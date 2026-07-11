@@ -18,20 +18,21 @@
  */
 
 /*
- * tcp_loader.c - Userspace loader for tcp_hello.bpf.o (kprobe edition)
+ * tcp_loader.c - Userspace loader for the tcp_hello eBPF kprobe program
  *
  * Usage:
  *   ./tcp_loader              # attach kprobes and stream RTT events
  *
  * Attaches BPF kprobes on ip_forward() (IPv4) and ip6_forward() (IPv6).
- * RTT events are delivered via bpf_perf_event_output (process context)
- * and consumed through the standard perf_buffer API.
+ * RTT events are delivered by the BPF program via bpf_ringbuf_output and
+ * consumed here through the libbpf ring_buffer API (single shared ring,
+ * one epoll fd, no per-CPU split).
  *
  * Advantages over the socket_filter approach:
  *   - No interface-specific binding: all LAN clients covered automatically
- *   - Clean perf_buffer delivery: no ARRAY map ring or recv() wakeup trick
+ *   - Ring buffer delivery: zero-copy, ordered, no dropped events under load
  *
- * To stop: Ctrl+C
+ * To stop: Ctrl+C or SIGTERM
  */
 
 #include <stdio.h>
@@ -47,13 +48,14 @@
 #include <bpf/bpf.h>
 
 /*
- * tcp_hello_bpf_o.inc is auto-generated from tcp_hello.bpf.o by
- * 'xxd -i tcp_hello.bpf.o' during the build.
- * It defines:
- *   static const unsigned char tcp_hello_bpf_o[];  -- BPF ELF bytes
+ * tcp_hello_bpf_o.h is auto-generated from tcp_hello.bpf.o during the build
+ * using 'od -v -An -tx1 | awk' to produce a C byte array.  It defines:
+ *   static const unsigned char tcp_hello_bpf_o[];   -- BPF ELF bytes
  *   static const unsigned int  tcp_hello_bpf_o_len; -- byte count
- * The loader uses bpf_object__open_mem() to load directly from memory,
- * removing the need to install or locate a separate .bpf.o file.
+ * The loader opens the BPF object directly from memory via
+ * bpf_object__open_mem(), so no separate .bpf.o file is needed at runtime.
+ * A prebuilt copy lives in prebuilt/tcp_hello_bpf_o.h for platforms without
+ * a clang toolchain.
  */
 #include "tcp_hello_bpf_o.h"
 
@@ -114,17 +116,21 @@ static int handle_rtt_event(void *ctx, void *data, size_t data_sz)
 
 /*
  * Background thread: polls the ring buffer for RTT events.
- * ring_buffer__poll() blocks (epoll_wait) until data arrives or timeout.
- * The 1-second timeout is only for checking the running flag (Ctrl+C);
- * events are delivered within microseconds of bpf_ringbuf_output().
+ * ring_buffer__poll() blocks in epoll_wait until data arrives or the timeout
+ * expires.  The 1-second timeout allows the loop to notice when 'running' is
+ * cleared by the signal handler without relying solely on signal delivery.
+ * On error ring_buffer__poll() returns -errno; EINTR means a signal arrived
+ * (normal shutdown path) so we continue; any other error is fatal.
  */
 static void *poll_thread(void *arg)
 {
     (void)arg;
     while (running) {
         int n = ring_buffer__poll(rb, 1000 /* ms */);
-        if (n < 0 && errno != EINTR) {
-            fprintf(stderr, "ring_buffer__poll error: %s\n", strerror(errno));
+        if (n < 0) {
+            if (n == -EINTR)
+                continue;
+            fprintf(stderr, "ring_buffer__poll error: %s\n", strerror(-n));
             running = 0;
             break;
         }
@@ -204,7 +210,7 @@ int main(int argc, char *argv[])
     }
 
     rb = ring_buffer__new(bpf_map__fd(rtt_map), handle_rtt_event, NULL, NULL);
-    if (libbpf_get_error(rb)) {
+    if (!rb) {
         fprintf(stderr, "Failed to create ring buffer: %s\n", strerror(errno));
         goto cleanup;
     }
@@ -219,7 +225,7 @@ int main(int argc, char *argv[])
     }
 
     while (running)
-        pause();
+        sleep(1);
 
     pthread_join(poll_tid, NULL);
 

@@ -18,30 +18,28 @@
  */
 
 /*
- * tcp_hello.bpf.c - eBPF kprobe: LAN-client RTT via TCP handshake timing
+ * tcp_hello.bpf.c - eBPF kprobe: LAN-client TCP handshake RTT measurement
  *
  * Attached as kprobes on ip_forward() (IPv4) and ip6_forward() (IPv6).
  * Both SYN (LAN->WAN) and SYN-ACK (WAN->LAN) pass through these functions
  * for every forwarded packet -- no interface binding needed.
  *
- * Advantages over the socket_filter approach:
- *   - bpf_perf_event_output works (kprobes run in process context, not softirq)
- *   - Interface-agnostic: all LAN clients on all ports are covered automatically
- *   - No AF_PACKET socket or recv() wakeup trick needed
- *
  * How it works
  * -------------
- *   TCP SYN  : store flow_key -> ktime_ns in syn_timestamps LRU hash map.
- *   TCP SYN-ACK: reverse key, look up SYN timestamp, compute RTT,
- *                emit rtt_event via bpf_perf_event_output.
+ *   TCP SYN     : store flow_key -> ktime_ns in syn_timestamps LRU hash map.
+ *   TCP SYN-ACK : reverse key, look up SYN timestamp, compute WAN RTT,
+ *                 store synack_state keyed by the original (client->server) key.
+ *   TCP ACK     : look up synack_state, compute LAN RTT (SYN-ACK -> ACK delta),
+ *                 emit combined rtt_event to the rtt_events ring buffer.
  *
  * sk_buff->data offset
  * ---------------------
  *   Without BTF/CO-RE, skb->data is accessed at a hardcoded byte offset
- *   (SKBUFF_DATA_OFFSET).  Verify with:
+ *   (SKBUFF_DATA_OFFSET) computed at compile time from kernel CONFIG_ macros
+ *   in skbuff_offset.h.  Verify with:
  *     pahole -C sk_buff <kernel_vmlinux> | grep " data;"
  *   Safe failure mode: wrong offset -> bpf_probe_read_kernel() returns error
- *   -> no RTT events, no crash.
+ *   -> no RTT events emitted, no crash.
  */
 
 #include <linux/bpf.h>

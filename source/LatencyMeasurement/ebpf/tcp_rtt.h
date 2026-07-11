@@ -28,13 +28,14 @@
 #define TCP_RTT_H
 
 /*
- * RTT event: written to the rtt_events ARRAY map by the BPF program;
- * read from the same map by tcp_loader's poll thread.
+ * RTT event: written to the rtt_events ring buffer by the BPF program when
+ * the three-way handshake ACK is forwarded; consumed by tcp_loader's poll
+ * thread via ring_buffer__poll().
  *
  * client_*    = LAN-side host (source of the TCP SYN)
  * server_*    = WAN-side peer (destination of the TCP SYN)
- * wan_rtt_ns  = SYN → SYN-ACK delta in nanoseconds (gateway ↔ WAN server RTT)
- * lan_rtt_ns  = SYN-ACK → ACK delta in nanoseconds (client response time)
+ * wan_rtt_ns  = SYN -> SYN-ACK delta in nanoseconds (gateway <-> WAN server RTT)
+ * lan_rtt_ns  = SYN-ACK -> ACK delta in nanoseconds (LAN client response time)
  *               Both are stored as lower 32 bits; safe up to ~4.29 s.
  */
 struct rtt_event {
