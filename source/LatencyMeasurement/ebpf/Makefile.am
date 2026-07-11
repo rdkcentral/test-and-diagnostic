@@ -44,7 +44,7 @@ LIBBPF_LIB   ?=
 ebpfdir = $(bindir)/ebpf
 
 EXTRA_DIST = tcp_rtt.h bpf_net_defs.h skbuff_offset.h tcp_hello.bpf.c tcp_loader.c \
-             prebuilt/tcp_hello_bpf_o.h prebuilt/SHA256SUMS
+             prebuilt/LICENSE_HEADER prebuilt/tcp_hello_bpf_o.h prebuilt/SHA256SUMS
 
 # Build both products only when prerequisites are supplied.
 # Build both products only when prerequisites are supplied.
@@ -79,7 +79,8 @@ all-local:
 	        -c $(srcdir)/tcp_hello.bpf.c -o tcp_hello.bpf.o; \
 	    if [ -f tcp_hello.bpf.o ]; then \
 	        echo "[eBPF] EMBED    tcp_hello_bpf_o.h (od)"; \
-	        { printf 'static const unsigned char tcp_hello_bpf_o[] = {\n'; \
+	        { cat "$(srcdir)/prebuilt/LICENSE_HEADER"; \
+	          printf 'static const unsigned char tcp_hello_bpf_o[] = {\n'; \
 	          od -v -An -tx1 tcp_hello.bpf.o | awk '{for(i=1;i<=NF;i++) printf "0x%s,", $$i}'; \
 	          printf '\n};\nstatic const unsigned int tcp_hello_bpf_o_len = %u;\n' \
 	                 "$$(wc -c < tcp_hello.bpf.o)"; \
@@ -88,6 +89,7 @@ all-local:
 	        && (cd "$(srcdir)" && sha256sum tcp_hello.bpf.c bpf_net_defs.h \
 	                              skbuff_offset.h tcp_rtt.h > prebuilt/SHA256SUMS) \
 	        && echo "[eBPF] SHA256SUMS  prebuilt/SHA256SUMS updated" \
+	        && rm -f tcp_hello.bpf.o \
 	        && BPF_OK=1 \
 	        || echo "[eBPF] WARNING:  embed/copy step failed"; \
 	    else \
