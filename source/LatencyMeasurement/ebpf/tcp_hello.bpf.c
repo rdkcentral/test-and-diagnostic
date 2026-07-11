@@ -47,11 +47,24 @@
 #include <bpf/bpf_endian.h>
 
 /*
- * ARM32: -D__TARGET_ARCH_arm (passed by the Makefile) tells bpf_tracing.h to
- * emit the ARM-specific PT_REGS_PARMn macros (uregs[n] accessors).  Without
- * it, "-target bpf" compilation picks a wrong-arch or generic fallback and
- * the verifier rejects the program.
+ * ARM32 + BPF compilation needs two things for BPF_KPROBE to work:
+ *
+ *   1. -D__TARGET_ARCH_arm (in Makefile): tells bpf_tracing.h to emit the
+ *      ARM-specific PT_REGS_PARMn macros using the uregs[n] accessor layout.
+ *
+ *   2. struct pt_regs defined before bpf_tracing.h: libbpf 0.7.0 does NOT
+ *      define the struct itself — it only provides the accessor macros.
+ *      With "-target bpf" the arch ptrace.h is not in the default include
+ *      path.  Including <asm/ptrace.h> would also work given the Makefile
+ *      -I$(KERNEL_SRC)/arch/arm/include path, but it pulls in asm/hwcap.h
+ *      and other arch headers that can fail in the minimal BPF build context.
+ *      The three-line manual definition is simpler and proven on this target.
  */
+#ifndef __ASSEMBLY__
+struct pt_regs {
+    unsigned long uregs[18];
+};
+#endif
 #include <bpf/bpf_tracing.h>   /* BPF_KPROBE, PT_REGS_PARM1 */
 #include "tcp_rtt.h"            /* struct rtt_event (shared with tcp_loader.c) */
 #include "bpf_net_defs.h"       /* iphdr, ipv6hdr, tcphdr, flow_key, TCP_FLAG_* */
