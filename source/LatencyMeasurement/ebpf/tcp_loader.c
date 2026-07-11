@@ -156,9 +156,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (bpf_object__load(obj)) {
-        fprintf(stderr, "Failed to load BPF object: errno=%d (%s)\n",
-                errno, strerror(errno));
+    int load_err = bpf_object__load(obj);
+    if (load_err) {
+        fprintf(stderr, "Failed to load BPF object: %s\n", strerror(-load_err));
         bpf_object__close(obj);
         return 1;
     }

@@ -47,7 +47,6 @@ EXTRA_DIST = tcp_rtt.h bpf_net_defs.h skbuff_offset.h tcp_hello.bpf.c tcp_loader
              prebuilt/LICENSE_HEADER prebuilt/tcp_hello_bpf_o.h prebuilt/SHA256SUMS
 
 # Build both products only when prerequisites are supplied.
-# Build both products only when prerequisites are supplied.
 # Non-fatal: all eBPF build failures are printed as warnings so that the
 # broader image compilation always succeeds.
 all-local:

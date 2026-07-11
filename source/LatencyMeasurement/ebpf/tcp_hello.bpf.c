@@ -147,7 +147,8 @@ static __always_inline int handle_v4(const void *data)
         __u64 *syn_ts = bpf_map_lookup_elem(&syn_timestamps, &syn_key);
         if (syn_ts) {
             __u64 now       = bpf_ktime_get_ns();
-            __u32 wan_rtt   = (__u32)(now - *syn_ts);
+            __u64 wan_delta = now - *syn_ts;
+            __u32 wan_rtt   = wan_delta > 0xFFFFFFFFULL ? 0xFFFFFFFFU : (__u32)wan_delta;
             bpf_map_delete_elem(&syn_timestamps, &syn_key);
 
             /* Store state for ACK matching */
@@ -167,7 +168,8 @@ static __always_inline int handle_v4(const void *data)
          * data-transfer ACKs will find no entry and return quickly). */
         struct synack_state *sa = bpf_map_lookup_elem(&synack_states, &key);
         if (sa && (bpf_ktime_get_ns() - sa->synack_time_ns) < MAX_SYNACK_AGE_NS) {
-            __u32 lan_rtt = (__u32)(bpf_ktime_get_ns() - sa->synack_time_ns);
+            __u64 lan_delta = bpf_ktime_get_ns() - sa->synack_time_ns;
+            __u32 lan_rtt   = lan_delta > 0xFFFFFFFFULL ? 0xFFFFFFFFU : (__u32)lan_delta;
             bpf_map_delete_elem(&synack_states, &key);
 
             struct rtt_event ev = {};
@@ -232,7 +234,8 @@ static __always_inline int handle_v6(const void *data)
         __u64 *syn_ts = bpf_map_lookup_elem(&syn_timestamps, &syn_key);
         if (syn_ts) {
             __u64 now     = bpf_ktime_get_ns();
-            __u32 wan_rtt = (__u32)(now - *syn_ts);
+            __u64 wan_delta = now - *syn_ts;
+            __u32 wan_rtt = wan_delta > 0xFFFFFFFFULL ? 0xFFFFFFFFU : (__u32)wan_delta;
             bpf_map_delete_elem(&syn_timestamps, &syn_key);
 
             struct synack_state sa = {};
@@ -249,7 +252,8 @@ static __always_inline int handle_v6(const void *data)
     } else if (!tcph.syn && tcph.ack && !tcph.rst && !tcph.fin) {  /* ACK */
         struct synack_state *sa = bpf_map_lookup_elem(&synack_states, &key);
         if (sa && (bpf_ktime_get_ns() - sa->synack_time_ns) < MAX_SYNACK_AGE_NS) {
-            __u32 lan_rtt = (__u32)(bpf_ktime_get_ns() - sa->synack_time_ns);
+            __u64 lan_delta = bpf_ktime_get_ns() - sa->synack_time_ns;
+            __u32 lan_rtt   = lan_delta > 0xFFFFFFFFULL ? 0xFFFFFFFFU : (__u32)lan_delta;
             bpf_map_delete_elem(&synack_states, &key);
 
             struct rtt_event ev = {};

@@ -44,6 +44,18 @@
 #define __BPF_NET_DEFS_H
 
 /* ── Force big-endian bitfield layout ───────────────────────────────────── */
+/*
+ * Network packet bytes are always in big-endian (network) byte order.
+ * To correctly extract struct tcphdr bitfields (syn/ack/rst/fin/doff) from
+ * raw packet data, the bitfield layout must match big-endian packing,
+ * regardless of the BPF VM's target endianness (which is little-endian,
+ * ELFDATA2LSB, on ARM with "-target bpf").
+ *
+ * The BPF VM endianness controls integer arithmetic; the bitfield layout
+ * controls how bits within a struct field map to packet bytes.  These are
+ * independent.  __BIG_ENDIAN_BITFIELD is the correct choice for parsing
+ * network protocol headers on any endianness target.
+ */
 #ifdef __LITTLE_ENDIAN_BITFIELD
 # undef __LITTLE_ENDIAN_BITFIELD
 #endif
