@@ -116,4 +116,24 @@ struct flow_key {
     __u8  pad[3];
 };
 
+/* ── SYN-ACK intermediate tracking state ────────────────────────────────── */
+/*
+ * Stored in synack_states LRU map when a SYN-ACK is forwarded, keyed by the
+ * canonical (client->server) flow key.  Consumed on the subsequent ACK to
+ * compute LAN latency (SYN-ACK -> ACK).  Entries older than
+ * MAX_SYNACK_AGE_NS are treated as stale and ignored.
+ */
+#define MAX_SYNACK_AGE_NS (5ULL * 1000000000ULL)  /* 5 seconds */
+
+struct synack_state {
+    __u32 client_ip[4];
+    __u32 server_ip[4];
+    __u16 client_port;
+    __u16 server_port;
+    __u8  family;
+    __u8  pad[3];
+    __u64 synack_time_ns;  /* ktime when SYN-ACK was forwarded */
+    __u32 wan_rtt_ns;      /* SYN -> SYN-ACK already computed */
+};
+
 #endif /* __BPF_NET_DEFS_H */

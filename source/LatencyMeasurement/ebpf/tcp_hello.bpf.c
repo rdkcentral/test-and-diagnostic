@@ -78,26 +78,6 @@ struct bpf_map_def SEC("maps") syn_timestamps = {
     .max_entries = 8192,
 };
 
-/*
- * Intermediate state stored when SYN-ACK is seen, keyed by the canonical
- * (client→server) flow key.  Consumed when the subsequent ACK arrives to
- * compute LAN latency (SYN-ACK → ACK).
- * Max age: if ACK does not arrive within MAX_SYNACK_AGE_NS the entry is
- * ignored (evicted by LRU or stale-detected at ACK time).
- */
-#define MAX_SYNACK_AGE_NS (5ULL * 1000000000ULL)  /* 5 seconds */
-
-struct synack_state {
-    __u32 client_ip[4];
-    __u32 server_ip[4];
-    __u16 client_port;
-    __u16 server_port;
-    __u8  family;
-    __u8  pad[3];
-    __u64 synack_time_ns;  /* ktime when SYN-ACK was forwarded */
-    __u32 wan_rtt_ns;      /* SYN → SYN-ACK already computed */
-};
-
 struct bpf_map_def SEC("maps") synack_states = {
     .type        = BPF_MAP_TYPE_LRU_HASH,
     .key_size    = sizeof(struct flow_key),
