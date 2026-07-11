@@ -44,7 +44,7 @@ LIBBPF_LIB   ?=
 ebpfdir = $(bindir)/ebpf
 
 EXTRA_DIST = tcp_rtt.h bpf_net_defs.h skbuff_offset.h tcp_hello.bpf.c tcp_loader.c \
-             prebuilt/tcp_hello.bpf.o prebuilt/SHA256SUMS
+             prebuilt/tcp_hello_bpf_o.h prebuilt/SHA256SUMS
 
 # Build both products only when prerequisites are supplied.
 # Build both products only when prerequisites are supplied.
@@ -76,19 +76,28 @@ all-local:
 	        -I$(KERNEL_SRC)/arch/arm/include \
 	        $(if $(KERNEL_BUILD),-I$(KERNEL_BUILD)/arch/arm/include/generated) \
 	        -I$(LIBBPF_INC) \
-	        -c $(srcdir)/tcp_hello.bpf.c -o tcp_hello.bpf.o \
-	    && cp tcp_hello.bpf.o $(srcdir)/prebuilt/tcp_hello.bpf.o \
-	    && sha256sum $(srcdir)/tcp_hello.bpf.c $(srcdir)/bpf_net_defs.h \
-	                 $(srcdir)/skbuff_offset.h $(srcdir)/tcp_rtt.h \
-	       > $(srcdir)/prebuilt/SHA256SUMS \
-	    && echo "[eBPF] SHA256SUMS  prebuilt/SHA256SUMS updated" \
-	    && BPF_OK=1 \
-	    || echo "[eBPF] WARNING:  BPF compilation failed — trying prebuilt"; \
+	        -c $(srcdir)/tcp_hello.bpf.c -o tcp_hello.bpf.o; \
+	    if [ -f tcp_hello.bpf.o ]; then \
+	        echo "[eBPF] EMBED    tcp_hello_bpf_o.h (od)"; \
+	        { printf 'static const unsigned char tcp_hello_bpf_o[] = {\n'; \
+	          od -v -An -tx1 tcp_hello.bpf.o | awk '{for(i=1;i<=NF;i++) printf "0x%s,", $$i}'; \
+	          printf '\n};\nstatic const unsigned int tcp_hello_bpf_o_len = %u;\n' \
+	                 "$$(wc -c < tcp_hello.bpf.o)"; \
+	        } > tcp_hello_bpf_o.h \
+	        && cp tcp_hello_bpf_o.h $(srcdir)/prebuilt/tcp_hello_bpf_o.h \
+	        && (cd "$(srcdir)" && sha256sum tcp_hello.bpf.c bpf_net_defs.h \
+	                              skbuff_offset.h tcp_rtt.h > prebuilt/SHA256SUMS) \
+	        && echo "[eBPF] SHA256SUMS  prebuilt/SHA256SUMS updated" \
+	        && BPF_OK=1 \
+	        || echo "[eBPF] WARNING:  embed/copy step failed"; \
+	    else \
+	        echo "[eBPF] WARNING:  BPF compilation failed — trying prebuilt"; \
 	    fi; \
-	 elif [ -f "$(srcdir)/prebuilt/tcp_hello.bpf.o" ]; then \
-	    echo "[eBPF] PREBUILT  tcp_hello.bpf.o (clang/KERNEL_SRC not available)"; \
+	    fi; \
+	 elif [ -f "$(srcdir)/prebuilt/tcp_hello_bpf_o.h" ]; then \
+	    echo "[eBPF] PREBUILT  tcp_hello_bpf_o.h (clang/KERNEL_SRC not available)"; \
 	    if [ -f "$(srcdir)/prebuilt/SHA256SUMS" ]; then \
-	        if sha256sum -c "$(srcdir)/prebuilt/SHA256SUMS" --quiet 2>/dev/null; then \
+	        if (cd "$(srcdir)" && sha256sum -c prebuilt/SHA256SUMS --quiet 2>/dev/null); then \
 	            echo "[eBPF] VERIFY    prebuilt SHA256SUMS OK — sources unchanged"; \
 	        else \
 	            echo "[eBPF] WARNING:  prebuilt/SHA256SUMS mismatch — sources changed since last compile"; \
@@ -97,14 +106,14 @@ all-local:
 	    else \
 	        echo "[eBPF] WARNING:  no SHA256SUMS for prebuilt — cannot verify freshness"; \
 	    fi; \
-	    cp "$(srcdir)/prebuilt/tcp_hello.bpf.o" tcp_hello.bpf.o && BPF_OK=1; \
+	    cp "$(srcdir)/prebuilt/tcp_hello_bpf_o.h" tcp_hello_bpf_o.h && BPF_OK=1; \
 	 else \
-	    echo "[eBPF] WARNING:  no clang and no prebuilt/tcp_hello.bpf.o — skipping eBPF build"; \
+	    echo "[eBPF] WARNING:  no clang and no prebuilt/tcp_hello_bpf_o.h — skipping eBPF build"; \
 	 fi; \
 	 \
 	 if [ $$BPF_OK -eq 1 ] && [ -n "$(LIBBPF_INC)" ] && [ -n "$(LIBBPF_LIB)" ]; then \
 	    echo "[eBPF] CC        tcp_loader"; \
-	    $(CC) -Wall -O2 $(CPPFLAGS) $(CFLAGS) -I$(LIBBPF_INC) $(srcdir)/tcp_loader.c \
+	    $(CC) -Wall -O2 $(CPPFLAGS) $(CFLAGS) -I. -I$(LIBBPF_INC) $(srcdir)/tcp_loader.c \
 	        $(LDFLAGS) -L$(LIBBPF_LIB) -lbpf -lelf -lz -lpthread -o tcp_loader \
 	    || echo "[eBPF] WARNING:  tcp_loader compilation failed"; \
 	 elif [ $$BPF_OK -eq 1 ]; then \
@@ -120,10 +129,7 @@ install-exec-local:
 	fi
 
 install-data-local:
-	@if [ -f tcp_hello.bpf.o ]; then \
-	    $(INSTALL) -d $(DESTDIR)$(ebpfdir); \
-	    $(INSTALL) -m 0644 tcp_hello.bpf.o $(DESTDIR)$(ebpfdir)/tcp_hello.bpf.o; \
-	fi
+	@# BPF object is now embedded in tcp_loader — no separate install needed.
 
 clean-local:
-	rm -f tcp_loader tcp_hello.bpf.o
+	rm -f tcp_loader tcp_hello.bpf.o tcp_hello_bpf_o.h

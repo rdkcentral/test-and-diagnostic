@@ -27,7 +27,16 @@
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 
-#define BPF_OBJ_PATH   "/usr/bin/ebpf/tcp_hello.bpf.o"
+/*
+ * tcp_hello_bpf_o.inc is auto-generated from tcp_hello.bpf.o by
+ * 'xxd -i tcp_hello.bpf.o' during the build.
+ * It defines:
+ *   static const unsigned char tcp_hello_bpf_o[];  -- BPF ELF bytes
+ *   static const unsigned int  tcp_hello_bpf_o_len; -- byte count
+ * The loader uses bpf_object__open_mem() to load directly from memory,
+ * removing the need to install or locate a separate .bpf.o file.
+ */
+#include "tcp_hello_bpf_o.h"
 
 #include "tcp_rtt.h"  /* struct rtt_event (shared with tcp_hello.bpf.c) */
 
@@ -112,12 +121,13 @@ int main(int argc, char *argv[])
     libbpf_set_print(libbpf_print_fn);
 
     /* ------------------------------------------------------------------ */
-    /* 1. Load the BPF object                                              */
+    /* 1. Load the BPF object from embedded byte array                     */
     /* ------------------------------------------------------------------ */
-    struct bpf_object *obj = bpf_object__open(BPF_OBJ_PATH);
+    struct bpf_object *obj = bpf_object__open_mem(
+            tcp_hello_bpf_o, tcp_hello_bpf_o_len, NULL);
     if (libbpf_get_error(obj)) {
-        fprintf(stderr, "Failed to open %s: %ld\n",
-                BPF_OBJ_PATH, libbpf_get_error(obj));
+        fprintf(stderr, "Failed to open BPF object from memory: %ld\n",
+                libbpf_get_error(obj));
         return 1;
     }
 
