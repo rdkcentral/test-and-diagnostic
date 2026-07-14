@@ -504,6 +504,101 @@ fi
             t2ValNotify "SlabUsage_split" "${8},${7},${16},${15},${24},${23}"
         )
     fi
+
+    # ---------------------------------------------------------------
+    # Duplicate process detection
+    # RFC 1: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.SelfHeal.DualProcessDetect.Enable
+    #        syscfg key: SelfHealDualProcDetectEnable  (default: true)
+    # RFC 2: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.SelfHeal.DualProcessExcludeList
+    #        syscfg key: SelfHealDualProcExcludeList   (additive, comma-separated basenames)
+    # RFC 3: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.SelfHeal.DualProcessDetectInterval
+    #        syscfg key: SelfHealDualProcDetectInterval (minutes: 15|30|45|60, default: 15)
+    # ---------------------------------------------------------------
+
+    DUAL_PROC_DETECT_ENABLE=$(syscfg get SelfHealDualProcDetectEnable 2>/dev/null)
+    # Default: enabled
+    if [ -z "$DUAL_PROC_DETECT_ENABLE" ] || [ "$DUAL_PROC_DETECT_ENABLE" = "true" ]; then
+
+        # --- Interval control ---
+        # resource_monitor.sh runs every 15 min. Compute how many cycles to skip.
+        DUAL_PROC_INTERVAL=$(syscfg get SelfHealDualProcDetectInterval 2>/dev/null)
+        case "$DUAL_PROC_INTERVAL" in
+            30) DUAL_PROC_CYCLE_THRESHOLD=2 ;;
+            45) DUAL_PROC_CYCLE_THRESHOLD=3 ;;
+            60) DUAL_PROC_CYCLE_THRESHOLD=4 ;;
+            *)  DUAL_PROC_CYCLE_THRESHOLD=1 ;;  # 15 min or unset: run every cycle
+        esac
+
+        DUAL_PROC_COUNT_FILE="/tmp/.dual_proc_detect_count"
+        DUAL_PROC_COUNT=$(cat "$DUAL_PROC_COUNT_FILE" 2>/dev/null)
+        case "$DUAL_PROC_COUNT" in ''|*[!0-9]*) DUAL_PROC_COUNT=0 ;; esac
+        DUAL_PROC_COUNT=$((DUAL_PROC_COUNT + 1))
+
+        if [ "$DUAL_PROC_COUNT" -ge "$DUAL_PROC_CYCLE_THRESHOLD" ]; then
+            DUAL_PROC_COUNT=0
+
+            # --- Exclusion list ---
+            # Hardcoded defaults — always excluded regardless of RFC
+            DUAL_PROC_EXCLUDE_DEFAULT="sleep,dropbear,sh,ash,ssh,stunnel"
+            # RFC-configured additions (appended to the default list)
+            DUAL_PROC_EXCLUDE_RFC=$(syscfg get SelfHealDualProcExcludeList 2>/dev/null)
+            if [ -n "$DUAL_PROC_EXCLUDE_RFC" ]; then
+                DUAL_PROC_EXCLUDE_LIST="${DUAL_PROC_EXCLUDE_DEFAULT},${DUAL_PROC_EXCLUDE_RFC}"
+            else
+                DUAL_PROC_EXCLUDE_LIST="$DUAL_PROC_EXCLUDE_DEFAULT"
+            fi
+
+            ps | awk -v excl_list="$DUAL_PROC_EXCLUDE_LIST" '
+                BEGIN {
+                    n = split(excl_list, entries, ",")
+                    for (i = 1; i <= n; i++) {
+                        gsub(/^[ \t]+|[ \t]+$/, "", entries[i])
+                        if (entries[i] != "") excl[entries[i]] = 1
+                    }
+                }
+                NR == 1 { next }
+                {
+                    cmd = ""
+                    for (i = 5; i <= NF; i++) cmd = (cmd == "") ? $i : cmd " " $i
+                    n = split($5, parts, "/")
+                    base = parts[n]
+                    # Always skip kernel threads
+                    if (base ~ /^\[.*\]$/) next
+                    # Skip exclusion list (defaults + RFC additions)
+                    if (base in excl) next
+                    count[cmd]++
+                    lines[cmd] = lines[cmd] "\n" $0
+                }
+                END {
+                    found = 0
+                    for (cmd in count) {
+                        if (count[cmd] > 1) {
+                            if (!found) { print "DETECTED"; found = 1 }
+                            print "COUNT=" count[cmd] lines[cmd]
+                        }
+                    }
+                }
+            ' | {
+                read firstline
+                if [ "$firstline" = "DETECTED" ]; then
+                    echo_t "RDKB_SELFHEAL : Duplicate processes detected:"
+                    while IFS= read -r line; do
+                        case "$line" in
+                            COUNT=*)
+                                dup_count="${line#COUNT=}"
+                                echo_t "RDKB_SELFHEAL : DUAL_PROCESS_RUNNING - $dup_count instances:"
+                                ;;
+                            *)
+                                echo_t "RDKB_SELFHEAL :   $line"
+                                ;;
+                        esac
+                    done
+                fi
+            }
+        fi
+
+        echo "$DUAL_PROC_COUNT" > "$DUAL_PROC_COUNT_FILE"
+    fi
 }
 
 Bootup_HealthCheck()
