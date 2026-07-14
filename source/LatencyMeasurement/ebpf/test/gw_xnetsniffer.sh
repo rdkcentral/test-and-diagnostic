@@ -49,7 +49,7 @@ echo "Report interval: ${INTERVAL}s"
 echo ""
 
 # --- Kill production xNetDP to avoid split message queue ---
-PROD_XDP=$(pgrep -f "xNetDP" | head -n 1)
+PROD_XDP=$(pidof xNetDP | awk '{print $1}')
 if [ -n "$PROD_XDP" ]; then
     echo "Stopping production xNetDP (pid=$PROD_XDP, it uses -i 1800)"
     kill "$PROD_XDP" 2>/dev/null
@@ -67,7 +67,7 @@ echo "Waiting 3s for xNetDP to drain stale queue messages..."
 sleep 3
 
 # --- Start xNetSniffer only if not already running ---
-if ! pgrep -f "xNetSniffer" > /dev/null 2>&1; then
+if ! pidof xNetSniffer > /dev/null 2>&1; then
     /usr/bin/xNetSniffer -i "$LAN_IF" -f IPv4 -p "$LAN_PREFIX" &
     XNPID=$!
     echo "Started xNetSniffer pid=$XNPID"
