@@ -100,5 +100,7 @@
 #include "ansc_xsocket_interface.h"
 #include "ansc_xsocket_external_api.h"
 
+#include <telemetry_busmessage_sender.h>
+
 #endif
 

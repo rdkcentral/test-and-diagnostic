@@ -433,6 +433,70 @@ BbhmDiagnsStop
     pDslhDiagInfo->SuccessCount             = pProperty->NumDnsSuccess;
     pDslhDiagInfo->UpdatedAt                = AnscGetTickInSeconds();
 
+    /* DNS telemetry: emit latency and failure metrics */
+    {
+        PBBHM_NS_LOOKUP_ECHO_ENTRY  pDiagEntries = (PBBHM_NS_LOOKUP_ECHO_ENTRY)pDslhDiagInfo->hDiaginfo;
+        ULONG                       i;
+        ULONG                       totalLatencyMs  = 0;
+        ULONG                       successCount    = 0;
+        ULONG                       failCount       = 0;
+        ULONG                       timeoutCount    = 0;
+        ULONG                       svrUnavailCount = 0;
+        ULONG                       hostErrCount    = 0;
+        ULONG                       otherErrCount   = 0;
+        char                        failTypeStr[128] = {0};
+
+        for ( i = 0; i < MaxRetrieve && pDiagEntries; i++ )
+        {
+            switch ( pDiagEntries[i].Status )
+            {
+                case BBHM_NS_LOOKUP_STATUS_Success:
+                    totalLatencyMs += pDiagEntries[i].ResponsTime;
+                    successCount++;
+                    break;
+                case BBHM_NS_LOOKUP_STATUS_Error_Timeout:
+                    timeoutCount++;
+                    failCount++;
+                    break;
+                case BBHM_NS_LOOKUP_STATUS_Error_DNSServerNotAvailable:
+                    svrUnavailCount++;
+                    failCount++;
+                    break;
+                case BBHM_NS_LOOKUP_STATUS_Error_HostNameNotResolved:
+                    hostErrCount++;
+                    failCount++;
+                    break;
+                case BBHM_NS_LOOKUP_STATUS_Error_Other:
+                default:
+                    otherErrCount++;
+                    failCount++;
+                    break;
+            }
+        }
+
+        /* Average DNS latency (ms) for successful queries */
+        if ( successCount > 0 )
+        {
+            ULONG avgLatencyMs = totalLatencyMs / successCount;
+            CcspTraceInfo(("DNS Telemetry: avg_latency_ms=%lu success=%lu\n",
+                           avgLatencyMs, successCount));
+            t2_event_d("NET_DNS_LATENCY_AVG_ms_split", (int)avgLatencyMs);
+        }
+
+        /* DNS failure count */
+        if ( failCount > 0 )
+        {
+            /* Build a summary string of failure breakdown */
+            snprintf(failTypeStr, sizeof(failTypeStr),
+                     "timeout=%lu,svr_unavail=%lu,host_err=%lu,other=%lu",
+                     timeoutCount, svrUnavailCount, hostErrCount, otherErrCount);
+            CcspTraceInfo(("DNS Telemetry: fail_count=%lu types=%s\n",
+                           failCount, failTypeStr));
+            t2_event_d("NET_DNS_FAIL_CNT_split",  (int)failCount);
+            t2_event_s("NET_DNS_FAIL_TYPE_split", failTypeStr);
+        }
+    }
+
     return  returnStatus;
 }
 
