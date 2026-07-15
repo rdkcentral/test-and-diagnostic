@@ -21,7 +21,10 @@
  * tcp_loader.c - Userspace loader for the tcp_hello eBPF kprobe program
  *
  * Usage:
- *   ./tcp_loader              # attach kprobes and stream RTT events
+ *   ./tcp_loader [interval_sec] [-o output_file]
+ *   ./tcp_loader 30                   # consume every 30s, write to stdout
+ *   ./tcp_loader 300 -o /tmp/rtt.log  # consume every 5 min, write to file
+ *   ./tcp_loader 1800                 # match xNetDP production interval
  *
  * Attaches BPF kprobes on ip_forward() (IPv4) and ip6_forward() (IPv6).
  * RTT events are delivered by the BPF program via bpf_ringbuf_output and
@@ -64,7 +67,9 @@
 static struct ring_buffer       *rb      = NULL;
 static struct bpf_link          *link_v4 = NULL;
 static struct bpf_link          *link_v6 = NULL;
-static volatile sig_atomic_t     running = 1;
+static volatile sig_atomic_t     running  = 1;
+static int                       consume_interval_s = 30;
+static FILE                     *output_fp = NULL;  /* stdout or -o file */
 
 static void sig_handler(int sig)
 {
@@ -106,41 +111,65 @@ static int handle_rtt_event(void *ctx, void *data, size_t data_sz)
         snprintf(cfmt, sizeof(cfmt), "%s", cip);
         snprintf(sfmt, sizeof(sfmt), "%s", sip);
     }
-    printf("  LAN %s:%-5u  ->  WAN %s:%-5u   WAN RTT: %5.2f ms  LAN RTT: %5.2f ms\n",
-           cfmt, e->client_port, sfmt, e->server_port,
-           e->wan_rtt_ns / 1000000.0,
-           e->lan_rtt_ns / 1000000.0);
-    fflush(stdout);
+    fprintf(output_fp, "  LAN %s:%-5u  ->  WAN %s:%-5u   WAN RTT: %5.2f ms  LAN RTT: %5.2f ms\n",
+            cfmt, e->client_port, sfmt, e->server_port,
+            e->wan_rtt_ns / 1000000.0,
+            e->lan_rtt_ns / 1000000.0);
     return 0;
 }
 
 /*
- * Background thread: polls the ring buffer for RTT events.
- * ring_buffer__poll() blocks in epoll_wait until data arrives or the timeout
- * expires.  The 1-second timeout allows the loop to notice when 'running' is
- * cleared by the signal handler without relying solely on signal delivery.
- * On error ring_buffer__poll() returns -errno; EINTR means a signal arrived
- * (normal shutdown path) so we continue; any other error is fatal.
+ * consume_interval_s controls how often the ring buffer is drained.
+ * Events flush in a single burst at each interval — writing to output_fp.
+ * At the burst point, fflush() is called once to ensure the file is updated.
  */
 static void *poll_thread(void *arg)
 {
     (void)arg;
+    int i;
     while (running) {
-        int n = ring_buffer__poll(rb, 1000 /* ms */);
-        if (n < 0) {
-            if (n == -EINTR)
-                continue;
-            fprintf(stderr, "ring_buffer__poll error: %s\n", strerror(-n));
-            running = 0;
+        for (i = 0; i < consume_interval_s && running; i++)
+            sleep(1);
+        if (!running)
             break;
-        }
+        int n = ring_buffer__consume(rb);
+        if (n < 0)
+            fprintf(stderr, "ring_buffer__consume error: %s\n", strerror(-n));
+        else if (n > 0)
+            fflush(output_fp);  /* flush the batch to file/stdout atomically */
     }
     return NULL;
 }
 
 int main(int argc, char *argv[])
 {
-    (void)argc; (void)argv;
+    const char *out_path = NULL;
+    int i;
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+            out_path = argv[++i];
+        } else {
+            int v = atoi(argv[i]);
+            if (v > 0)
+                consume_interval_s = v;
+            else
+                fprintf(stderr, "Warning: unknown argument '%s'\n", argv[i]);
+        }
+    }
+
+    if (out_path) {
+        output_fp = fopen(out_path, "a");  /* append so restarts don't overwrite */
+        if (!output_fp) {
+            fprintf(stderr, "Failed to open output file '%s': %s\n",
+                    out_path, strerror(errno));
+            return 1;
+        }
+    } else {
+        output_fp = stdout;
+    }
+
+    fprintf(stderr, "Consume interval: %ds  Output: %s\n",
+            consume_interval_s, out_path ? out_path : "stdout");
 
     /* Restrict libbpf output to warnings and errors only. */
     libbpf_set_print(libbpf_print_fn);
@@ -238,6 +267,8 @@ cleanup:
     if (link_v6)   bpf_link__destroy(link_v6);
     if (link_v4)   bpf_link__destroy(link_v4);
     bpf_object__close(obj);
+    if (output_fp && output_fp != stdout)
+        fclose(output_fp);
     return 0;
 }
 
