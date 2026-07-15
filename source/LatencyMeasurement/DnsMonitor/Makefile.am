@@ -22,7 +22,6 @@ bin_PROGRAMS = DnsMonitor
 DnsMonitor_SOURCES = DnsMonitor.c
 
 DnsMonitor_CFLAGS  = $(AM_CFLAGS) \
-                     -I$(CCSP_HOME)/usr/include \
                      -DFEATURE_SUPPORT_RDKLOG
 
 DnsMonitor_LDFLAGS = -lpcap \

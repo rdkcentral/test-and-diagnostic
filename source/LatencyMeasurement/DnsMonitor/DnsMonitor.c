@@ -61,7 +61,6 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/time.h>
-#include <sys/select.h>
 
 #include <telemetry_busmessage_sender.h>
 
@@ -700,13 +699,12 @@ int main(int argc, char *argv[])
     }
     pcap_freecode(&bpf);
 
-    /* Non-blocking; use select() on pcap fd to avoid busy-spin */
+    /* Non-blocking so pcap_dispatch returns immediately when no packets */
     if (pcap_setnonblock(handle, 1, errbuf) < 0) {
         fprintf(stderr, "[DnsMonitor] pcap_setnonblock: %s\n", errbuf);
         pcap_close(handle);
         return 1;
     }
-    int pcap_fd = pcap_get_selectable_fd(handle);
 
     memset(g_table,   0, sizeof(g_table));
     memset(&g_stats,  0, sizeof(g_stats));
@@ -727,15 +725,8 @@ int main(int argc, char *argv[])
 
     while (g_running)
     {
-        if (pcap_fd >= 0) {
-            fd_set rfd;
-            FD_ZERO(&rfd);
-            FD_SET(pcap_fd, &rfd);
-            struct timeval tv = { .tv_sec = 0, .tv_usec = 50000 }; /* 50 ms */
-            select(pcap_fd + 1, &rfd, NULL, NULL, &tv);
-        } else {
-            usleep(50000);
-        }
+        /* 50 ms idle sleep — avoids busy-spin without select()/FD_ZERO */
+        usleep(50000);
 
         int n = pcap_dispatch(handle, 128, packet_cb, (u_char *)&cb_args);
         if (n < 0 && n != PCAP_ERROR_BREAK) {
