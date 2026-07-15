@@ -86,5 +86,6 @@ SubDocSupportMap_t * get_global_sdInfoTail(void);
 SupplementaryDocs_t * get_global_spInfoTail(void);
 
 void webcfg_subdoc_mismatch_boot_check(void);
+void webcfg_selfheal_start(void);
 
 #endif /* WEBCFG_SELFHEAL_H */
