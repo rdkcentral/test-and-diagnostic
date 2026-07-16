@@ -51,6 +51,7 @@
 
 #ifndef UNIT_TEST_DOCKER_SUPPORT
 #include <pcap.h>
+#include <telemetry_busmessage_sender.h>
 #endif
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,8 +64,6 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/time.h>
-
-#include <telemetry_busmessage_sender.h>
 
 /* ------------------------------------------------------------------ */
 /* Compile-time constants                                               */
