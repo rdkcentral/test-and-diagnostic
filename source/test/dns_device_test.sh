@@ -261,12 +261,14 @@ test_timeout_detection() {
     fi
 
     BEFORE=$(wc -l < "$LOG")
-    iptables -I OUTPUT -o "$IFACE" -p udp --dport 53 -j DROP 2>/dev/null
-    # Fire a query that will be blocked
+    iptables  -I OUTPUT -o "$IFACE" -p udp --dport 53 -j DROP 2>/dev/null
+    ip6tables -I OUTPUT -o "$IFACE" -p udp --dport 53 -j DROP 2>/dev/null
+    # Fire a query that will be blocked on both IPv4 and IPv6
     nslookup timeout-test-xb8.com > /dev/null 2>&1 &
     # Wait longer than default query_timeout (5s) + margin
     sleep 10
-    iptables -D OUTPUT -o "$IFACE" -p udp --dport 53 -j DROP 2>/dev/null
+    iptables  -D OUTPUT -o "$IFACE" -p udp --dport 53 -j DROP 2>/dev/null
+    ip6tables -D OUTPUT -o "$IFACE" -p udp --dport 53 -j DROP 2>/dev/null
     sleep 3
 
     TIMEOUT_CNT=$(tail -n +"$BEFORE" "$LOG" | grep "\[DNS_TIMEOUT\]" | wc -l | tr -d ' ')
