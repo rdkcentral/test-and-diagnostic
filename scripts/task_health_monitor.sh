@@ -478,27 +478,42 @@ self_heal_dual_cron()
 self_heal_sedaemon()
 {
     if [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
-         accessmgr=`pidof accessManager`
 
-         if [ "$kdftype" = "ECC" ]; then
-             ssadaemon=`pidof rdkssaecckdf`
-             daemon_service="rdkssaeccdaemon.service"
-             daemon_name="rdkssaecckdf"
-         else
-             ssadaemon=`pidof se05xd`
-             daemon_service="startse05xd.service"
-             daemon_name="se05xd"
-         fi
+    	if systemctl list-unit-files | grep -q "^accessmanager.service"; then
+        	accessmgr=$(pidof accessManager)
+        	accessmgr_supported=1
+    	else
+        	accessmgr_supported=0
+    	fi
 
-         if [[ -z "$ssadaemon" ]] || [[ -z "$accessmgr" ]]; then
-               echo_t "[RDKB_SELFHEAL] : Restarting accessmanager and $daemon_name"
-               t2CountNotify "SYS_SH_SERestart"
-               systemctl stop $daemon_service
-               systemctl stop accessmanager.service
-               systemctl start accessmanager.service
-               systemctl start $daemon_service
-         fi
-    fi
+    	if [ "$kdftype" = "ECC" ]; then
+        	ssadaemon=$(pidof rdkssaecckdf)
+        	daemon_service="rdkssaeccdaemon.service"
+        	daemon_name="rdkssaecckdf"
+    	else
+        	ssadaemon=$(pidof se05xd)
+        	daemon_service="startse05xd.service"
+        	daemon_name="se05xd"
+    	fi
+
+    	if [ -z "$ssadaemon" ] || ([ "$accessmgr_supported" -eq 1 ] && [ -z "$accessmgr" ]); then
+
+        	echo_t "[RDKB_SELFHEAL] : Restarting $daemon_name"		
+		
+			systemctl stop "$daemon_service"
+
+        	if [ "$accessmgr_supported" -eq 1 ]; then
+			    echo_t "[RDKB_SELFHEAL] : Restarting accessmanager"		
+            	systemctl stop accessmanager.service
+				systemctl start accessmanager.service
+				t2CountNotify "SYS_SH_SERestart"			
+	    	fi
+        	systemctl start "$daemon_service"
+			if [ "$accessmgr_supported" -eq 1 ]; then
+				t2CountNotify "SYS_SH_TEERestart"
+			fi
+    	fi
+	fi
 }
 
 xle_device_mode=0
