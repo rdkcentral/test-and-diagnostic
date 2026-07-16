@@ -32,12 +32,18 @@ typedef int T2ERROR;
 static int t2_event_d(const char *n, int v)    { (void)n;(void)v; return 0; }
 static int t2_event_s(const char *n, const char *v) { (void)n;(void)v; return 0; }
 
-/* pcap stubs */
+/* pcap type stubs — struct pcap_pkthdr must be a named struct for packet_cb */
 typedef void pcap_t;
-typedef struct { int caplen; struct timeval ts; } pcap_pkthdr;
+struct pcap_pkthdr { int caplen; struct timeval ts; };
 typedef unsigned char u_char;
 typedef unsigned int  u_int;
 typedef unsigned short u_short;
+struct bpf_program { int dummy; };
+#define PCAP_ERRBUF_SIZE      256
+#define PCAP_NETMASK_UNKNOWN  0
+#define PCAP_ERROR_BREAK      -2
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
 static pcap_t *pcap_open_live(const char*a,int b,int c,int d,char*e){(void)a;(void)b;(void)c;(void)d;(void)e;return NULL;}
 static int pcap_compile(pcap_t*a,void*b,const char*c,int d,unsigned int e){(void)a;(void)b;(void)c;(void)d;(void)e;return 0;}
 static int pcap_setfilter(pcap_t*a,void*b){(void)a;(void)b;return 0;}
@@ -46,9 +52,7 @@ static int pcap_setnonblock(pcap_t*a,int b,char*c){(void)a;(void)b;(void)c;retur
 static int pcap_dispatch(pcap_t*a,int b,void*c,u_char*d){(void)a;(void)b;(void)c;(void)d;return 0;}
 static void pcap_close(pcap_t*a){(void)a;}
 static const char*pcap_geterr(pcap_t*a){(void)a;return "";}
-#define PCAP_ERRBUF_SIZE 256
-#define PCAP_NETMASK_UNKNOWN 0
-#define PCAP_ERROR_BREAK -2
+#pragma GCC diagnostic pop
 struct bpf_program { int dummy; };
 
 /* Include DnsMonitor implementation */
