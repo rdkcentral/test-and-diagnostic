@@ -16,6 +16,7 @@
 
 IFACE="erouter0"
 LOG="/tmp/dnsmon_test.log"
+RESULTS_FILE="/tmp/dnsmon_results.txt"
 BINARY="DnsMonitor"
 REPORT_INTERVAL=30
 SLOW_THRESHOLD=500
@@ -50,8 +51,9 @@ check() {
         [ "$HTML_MODE" -eq 0 ] && printf "  \033[31m[FAIL]\033[0m %s  %s\n        Actual: %s\n" "$TC_ID" "$SCENARIO" "$ACTUAL"
     fi
 
-    # Append to results buffer (pipe-separated for HTML)
-    RESULTS="${RESULTS}${TC_ID}|${SUBJECT}|${SCENARIO}|${EXPECTED}|${ACTUAL}|${STATUS}\n"
+    # Append to results file (pipe-separated for HTML)
+    printf "%s|%s|%s|%s|%s|%s\n" \
+        "$TC_ID" "$SUBJECT" "$SCENARIO" "$EXPECTED" "$ACTUAL" "$STATUS" >> "$RESULTS_FILE"
 }
 
 assert_grep() {
@@ -75,7 +77,8 @@ get_field() {
 
 # ── Start DnsMonitor ─────────────────────────────────────────────────
 start_monitor() {
-    rm -f "$LOG"
+    rm -f "$LOG" "$RESULTS_FILE"
+    touch "$RESULTS_FILE"
     $BINARY -i "$IFACE" -r "$REPORT_INTERVAL" -s "$SLOW_THRESHOLD" -v \
         2>&1 >> "$LOG" &
     DNSMON_PID=$!
@@ -95,7 +98,7 @@ stop_monitor() {
 # ── Test sections ────────────────────────────────────────────────────
 
 test_startup() {
-    log "\n[1. Startup and Interface]"
+    printf "\n[1. Startup and Interface]\n"
     sleep 2
 
     ST=$(assert_grep "event=START" "$LOG")
@@ -114,7 +117,7 @@ test_startup() {
 }
 
 test_normal_queries() {
-    log "\n[2. Normal DNS Queries — A and AAAA]"
+    printf "\n[2. Normal DNS Queries - A and AAAA]\n"
     BEFORE=$(wc -l < "$LOG")
 
     nslookup www.google.com > /dev/null 2>&1
@@ -134,7 +137,7 @@ test_normal_queries() {
     check "2. Normal Query" \
           "Response log line contains latency_ms= field" \
           "latency_ms= present in [DNS_RESP_OK]" \
-          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_RESP_OK\]' | grep 'latency_ms=' | head -1 | grep -o 'latency_ms=[0-9]*')" \
+          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_RESP_OK\]' | grep 'latency_ms=' | head -n 1 | grep -o 'latency_ms=[0-9]*')" \
           "$ST"
 
     # Verify qname field
@@ -142,7 +145,7 @@ test_normal_queries() {
     check "2. Normal Query" \
           "Response log line contains qname= field" \
           "qname= present" \
-          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_RESP_OK\]' | grep -o 'qname=[^ ]*' | head -1)" \
+          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_RESP_OK\]' | grep -o 'qname=[^ ]*' | head -n 1)" \
           "$ST"
 
     # Verify server IP field
@@ -150,12 +153,12 @@ test_normal_queries() {
     check "2. Normal Query" \
           "Response log line contains server= (upstream DNS IP)" \
           "server= present" \
-          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_RESP_OK\]' | grep -o 'server=[^ ]*' | head -1)" \
+          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_RESP_OK\]' | grep -o 'server=[^ ]*' | head -n 1)" \
           "$ST"
 }
 
 test_nxdomain() {
-    log "\n[3. NXDOMAIN Failure Detection]"
+    printf "\n[3. NXDOMAIN Failure Detection]\n"
     BEFORE=$(wc -l < "$LOG")
 
     nslookup this-domain-does-not-exist-xb8test123.com > /dev/null 2>&1
@@ -165,26 +168,26 @@ test_nxdomain() {
     check "3. NXDOMAIN" \
           "Non-existent domain triggers [DNS_FAIL] log line" \
           "[DNS_FAIL] line in log" \
-          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_FAIL\]' | head -1 | cut -c1-80)" \
+          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_FAIL\]' | head -n 1 | cut -c1-80)" \
           "$ST"
 
     ST=$(tail -n +"$BEFORE" "$LOG" | grep "\[DNS_FAIL\]" | grep -q "NXDOMAIN" && echo PASS || echo FAIL)
     check "3. NXDOMAIN" \
           "[DNS_FAIL] contains rcode=3(NXDOMAIN)" \
           "rcode=3(NXDOMAIN) in [DNS_FAIL]" \
-          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_FAIL\]' | grep -o 'rcode=[^)]*)'| head -1)" \
+          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_FAIL\]' | grep -o 'rcode=[^)]*)'| head -n 1)" \
           "$ST"
 
     ST=$(tail -n +"$BEFORE" "$LOG" | grep "\[DNS_FAIL\]" | grep -q "latency_ms=" && echo PASS || echo FAIL)
     check "3. NXDOMAIN" \
           "NXDOMAIN response also records latency_ms" \
           "latency_ms= present even for failures" \
-          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_FAIL\]' | grep -o 'latency_ms=[0-9]*' | head -1)" \
+          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_FAIL\]' | grep -o 'latency_ms=[0-9]*' | head -n 1)" \
           "$ST"
 }
 
 test_multiple_domains() {
-    log "\n[4. Bulk Queries — Multiple Domains]"
+    printf "\n[4. Bulk Queries - Multiple Domains]\n"
     BEFORE=$(wc -l < "$LOG")
 
     for d in www.amazon.com www.youtube.com www.github.com www.microsoft.com; do
@@ -210,15 +213,14 @@ test_multiple_domains() {
 }
 
 test_ptr_lookup() {
-    log "\n[5. PTR Reverse Lookup]"
+    printf "\n[5. PTR Reverse Lookup]\n"
     BEFORE=$(wc -l < "$LOG")
 
-    # PTR lookup for Comcast DNS server — expected to succeed
     nslookup 75.75.75.75 > /dev/null 2>&1
     sleep 1
 
-    NEW=$(tail -n +"$BEFORE" "$LOG" | grep -c "\[DNS_RESP_OK\]\|\[DNS_FAIL\]" 2>/dev/null || echo 0)
-    [ "$NEW" -ge 1 ] && ST="PASS" || ST="FAIL"
+    NEW=$(tail -n +"$BEFORE" "$LOG" | grep -c "\[DNS_RESP_OK\]\|\[DNS_FAIL\]" 2>/dev/null | tr -d ' ')
+    [ "${NEW:-0}" -ge 1 ] && ST="PASS" || ST="FAIL"
     check "5. PTR Lookup" \
           "Reverse PTR lookup captured (in-addr.arpa query)" \
           "At least 1 response line for PTR" \
@@ -229,14 +231,15 @@ test_ptr_lookup() {
     check "5. PTR Lookup" \
           "PTR query type correctly identified as qtype=PTR" \
           "qtype=PTR in log" \
-          "$(tail -n +"$BEFORE" "$LOG" | grep 'qtype=PTR' | head -1 | grep -o 'qtype=PTR')" \
+          "$(tail -n +"$BEFORE" "$LOG" | grep 'qtype=PTR' | head -n 1 | grep -o 'qtype=PTR')" \
           "$ST"
 }
 
 test_no_slow_normal() {
-    log "\n[6. No Slow Queries Under Normal Conditions]"
-    # Under normal conditions with threshold=500ms, nothing should be slow
-    SLOW_COUNT=$(grep -c "\[DNS_SLOW\]" "$LOG" 2>/dev/null || echo 0)
+    printf "\n[6. No Slow Queries Under Normal Conditions]\n"
+    # Use wc -l instead of grep -c to avoid exit-code issues on busybox
+    SLOW_COUNT=$(grep "\[DNS_SLOW\]" "$LOG" 2>/dev/null | wc -l | tr -d ' ')
+    SLOW_COUNT=${SLOW_COUNT:-0}
     [ "$SLOW_COUNT" -eq 0 ] && ST="PASS" || ST="FAIL"
     check "6. Slow Detection" \
           "No [DNS_SLOW] lines under normal network conditions (threshold=${SLOW_THRESHOLD}ms)" \
@@ -246,12 +249,11 @@ test_no_slow_normal() {
 }
 
 test_timeout_detection() {
-    log "\n[7. DNS Timeout Detection]"
+    printf "\n[7. DNS Timeout Detection]\n"
 
-    # Check if iptables available
     if ! iptables -L OUTPUT > /dev/null 2>&1; then
         check "7. Timeout" \
-              "Block DNS and verify [DNS_TIMEOUT] — SKIPPED (no iptables)" \
+              "Block DNS and verify [DNS_TIMEOUT] - SKIPPED (no iptables)" \
               "[DNS_TIMEOUT] in log after blocking DNS" \
               "SKIPPED: iptables not available" \
               "PASS"
@@ -259,24 +261,25 @@ test_timeout_detection() {
     fi
 
     BEFORE=$(wc -l < "$LOG")
-    # Block outgoing DNS for 8 seconds (longer than default 5s timeout)
     iptables -I OUTPUT -o "$IFACE" -p udp --dport 53 -j DROP 2>/dev/null
+    # Fire a query that will be blocked
     nslookup timeout-test-xb8.com > /dev/null 2>&1 &
-    sleep 8
+    # Wait longer than default query_timeout (5s) + margin
+    sleep 10
     iptables -D OUTPUT -o "$IFACE" -p udp --dport 53 -j DROP 2>/dev/null
-    sleep 2
+    sleep 3
 
-    ST=$(tail -n +"$BEFORE" "$LOG" | grep -q "\[DNS_TIMEOUT\]" && echo PASS || echo FAIL)
+    TIMEOUT_CNT=$(tail -n +"$BEFORE" "$LOG" | grep "\[DNS_TIMEOUT\]" | wc -l | tr -d ' ')
+    [ "${TIMEOUT_CNT:-0}" -ge 1 ] && ST="PASS" || ST="FAIL"
     check "7. Timeout" \
           "Blocked DNS produces [DNS_TIMEOUT] after query_timeout seconds" \
-          "[DNS_TIMEOUT] in log" \
-          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_TIMEOUT\]' | head -1 | cut -c1-80)" \
+          "[DNS_TIMEOUT] count >= 1" \
+          "[DNS_TIMEOUT] count = $TIMEOUT_CNT" \
           "$ST"
 }
 
 test_summary_format() {
-    log "\n[8. Summary Format and Fields]"
-    # Force a summary by killing DnsMonitor (it emits final summary on SIGTERM)
+    printf "\n[8. Summary Format and Fields]\n"
     kill -TERM "$DNSMON_PID" 2>/dev/null
     sleep 3
 
@@ -369,7 +372,8 @@ td{padding:8px 12px;vertical-align:top;border-bottom:1px solid #e8ecf0;}
 </tr></thead><tbody>
 EOF
 
-    printf "%b" "$RESULTS" | while IFS='|' read -r id subj scen exp act status; do
+    # Read results from temp file for HTML
+    while IFS='|' read -r id subj scen exp act status; do
         [ -z "$id" ] && continue
         if [ "$status" = "PASS" ]; then
             printf "<tr><td class='tid'>%s</td><td class='subj'>%s</td><td>%s</td><td class='exp'>%s</td><td class='ok'>%s</td><td class='pass'>&#10003; PASS</td></tr>\n" \
@@ -378,7 +382,7 @@ EOF
             printf "<tr><td class='tid'>%s</td><td class='subj'>%s</td><td>%s</td><td class='exp'>%s</td><td class='err'>%s</td><td class='fail'>&#10007; FAIL</td></tr>\n" \
                 "$id" "$subj" "$scen" "$exp" "$act"
         fi
-    done
+    done < "$RESULTS_FILE"
 
     cat <<EOF
 </tbody></table></div>
