@@ -6,7 +6,7 @@
  *
  * Compile:
  *   gcc -std=c99 -DUNIT_TEST_DOCKER_SUPPORT -Wall \
- *       -I../../LatencyMeasurement/DnsMonitor \
+ *       -I../LatencyMeasurement/DnsMonitor \
  *       -o dns_monitor_test dns_monitor_standalone_test.c -lpthread
  *
  * Run:
@@ -14,7 +14,7 @@
  *   ./dns_monitor_test --html > DnsMonitor_TestReport.html
  */
 
-#define UNIT_TEST_DOCKER_SUPPORT
+/* UNIT_TEST_DOCKER_SUPPORT is passed via -D on the compile line */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

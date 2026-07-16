@@ -49,7 +49,9 @@
  *              [-s <slow_threshold_ms>] [-v]
  */
 
+#ifndef UNIT_TEST_DOCKER_SUPPORT
 #include <pcap.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
