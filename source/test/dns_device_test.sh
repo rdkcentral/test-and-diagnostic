@@ -280,6 +280,95 @@ test_timeout_detection() {
           "$ST"
 }
 
+test_excessive_dns() {
+    printf "\n[9. Excessive DNS Request Detection]\n"
+    BEFORE=$(wc -l < "$LOG")
+
+    # Fire 60 queries rapidly to exceed default flood threshold (50 qps)
+    i=0
+    while [ $i -lt 60 ]; do
+        nslookup flood-test-${i}.example.com > /dev/null 2>&1 &
+        i=$((i+1))
+    done
+    wait
+    sleep 3
+
+    FLOOD_CNT=$(tail -n +"$BEFORE" "$LOG" | grep "\[DNS_FLOOD\]" | wc -l | tr -d ' ')
+    [ "${FLOOD_CNT:-0}" -ge 1 ] && ST="PASS" || ST="FAIL"
+    check "9. Excessive DNS" \
+          "60 rapid queries triggers [DNS_FLOOD] (threshold=50 qps)" \
+          "[DNS_FLOOD] count >= 1" \
+          "[DNS_FLOOD] count = $FLOOD_CNT" \
+          "$ST"
+
+    ST=$(tail -n +"$BEFORE" "$LOG" | grep "\[DNS_FLOOD\]" | grep -q "qps=" && echo PASS || echo FAIL)
+    check "9. Excessive DNS" \
+          "[DNS_FLOOD] line contains qps= field" \
+          "qps= in [DNS_FLOOD]" \
+          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_FLOOD\]' | grep -o 'qps=[0-9]*' | head -n 1)" \
+          "$ST"
+
+    ST=$(tail -n +"$BEFORE" "$LOG" | grep "\[DNS_FLOOD\]" | grep -q "threshold_qps=" && echo PASS || echo FAIL)
+    check "9. Excessive DNS" \
+          "[DNS_FLOOD] line contains threshold_qps= field" \
+          "threshold_qps= in [DNS_FLOOD]" \
+          "$(tail -n +"$BEFORE" "$LOG" | grep '\[DNS_FLOOD\]' | grep -o 'threshold_qps=[0-9]*' | head -n 1)" \
+          "$ST"
+}
+
+test_slow_internet() {
+    printf "\n[10. Slow Internet / Network Degraded Detection]\n"
+
+    # Use the summary already captured; kill DnsMonitor first if still running
+    kill -TERM "$DNSMON_PID" 2>/dev/null; sleep 2
+    SUMMARY=$(grep "\[DNS_SUMMARY\]" "$LOG" | grep -v "event=" | tail -n 1)
+
+    # Under normal XB8 conditions (avg ~11ms), degrade_events must be 0
+    DEG=$(echo "$SUMMARY" | tr ' ' '\n' | grep "^degrade_events=" | cut -d= -f2)
+    [ "${DEG:-0}" -eq 0 ] && ST="PASS" || ST="FAIL"
+    check "10. Slow Internet" \
+          "No [NET_DEGRADED] under normal conditions (avg ~11ms << 300ms threshold)" \
+          "degrade_events=0" \
+          "degrade_events=${DEG:-0}" \
+          "$ST"
+
+    ST=$(echo "$SUMMARY" | grep -q "degrade_events=" && echo PASS || echo FAIL)
+    check "10. Slow Internet" \
+          "[DNS_SUMMARY] contains degrade_events= field" \
+          "degrade_events= present" \
+          "$(echo $SUMMARY | grep -o 'degrade_events=[0-9]*')" \
+          "$ST"
+
+    ST=$(echo "$SUMMARY" | grep -q "flood_events=" && echo PASS || echo FAIL)
+    check "10. Slow Internet" \
+          "[DNS_SUMMARY] contains flood_events= field" \
+          "flood_events= present" \
+          "$(echo $SUMMARY | grep -o 'flood_events=[0-9]*')" \
+          "$ST"
+
+    ST=$(echo "$SUMMARY" | grep -q "top_client=" && echo PASS || echo FAIL)
+    check "10. Slow Internet" \
+          "[DNS_SUMMARY] contains top_client= (highest query-volume client)" \
+          "top_client= present" \
+          "$(echo $SUMMARY | grep -o 'top_client=[^ ]*')" \
+          "$ST"
+
+    ST=$(echo "$SUMMARY" | grep -q "timeout_pct=" && echo PASS || echo FAIL)
+    check "10. Slow Internet" \
+          "[DNS_SUMMARY] contains timeout_pct= field" \
+          "timeout_pct= present" \
+          "$(echo $SUMMARY | grep -o 'timeout_pct=[0-9]*')" \
+          "$ST"
+
+    TO_PCT=$(echo "$SUMMARY" | tr ' ' '\n' | grep "^timeout_pct=" | cut -d= -f2)
+    [ "${TO_PCT:-0}" -eq 0 ] && ST="PASS" || ST="FAIL"
+    check "10. Slow Internet" \
+          "timeout_pct=0 under normal conditions" \
+          "timeout_pct=0" \
+          "timeout_pct=${TO_PCT:-0}" \
+          "$ST"
+}
+
 test_summary_format() {
     printf "\n[8. Summary Format and Fields]\n"
     kill -TERM "$DNSMON_PID" 2>/dev/null
@@ -421,6 +510,8 @@ test_multiple_domains
 test_ptr_lookup
 test_no_slow_normal
 test_timeout_detection
+test_excessive_dns
+test_slow_internet
 test_summary_format
 
 if [ "$HTML_MODE" -eq 1 ]; then

@@ -74,10 +74,14 @@
 #define DFLT_REPORT_SEC      300
 #define DFLT_QUERY_TIMEOUT   5
 #define DFLT_SLOW_THRESH_MS  200
+#define DFLT_FLOOD_QPS       50    /* queries/sec per client before [DNS_FLOOD]  */
+#define DFLT_DEGRADE_AVG_MS  300   /* avg latency (ms) above which = degraded    */
+#define DFLT_DEGRADE_TO_PCT  15    /* % timeouts above which = degraded          */
 #define MAX_PENDING          4096
 #define DNS_HASH_BUCKETS     4096   /* must be power-of-2 */
 #define MAX_QNAME_LEN        256
 #define MAX_IP_STR           INET6_ADDRSTRLEN
+#define MAX_CLIENT_TRACK     32    /* per-client query rate tracker slots        */
 
 /* ------------------------------------------------------------------ */
 /* IP / UDP / DNS header layouts (packed, no system-header dependency) */
@@ -311,6 +315,10 @@ typedef struct {
     uint64_t refused;
     uint64_t other_rcode;
     uint64_t timeout;
+    /* Excessive DNS request detection */
+    uint64_t flood_events;       /* times a client exceeded flood_qps threshold */
+    /* Slow internet / degraded network detection */
+    uint64_t degrade_events;     /* intervals where network was degraded        */
 } stats_t;
 
 static stats_t g_stats;
@@ -336,6 +344,44 @@ static void server_bump_fail(const char *server_ip)
     }
 }
 
+/* Per-client query rate tracker (for excessive DNS / flood detection) */
+typedef struct { char ip[MAX_IP_STR]; uint64_t query_count; } client_stat_t;
+static client_stat_t g_clients[MAX_CLIENT_TRACK];
+static int           g_client_count = 0;
+static time_t        g_interval_start = 0;
+
+static uint64_t client_bump(const char *client_ip)
+{
+    for (int i = 0; i < g_client_count; i++) {
+        if (strncmp(g_clients[i].ip, client_ip, MAX_IP_STR) == 0) {
+            g_clients[i].query_count++;
+            return g_clients[i].query_count;
+        }
+    }
+    if (g_client_count < MAX_CLIENT_TRACK) {
+        strncpy(g_clients[g_client_count].ip, client_ip, MAX_IP_STR - 1);
+        g_clients[g_client_count].query_count = 1;
+        g_client_count++;
+        return 1;
+    }
+    return 0; /* table full */
+}
+
+/* Return IP of the client with most queries (for telemetry) */
+static void top_client(char *out_ip, uint64_t *out_count)
+{
+    uint64_t max = 0;
+    out_ip[0] = '\0';
+    *out_count = 0;
+    for (int i = 0; i < g_client_count; i++) {
+        if (g_clients[i].query_count > max) {
+            max = g_clients[i].query_count;
+            strncpy(out_ip, g_clients[i].ip, MAX_IP_STR - 1);
+            *out_count = max;
+        }
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Global config (set once at startup, then read-only)                 */
 /* ------------------------------------------------------------------ */
@@ -344,6 +390,9 @@ static struct {
     int  report_sec;
     int  query_timeout;
     int  slow_thresh_ms;
+    int  flood_qps;        /* per-client queries/sec threshold for flood alert */
+    int  degrade_avg_ms;   /* avg latency threshold for degraded internet alert */
+    int  degrade_to_pct;   /* timeout % threshold for degraded internet alert  */
     int  verbose;
 } g_cfg;
 
@@ -386,6 +435,57 @@ static void report_and_reset(void)
     uint64_t avg_ms = g_stats.success_count
                     ? (g_stats.total_latency_ms / g_stats.success_count) : 0;
 
+    /* ── Excessive DNS detection: check top client QPS ── */
+    char   top_ip[MAX_IP_STR] = "";
+    uint64_t top_cnt = 0;
+    top_client(top_ip, &top_cnt);
+    uint64_t elapsed_sec = (uint64_t)(now_tv.tv_sec - g_interval_start);
+    if (elapsed_sec == 0) elapsed_sec = 1;
+    uint64_t top_qps = top_cnt / elapsed_sec;
+    if (top_qps >= (uint64_t)g_cfg.flood_qps && top_ip[0] != '\0') {
+        g_stats.flood_events++;
+        fprintf(stdout,
+                "[DNS_FLOOD] ts=%s iface=%s"
+                " client=%s queries=%llu elapsed_sec=%llu qps=%llu"
+                " threshold_qps=%d\n",
+                iso_ts(&now_tv), g_cfg.iface,
+                top_ip,
+                (unsigned long long)top_cnt,
+                (unsigned long long)elapsed_sec,
+                (unsigned long long)top_qps,
+                g_cfg.flood_qps);
+        fflush(stdout);
+    }
+
+    /* ── Slow internet / degraded network detection ── */
+    uint64_t timeout_pct = (g_stats.query_count > 0)
+                         ? (g_stats.timeout * 100 / g_stats.query_count) : 0;
+    int high_latency  = (g_stats.success_count >= 5 &&
+                         avg_ms  >= (uint64_t)g_cfg.degrade_avg_ms);
+    int high_timeouts = (g_stats.query_count >= 10 &&
+                         timeout_pct >= (uint64_t)g_cfg.degrade_to_pct);
+    int high_servfail = (g_stats.query_count >= 5 &&
+                         g_stats.servfail * 100 / g_stats.query_count >= 20);
+    if (high_latency || high_timeouts || high_servfail) {
+        g_stats.degrade_events++;
+        char reason[128];
+        snprintf(reason, sizeof(reason), "%s%s%s",
+                 high_latency  ? "high_latency " : "",
+                 high_timeouts ? "high_timeouts " : "",
+                 high_servfail ? "high_servfail" : "");
+        fprintf(stdout,
+                "[NET_DEGRADED] ts=%s iface=%s"
+                " reason=%s avg_ms=%llu timeout_pct=%llu"
+                " servfail=%llu queries=%llu\n",
+                iso_ts(&now_tv), g_cfg.iface,
+                reason,
+                (unsigned long long)avg_ms,
+                (unsigned long long)timeout_pct,
+                (unsigned long long)g_stats.servfail,
+                (unsigned long long)g_stats.query_count);
+        fflush(stdout);
+    }
+
     /* Build per-server failure string for the summary line */
     char svr_buf[256] = "";
     for (int i = 0; i < g_server_count; i++) {
@@ -403,8 +503,10 @@ static void report_and_reset(void)
             " queries=%llu success=%llu slow=%llu"
             " fail_total=%llu"
             " nxdomain=%llu servfail=%llu refused=%llu"
-            " other_rcode=%llu timeout=%llu"
+            " other_rcode=%llu timeout=%llu timeout_pct=%llu"
             " avg_ms=%llu max_ms=%llu"
+            " flood_events=%llu degrade_events=%llu"
+            " top_client=%s:%llu"
             " server_fails=[%s]\n",
             iso_ts(&now_tv), g_cfg.iface,
             (unsigned long long)g_stats.query_count,
@@ -416,8 +518,13 @@ static void report_and_reset(void)
             (unsigned long long)g_stats.refused,
             (unsigned long long)g_stats.other_rcode,
             (unsigned long long)g_stats.timeout,
+            (unsigned long long)timeout_pct,
             (unsigned long long)avg_ms,
             (unsigned long long)g_stats.max_latency_ms,
+            (unsigned long long)g_stats.flood_events,
+            (unsigned long long)g_stats.degrade_events,
+            top_ip[0] ? top_ip : "none",
+            (unsigned long long)top_cnt,
             svr_buf);
     fflush(stdout);
 
@@ -425,10 +532,20 @@ static void report_and_reset(void)
     t2_event_d("NET_DNS_PCAP_QUERY_CNT_split",        (int)g_stats.query_count);
     t2_event_d("NET_DNS_PCAP_SLOW_CNT_split",         (int)g_stats.slow_count);
     t2_event_d("NET_DNS_PCAP_FAIL_CNT_split",         (int)fail_total);
+    t2_event_d("NET_DNS_PCAP_TIMEOUT_RATE_pct_split", (int)timeout_pct);
+    t2_event_d("NET_DNS_PCAP_FLOOD_CNT_split",        (int)g_stats.flood_events);
+    t2_event_d("NET_DNS_PCAP_DEGRADED_split",
+               (g_stats.degrade_events > 0) ? 1 : 0);
     if (g_stats.success_count > 0) {
         t2_event_d("NET_DNS_PCAP_LATENCY_AVG_ms_split", (int)avg_ms);
         t2_event_d("NET_DNS_PCAP_LATENCY_MAX_ms_split",
                    (int)g_stats.max_latency_ms);
+    }
+    if (top_ip[0] != '\0') {
+        char top_str[MAX_IP_STR + 32];
+        snprintf(top_str, sizeof(top_str), "%s:%llu",
+                 top_ip, (unsigned long long)top_cnt);
+        t2_event_s("NET_DNS_PCAP_TOP_CLIENT_split", top_str);
     }
     if (fail_total > 0) {
         char fail_str[192];
@@ -445,7 +562,10 @@ static void report_and_reset(void)
 
     memset(&g_stats,  0, sizeof(g_stats));
     memset(g_servers, 0, sizeof(g_servers));
-    g_server_count = 0;
+    memset(g_clients, 0, sizeof(g_clients));
+    g_server_count   = 0;
+    g_client_count   = 0;
+    g_interval_start = now_tv.tv_sec;
 }
 
 /* ------------------------------------------------------------------ */
@@ -554,6 +674,25 @@ static void packet_cb(u_char *user,
         /* ── Outgoing DNS query ── */
         g_stats.query_count++;
 
+        /* Track per-client query count for flood detection */
+        uint64_t cli_cnt = client_bump(client_ip);
+        time_t   elapsed = pkt_ts.tv_sec - g_interval_start;
+        if (elapsed <= 0) elapsed = 1;
+        uint64_t cli_qps = cli_cnt / (uint64_t)elapsed;
+        if (cli_qps >= (uint64_t)g_cfg.flood_qps) {
+            fprintf(stdout,
+                    "[DNS_FLOOD] ts=%s iface=%s"
+                    " client=%s queries=%llu elapsed_sec=%ld qps=%llu"
+                    " threshold_qps=%d\n",
+                    iso_ts(&pkt_ts), g_cfg.iface,
+                    client_ip,
+                    (unsigned long long)cli_cnt,
+                    (long)elapsed,
+                    (unsigned long long)cli_qps,
+                    g_cfg.flood_qps);
+            fflush(stdout);
+        }
+
         if (g_cfg.verbose) {
             fprintf(stdout,
                     "[DNS_QUERY] ts=%s iface=%s"
@@ -656,14 +795,19 @@ int main(int argc, char *argv[])
     g_cfg.report_sec     = DFLT_REPORT_SEC;
     g_cfg.query_timeout  = DFLT_QUERY_TIMEOUT;
     g_cfg.slow_thresh_ms = DFLT_SLOW_THRESH_MS;
+    g_cfg.flood_qps      = DFLT_FLOOD_QPS;
+    g_cfg.degrade_avg_ms = DFLT_DEGRADE_AVG_MS;
+    g_cfg.degrade_to_pct = DFLT_DEGRADE_TO_PCT;
     g_cfg.verbose        = 0;
 
-    while ((opt = getopt(argc, argv, "i:r:t:s:vh")) != -1) {
+    while ((opt = getopt(argc, argv, "i:r:t:s:f:d:vh")) != -1) {
         switch (opt) {
             case 'i': strncpy(g_cfg.iface, optarg, sizeof(g_cfg.iface) - 1); break;
             case 'r': g_cfg.report_sec     = atoi(optarg); break;
             case 't': g_cfg.query_timeout  = atoi(optarg); break;
             case 's': g_cfg.slow_thresh_ms = atoi(optarg); break;
+            case 'f': g_cfg.flood_qps      = atoi(optarg); break;
+            case 'd': g_cfg.degrade_avg_ms = atoi(optarg); break;
             case 'v': g_cfg.verbose        = 1;            break;
             default:  print_usage(argv[0]); return 1;
         }
@@ -713,6 +857,8 @@ int main(int argc, char *argv[])
     memset(g_table,   0, sizeof(g_table));
     memset(&g_stats,  0, sizeof(g_stats));
     memset(g_servers, 0, sizeof(g_servers));
+    memset(g_clients, 0, sizeof(g_clients));
+    g_interval_start = time(NULL);
 
     struct timeval now_tv;
     gettimeofday(&now_tv, NULL);
