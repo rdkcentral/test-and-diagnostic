@@ -111,7 +111,7 @@ case $BOX_TYPE in
     "XB6") SELFHEAL_TYPE="SYSTEMD";;
     "XF3") SELFHEAL_TYPE="SYSTEMD";;
     "TCCBR") SELFHEAL_TYPE="TCCBR";;
-    "pi"|"rpi"|"bpi") SELFHEAL_TYPE="BASE";;  # TBD?!
+    "pi"|"rpi"|"bpi"|"genericarm") SELFHEAL_TYPE="BASE";;  # TBD?!
     "HUB4") SELFHEAL_TYPE="SYSTEMD";;
     "SR300") SELFHEAL_TYPE="SYSTEMD";;
     "SE501") SELFHEAL_TYPE="SYSTEMD";;
@@ -1265,7 +1265,7 @@ case $SELFHEAL_TYPE in
 
         # Checking XdnsSsp PID
         XDNS_PID=$(busybox pidof CcspXdnsSsp)
-        if [ "$XDNS_PID" = "" ] && [ "$BOX_TYPE" != "bpi" ]; then
+        if [ "$XDNS_PID" = "" ] && [ "$BOX_TYPE" != "bpi" ] && [ "$BOX_TYPE" != "genericarm" ]; then
             echo_t "RDKB_PROCESS_CRASHED : CcspXdnsSsp_process is not running, need restart"
             resetNeeded xdns CcspXdnsSsp
 
