@@ -644,6 +644,9 @@ static void print_usage(const char *prog)
         prog, DFLT_REPORT_SEC, DFLT_QUERY_TIMEOUT, DFLT_SLOW_THRESH_MS);
 }
 
+/* In UNIT_TEST_DOCKER_SUPPORT mode main() is excluded so the test binary
+ * can link this file directly and call the internal functions. */
+#ifndef UNIT_TEST_DOCKER_SUPPORT
 int main(int argc, char *argv[])
 {
     char errbuf[PCAP_ERRBUF_SIZE];
@@ -750,3 +753,4 @@ int main(int argc, char *argv[])
             iso_ts(&now_tv), g_cfg.iface);
     return 0;
 }
+#endif /* UNIT_TEST_DOCKER_SUPPORT */

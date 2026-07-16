@@ -45,10 +45,12 @@ CcspTandD_Dml_Test_gtest_bin_CPPFLAGS = -I$(PKG_CONFIG_SYSROOT_DIR)$(includedir)
                                   -I$(top_srcdir)/source/dmltad \
                                   -I$(top_srcdir)/source/TandDSsp \
                                   -I$(top_srcdir)/source/xle_selfheal \
+                                  -I$(top_srcdir)/source/LatencyMeasurement/DnsMonitor \
                                   -DCORE_NET_LIB \
                                   -DUNIT_TEST_DOCKER_SUPPORT 
 CcspTandD_Dml_Test_gtest_bin_SOURCES = CcspTandD_IP_DmlTest.cpp \
                                   CcspTandD_DNS_DmlTest.cpp  \
+                                  CcspTandD_DnsMonitor_Test.cpp \
                                   CcspTandDSelfhealDmlTest.cpp  \
                                   WanConnectivityCheckTest.cpp \
                                   CosaTandD_Logbackup_DmlTest.cpp \
