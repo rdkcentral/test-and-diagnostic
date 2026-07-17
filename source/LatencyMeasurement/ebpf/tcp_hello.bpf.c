@@ -103,7 +103,7 @@ struct bpf_map_def SEC("maps") synack_states = {
  */
 struct bpf_map_def SEC("maps") rtt_events = {
     .type        = BPF_MAP_TYPE_RINGBUF,
-    .max_entries = 1 * 1024 * 1024,  /* 1 MB ring; power-of-2, multiple of page size */
+    .max_entries = 4 * 1024 * 1024,  /* 4 MB ring; power-of-2, multiple of page size */
 };
 
 /* ---- IPv4 forwarding kprobe -------------------------------------------- */
