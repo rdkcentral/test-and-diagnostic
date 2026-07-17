@@ -22,7 +22,7 @@ IFACE="brlan0"                   # LAN bridge — captures LAN client queries
 CLIENT_IP="10.0.0.58"            # Latitude-E5470 connected to XB8 WiFi/LAN
 CLIENT_USER="rdkb-corenw"        # SSH username on Latitude
 CLIENT_PASS="rdkbdev"            # SSH password on Latitude (used only for key setup)
-CLIENT_KEY="/tmp/xb8_test_key"   # SSH private key generated on XB8
+CLIENT_KEY="/tmp/xb8_key"        # SSH private key generated on XB8 with dropbearkey
 LOG="/tmp/dnsmon_client_test.log" # DnsMonitor output file
 RESULTS_FILE="/tmp/dns_results.txt"
 
@@ -41,15 +41,12 @@ PASS=0; FAIL=0; TOTAL=0
 
 # ─────────────────────────── Helper functions ────────────────────────────
 
-# Run a command on the LAN client via SSH (key-based, non-interactive)
+# Run a command on the LAN client via SSH (key-based, dropbear-compatible)
+# Dropbear on XB8 does NOT support -o options. Only -i is needed.
+# Known_hosts is pre-populated in the startup section below.
 # Usage: run_on_client "command"
-# Requires: /tmp/xb8_test_key (generated once — see setup instructions)
 run_on_client() {
-    ssh -i "$CLIENT_KEY" \
-        -o StrictHostKeyChecking=no \
-        -o ConnectTimeout=5 \
-        -o BatchMode=yes \
-        "${CLIENT_USER}@${CLIENT_IP}" "$1" 2>/dev/null
+    ssh -i "$CLIENT_KEY" "${CLIENT_USER}@${CLIENT_IP}" "$1" 2>/dev/null
 }
 
 # Emit a test result line
@@ -86,18 +83,30 @@ grep_since()  { tail -n +"$1" "$LOG" | grep -q "$2" 2>/dev/null && echo PASS || 
     printf "============================================================\n"
 }
 
+# ── Pre-populate known_hosts so SSH never prompts interactively ───────
+# Dropbear on XB8 doesn't persist known_hosts across runs reliably.
+# We extract the host key from the live SSH handshake and store it.
+mkdir -p /root/.ssh
+# Remove stale entry and re-add fresh
+grep -v "^$CLIENT_IP " /root/.ssh/known_hosts > /tmp/kh_tmp 2>/dev/null
+mv /tmp/kh_tmp /root/.ssh/known_hosts 2>/dev/null
+# Connect once accepting key (-y = auto-yes in some dropbear builds)
+# then capture the stored key
+ssh -i "$CLIENT_KEY" -y "${CLIENT_USER}@${CLIENT_IP}" "exit" > /dev/null 2>&1
+# If -y not supported, try adding key via ssh-keyscan if available
+if ! grep -q "$CLIENT_IP" /root/.ssh/known_hosts 2>/dev/null; then
+    ssh-keyscan "$CLIENT_IP" >> /root/.ssh/known_hosts 2>/dev/null
+fi
+
 # Verify client is reachable
 if ! run_on_client "echo ok" | grep -q "ok"; then
-    printf "\nERROR: Cannot SSH to client %s using key %s\n" "$CLIENT_IP" "$CLIENT_KEY"
-    printf "Run this one-time setup to create and install the SSH key:\n\n"
-    printf "  On XB8:\n"
-    printf "    ssh-keygen -t rsa -b 2048 -f %s -N ''\n" "$CLIENT_KEY"
-    printf "    cat %s.pub\n\n" "$CLIENT_KEY"
-    printf "  On Latitude (ssh rdkb-corenw@%s, pass: rdkbdev):\n" "$CLIENT_IP"
-    printf "    mkdir -p ~/.ssh && chmod 700 ~/.ssh\n"
-    printf "    echo \"<paste pub key here>\" >> ~/.ssh/authorized_keys\n"
-    printf "    chmod 600 ~/.ssh/authorized_keys\n\n"
-    printf "  Then verify: ssh -i %s rdkb-corenw@%s 'echo ok'\n" "$CLIENT_KEY" "$CLIENT_IP"
+    printf "\nERROR: Cannot SSH to client %s\n" "$CLIENT_IP"
+    printf "Ensure these are done once on XB8:\n"
+    printf "  1. dropbearkey -t rsa -f /tmp/xb8_key\n"
+    printf "  2. dropbearkey -y -f /tmp/xb8_key | grep ssh-rsa > /tmp/xb8_key.pub\n"
+    printf "  3. SSH to client and add /tmp/xb8_key.pub to ~/.ssh/authorized_keys\n"
+    printf "  4. Run: ssh -i /tmp/xb8_key -y %s@%s 'echo ok'\n" \
+           "$CLIENT_USER" "$CLIENT_IP"
     exit 1
 fi
 
