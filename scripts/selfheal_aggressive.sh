@@ -119,7 +119,7 @@ Dhcpv6_Client_restart ()
             if [ -f /tmp/dhcpmgr_initialized ]; then
                 sysevent set dhcpv6_client-stop
             else
-                if [ "$BOX_TYPE" = "genericarm" ] ;then
+                if [ "$BOX_TYPE" = "genericarm" ]; then
                     $DHCPV6_HANDLER dhcpv6_client-stop
                 else
                     $DHCPV6_HANDLER dhcpv6_client_service_disable
@@ -129,7 +129,7 @@ Dhcpv6_Client_restart ()
             if [ -f /tmp/dhcpmgr_initialized ]; then
                 sysevent set dhcpv6_client-start
             else
-                if [ "$BOX_TYPE" = "genericarm" ] ;then
+                if [ "$BOX_TYPE" = "genericarm" ]; then
                     $DHCPV6_HANDLER dhcpv6_client-start
                 else
 		    $DHCPV6_HANDLER dhcpv6_client_service_enable
@@ -845,7 +845,7 @@ self_heal_dibbler_server()
                                     if [ -f /tmp/dhcpmgr_initialized ]; then
                                         sysevent set dhcpv6_client-stop
                                     else
-                                        if [ "$BOX_TYPE" = "genericarm" ] ;then
+                                        if [ "$BOX_TYPE" = "genericarm" ]; then
 					    $DHCPV6_HANDLER dhcpv6_client-stop
                                     else
 					    $DHCPV6_HANDLER dhcpv6_client_service_disable
@@ -860,7 +860,7 @@ self_heal_dibbler_server()
                                     if [ -f /tmp/dhcpmgr_initialized ]; then
                                         sysevent set dhcpv6_client-start
                                     else
-                                        if [ "$BOX_TYPE" = "genericarm" ] ;then
+                                        if [ "$BOX_TYPE" = "genericarm" ]; then
 					    $DHCPV6_HANDLER dhcpv6_client-start
 				        else
 					    $DHCPV6_HANDLER dhcpv6_client_service_enable
@@ -1020,7 +1020,7 @@ self_heal_dhcp_clients()
                             if [ -f /tmp/dhcpmgr_initialized ]; then
                                 sysevent set dhcpv6_client-stop
                             else
-                                if [ "$BOX_TYPE" = "genericarm" ] ;then
+                                if [ "$BOX_TYPE" = "genericarm" ]; then
 				    $DHCPV6_HANDLER dhcpv6_client-stop
 			        else
                                     $DHCPV6_HANDLER dhcpv6_client_service_disable
