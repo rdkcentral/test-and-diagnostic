@@ -44,9 +44,11 @@ PASS=0; FAIL=0; TOTAL=0
 # Run a command on the LAN client via SSH (key-based, dropbear-compatible)
 # Dropbear on XB8 does NOT support -o options. Only -i is needed.
 # Known_hosts is pre-populated in the startup section below.
+# HOME=/tmp ensures dropbear reads/writes /tmp/.ssh/known_hosts
+# (XB8 has read-only /root filesystem)
 # Usage: run_on_client "command"
 run_on_client() {
-    ssh -i "$CLIENT_KEY" "${CLIENT_USER}@${CLIENT_IP}" "$1" 2>/dev/null
+    HOME=/tmp ssh -i "$CLIENT_KEY" "${CLIENT_USER}@${CLIENT_IP}" "$1" 2>/dev/null
 }
 
 # Emit a test result line
@@ -84,18 +86,17 @@ grep_since()  { tail -n +"$1" "$LOG" | grep -q "$2" 2>/dev/null && echo PASS || 
 }
 
 # ── Pre-populate known_hosts so SSH never prompts interactively ───────
-# Dropbear on XB8 doesn't persist known_hosts across runs reliably.
-# We extract the host key from the live SSH handshake and store it.
-mkdir -p /root/.ssh
+# XB8 has a read-only /root filesystem — use /tmp/.ssh instead.
+# HOME=/tmp makes dropbear read/write /tmp/.ssh/known_hosts.
+mkdir -p /tmp/.ssh
 # Remove stale entry and re-add fresh
-grep -v "^$CLIENT_IP " /root/.ssh/known_hosts > /tmp/kh_tmp 2>/dev/null
-mv /tmp/kh_tmp /root/.ssh/known_hosts 2>/dev/null
-# Connect once accepting key (-y = auto-yes in some dropbear builds)
-# then capture the stored key
-ssh -i "$CLIENT_KEY" -y "${CLIENT_USER}@${CLIENT_IP}" "exit" > /dev/null 2>&1
-# If -y not supported, try adding key via ssh-keyscan if available
-if ! grep -q "$CLIENT_IP" /root/.ssh/known_hosts 2>/dev/null; then
-    ssh-keyscan "$CLIENT_IP" >> /root/.ssh/known_hosts 2>/dev/null
+grep -v "^$CLIENT_IP " /tmp/.ssh/known_hosts > /tmp/kh_tmp 2>/dev/null
+mv /tmp/kh_tmp /tmp/.ssh/known_hosts 2>/dev/null
+# Connect once with -y flag (auto-accept host key) to populate known_hosts
+HOME=/tmp ssh -i "$CLIENT_KEY" -y "${CLIENT_USER}@${CLIENT_IP}" "exit" > /dev/null 2>&1
+# Fallback: use ssh-keyscan if -y flag is not supported
+if ! grep -q "$CLIENT_IP" /tmp/.ssh/known_hosts 2>/dev/null; then
+    ssh-keyscan "$CLIENT_IP" >> /tmp/.ssh/known_hosts 2>/dev/null
 fi
 
 # Verify client is reachable
