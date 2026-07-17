@@ -1020,11 +1020,7 @@ self_heal_dhcp_clients()
                             if [ -f /tmp/dhcpmgr_initialized ]; then
                                 sysevent set dhcpv6_client-stop
                             else
-                                if [ "$BOX_TYPE" = "genericarm" ]; then
-				    $DHCPV6_HANDLER dhcpv6_client-stop
-			        else
                                     $DHCPV6_HANDLER dhcpv6_client_service_disable
-                                fi
                             fi
                         fi
                     fi
