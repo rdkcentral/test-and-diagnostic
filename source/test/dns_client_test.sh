@@ -21,7 +21,8 @@
 IFACE="brlan0"                   # LAN bridge — captures LAN client queries
 CLIENT_IP="10.0.0.58"            # Latitude-E5470 connected to XB8 WiFi/LAN
 CLIENT_USER="rdkb-corenw"        # SSH username on Latitude
-CLIENT_PASS="rdkbdev"            # SSH password on Latitude
+CLIENT_PASS="rdkbdev"            # SSH password on Latitude (used only for key setup)
+CLIENT_KEY="/tmp/xb8_test_key"   # SSH private key generated on XB8
 LOG="/tmp/dnsmon_client_test.log" # DnsMonitor output file
 RESULTS_FILE="/tmp/dns_results.txt"
 
@@ -40,13 +41,14 @@ PASS=0; FAIL=0; TOTAL=0
 
 # ─────────────────────────── Helper functions ────────────────────────────
 
-# Run a command on the LAN client via SSH (non-interactive)
+# Run a command on the LAN client via SSH (key-based, non-interactive)
 # Usage: run_on_client "command"
+# Requires: /tmp/xb8_test_key (generated once — see setup instructions)
 run_on_client() {
-    # sshpass is not available on XB8; use ssh with StrictHostKeyChecking=no
-    # and expect-like approach via -o BatchMode=no
-    ssh -o StrictHostKeyChecking=no \
+    ssh -i "$CLIENT_KEY" \
+        -o StrictHostKeyChecking=no \
         -o ConnectTimeout=5 \
+        -o BatchMode=yes \
         "${CLIENT_USER}@${CLIENT_IP}" "$1" 2>/dev/null
 }
 
@@ -86,7 +88,16 @@ grep_since()  { tail -n +"$1" "$LOG" | grep -q "$2" 2>/dev/null && echo PASS || 
 
 # Verify client is reachable
 if ! run_on_client "echo ok" | grep -q "ok"; then
-    printf "ERROR: Cannot SSH to client %s. Check connectivity.\n" "$CLIENT_IP"
+    printf "\nERROR: Cannot SSH to client %s using key %s\n" "$CLIENT_IP" "$CLIENT_KEY"
+    printf "Run this one-time setup to create and install the SSH key:\n\n"
+    printf "  On XB8:\n"
+    printf "    ssh-keygen -t rsa -b 2048 -f %s -N ''\n" "$CLIENT_KEY"
+    printf "    cat %s.pub\n\n" "$CLIENT_KEY"
+    printf "  On Latitude (ssh rdkb-corenw@%s, pass: rdkbdev):\n" "$CLIENT_IP"
+    printf "    mkdir -p ~/.ssh && chmod 700 ~/.ssh\n"
+    printf "    echo \"<paste pub key here>\" >> ~/.ssh/authorized_keys\n"
+    printf "    chmod 600 ~/.ssh/authorized_keys\n\n"
+    printf "  Then verify: ssh -i %s rdkb-corenw@%s 'echo ok'\n" "$CLIENT_KEY" "$CLIENT_IP"
     exit 1
 fi
 
