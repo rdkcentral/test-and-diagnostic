@@ -344,43 +344,47 @@ static void server_bump_fail(const char *server_ip)
     }
 }
 
-/* Per-client query rate tracker (for excessive DNS / flood detection) */
-typedef struct { char ip[MAX_IP_STR]; uint64_t query_count; } client_stat_t;
+/* Per-client query rate tracker — includes 1-second burst window for flood detection */
+typedef struct {
+    char     ip[MAX_IP_STR];
+    uint64_t query_count;          /* total queries since interval start      */
+    uint64_t burst_count;          /* queries in current 1-second window      */
+    time_t   burst_window_start;   /* start of the 1-second burst window      */
+} client_stat_t;
 static client_stat_t g_clients[MAX_CLIENT_TRACK];
 static int           g_client_count = 0;
 static time_t        g_interval_start = 0;
 
+/* Returns the current 1-second burst count for the client.
+ * Resets the window when a new second begins. */
 static uint64_t client_bump(const char *client_ip)
 {
+    time_t now_sec = time(NULL);
     for (int i = 0; i < g_client_count; i++) {
         if (strncmp(g_clients[i].ip, client_ip, MAX_IP_STR) == 0) {
             g_clients[i].query_count++;
-            return g_clients[i].query_count;
+            /* Slide the window if a new second has started */
+            if (now_sec != g_clients[i].burst_window_start) {
+                g_clients[i].burst_count = 1;
+                g_clients[i].burst_window_start = now_sec;
+            } else {
+                g_clients[i].burst_count++;
+            }
+            return g_clients[i].burst_count;
         }
     }
     if (g_client_count < MAX_CLIENT_TRACK) {
         strncpy(g_clients[g_client_count].ip, client_ip, MAX_IP_STR - 1);
-        g_clients[g_client_count].query_count = 1;
+        g_clients[g_client_count].query_count       = 1;
+        g_clients[g_client_count].burst_count       = 1;
+        g_clients[g_client_count].burst_window_start = now_sec;
         g_client_count++;
         return 1;
     }
     return 0; /* table full */
 }
 
-/* Return IP of the client with most queries (for telemetry) */
-static void top_client(char *out_ip, uint64_t *out_count)
-{
-    uint64_t max = 0;
-    out_ip[0] = '\0';
-    *out_count = 0;
-    for (int i = 0; i < g_client_count; i++) {
-        if (g_clients[i].query_count > max) {
-            max = g_clients[i].query_count;
-            strncpy(out_ip, g_clients[i].ip, MAX_IP_STR - 1);
-            *out_count = max;
-        }
-    }
-}
+/* Return IP of the client with most queries (for telemetry) */\nstatic void top_client(char *out_ip, uint64_t *out_count)\n{\n    uint64_t max = 0;\n    out_ip[0] = '\\0';\n    *out_count = 0;\n    for (int i = 0; i < g_client_count; i++) {\n        if (g_clients[i].query_count > max) {\n            max = g_clients[i].query_count;\n            strncpy(out_ip, g_clients[i].ip, MAX_IP_STR - 1);\n            *out_count = max;\n        }\n    }\n}
 
 /* ------------------------------------------------------------------ */
 /* Global config (set once at startup, then read-only)                 */
@@ -435,24 +439,26 @@ static void report_and_reset(void)
     uint64_t avg_ms = g_stats.success_count
                     ? (g_stats.total_latency_ms / g_stats.success_count) : 0;
 
-    /* ── Excessive DNS detection: check top client QPS ── */
+    /* ── Excessive DNS detection: peak 1-second burst across all clients ── */
     char   top_ip[MAX_IP_STR] = "";
     uint64_t top_cnt = 0;
     top_client(top_ip, &top_cnt);
-    uint64_t elapsed_sec = (uint64_t)(now_tv.tv_sec - g_interval_start);
-    if (elapsed_sec == 0) elapsed_sec = 1;
-    uint64_t top_qps = top_cnt / elapsed_sec;
-    if (top_qps >= (uint64_t)g_cfg.flood_qps && top_ip[0] != '\0') {
+    uint64_t peak_burst = 0;
+    char     flood_client[MAX_IP_STR] = "";
+    for (int ci = 0; ci < g_client_count; ci++) {
+        if (g_clients[ci].burst_count > peak_burst) {
+            peak_burst = g_clients[ci].burst_count;
+            strncpy(flood_client, g_clients[ci].ip, MAX_IP_STR - 1);
+        }
+    }
+    if (peak_burst >= (uint64_t)g_cfg.flood_qps) {
         g_stats.flood_events++;
         fprintf(stdout,
                 "[DNS_FLOOD] ts=%s iface=%s"
-                " client=%s queries=%llu elapsed_sec=%llu qps=%llu"
-                " threshold_qps=%d\n",
+                " client=%s burst_qps=%llu threshold_qps=%d\n",
                 iso_ts(&now_tv), g_cfg.iface,
-                top_ip,
-                (unsigned long long)top_cnt,
-                (unsigned long long)elapsed_sec,
-                (unsigned long long)top_qps,
+                flood_client,
+                (unsigned long long)peak_burst,
                 g_cfg.flood_qps);
         fflush(stdout);
     }
@@ -675,20 +681,14 @@ static void packet_cb(u_char *user,
         g_stats.query_count++;
 
         /* Track per-client query count for flood detection */
-        uint64_t cli_cnt = client_bump(client_ip);
-        time_t   elapsed = pkt_ts.tv_sec - g_interval_start;
-        if (elapsed <= 0) elapsed = 1;
-        uint64_t cli_qps = cli_cnt / (uint64_t)elapsed;
-        if (cli_qps >= (uint64_t)g_cfg.flood_qps) {
+        uint64_t burst_qps = client_bump(client_ip); /* queries in current second */
+        if (burst_qps >= (uint64_t)g_cfg.flood_qps) {
             fprintf(stdout,
                     "[DNS_FLOOD] ts=%s iface=%s"
-                    " client=%s queries=%llu elapsed_sec=%ld qps=%llu"
-                    " threshold_qps=%d\n",
+                    " client=%s burst_qps=%llu threshold_qps=%d\n",
                     iso_ts(&pkt_ts), g_cfg.iface,
                     client_ip,
-                    (unsigned long long)cli_cnt,
-                    (long)elapsed,
-                    (unsigned long long)cli_qps,
+                    (unsigned long long)burst_qps,
                     g_cfg.flood_qps);
             fflush(stdout);
         }
