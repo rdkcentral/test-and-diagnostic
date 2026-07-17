@@ -119,21 +119,21 @@ Dhcpv6_Client_restart ()
             if [ -f /tmp/dhcpmgr_initialized ]; then
                 sysevent set dhcpv6_client-stop
             else
-		if [ "$BOX_TYPE" = "genericarm" ] ;then
-			$DHCPV6_HANDLER dhcpv6_client-stop
-		else
-			$DHCPV6_HANDLER dhcpv6_client_service_disable
-	    	fi
+                if [ "$BOX_TYPE" = "genericarm" ] ;then
+                    $DHCPV6_HANDLER dhcpv6_client-stop
+                else
+                    $DHCPV6_HANDLER dhcpv6_client_service_disable
+                fi
             fi
             sleep 2
             if [ -f /tmp/dhcpmgr_initialized ]; then
                 sysevent set dhcpv6_client-start
             else
                 if [ "$BOX_TYPE" = "genericarm" ] ;then
-                        $DHCPV6_HANDLER dhcpv6_client-start
+                    $DHCPV6_HANDLER dhcpv6_client-start
                 else
-			$DHCPV6_HANDLER dhcpv6_client_service_enable
-		fi
+		    $DHCPV6_HANDLER dhcpv6_client_service_enable
+                fi
             fi
             sleep 8
 		fi
@@ -846,10 +846,10 @@ self_heal_dibbler_server()
                                         sysevent set dhcpv6_client-stop
                                     else
                                         if [ "$BOX_TYPE" = "genericarm" ] ;then
-						$DHCPV6_HANDLER dhcpv6_client-stop
-					else
-						$DHCPV6_HANDLER dhcpv6_client_service_disable
-					fi
+					    $DHCPV6_HANDLER dhcpv6_client-stop
+                                    else
+					    $DHCPV6_HANDLER dhcpv6_client_service_disable
+                                        fi
                                     fi
                                     sysctl -w net.ipv6.conf.$PRIVATE_LAN.disable_ipv6=1
                                     sysctl -w net.ipv6.conf.$PRIVATE_LAN.accept_dad=0
@@ -861,10 +861,10 @@ self_heal_dibbler_server()
                                         sysevent set dhcpv6_client-start
                                     else
                                         if [ "$BOX_TYPE" = "genericarm" ] ;then
-						$DHCPV6_HANDLER dhcpv6_client-start
-					else
-						$DHCPV6_HANDLER dhcpv6_client_service_enable
-					fi
+					    $DHCPV6_HANDLER dhcpv6_client-start
+				        else
+					    $DHCPV6_HANDLER dhcpv6_client_service_enable
+                                        fi
                                     fi
                                     # re-add global ipv6 address after enabled it
                                     ip -6 addr add $v6addr dev $PRIVATE_LAN
@@ -1021,10 +1021,10 @@ self_heal_dhcp_clients()
                                 sysevent set dhcpv6_client-stop
                             else
                                 if [ "$BOX_TYPE" = "genericarm" ] ;then
-					$DHCPV6_HANDLER dhcpv6_client-stop
-				else
-					$DHCPV6_HANDLER dhcpv6_client_service_disable
-				fi
+				    $DHCPV6_HANDLER dhcpv6_client-stop
+			        else
+                                    $DHCPV6_HANDLER dhcpv6_client_service_disable
+                                fi
                             fi
                         fi
                     fi
