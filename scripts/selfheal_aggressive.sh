@@ -132,7 +132,7 @@ Dhcpv6_Client_restart ()
                 if [ "$BOX_TYPE" = "genericarm" ]; then
                     $DHCPV6_HANDLER dhcpv6_client-start
                 else
-		    $DHCPV6_HANDLER dhcpv6_client_service_enable
+                    $DHCPV6_HANDLER dhcpv6_client_service_enable
                 fi
             fi
             sleep 8
@@ -846,9 +846,9 @@ self_heal_dibbler_server()
                                         sysevent set dhcpv6_client-stop
                                     else
                                         if [ "$BOX_TYPE" = "genericarm" ]; then
-					    $DHCPV6_HANDLER dhcpv6_client-stop
-                                    else
-					    $DHCPV6_HANDLER dhcpv6_client_service_disable
+                                            $DHCPV6_HANDLER dhcpv6_client-stop
+                                        else
+                                            $DHCPV6_HANDLER dhcpv6_client_service_disable
                                         fi
                                     fi
                                     sysctl -w net.ipv6.conf.$PRIVATE_LAN.disable_ipv6=1
@@ -861,9 +861,9 @@ self_heal_dibbler_server()
                                         sysevent set dhcpv6_client-start
                                     else
                                         if [ "$BOX_TYPE" = "genericarm" ]; then
-					    $DHCPV6_HANDLER dhcpv6_client-start
-				        else
-					    $DHCPV6_HANDLER dhcpv6_client_service_enable
+                                            $DHCPV6_HANDLER dhcpv6_client-start
+                                        else
+                                            $DHCPV6_HANDLER dhcpv6_client_service_enable
                                         fi
                                     fi
                                     # re-add global ipv6 address after enabled it
