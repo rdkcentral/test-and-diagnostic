@@ -577,8 +577,10 @@ self_heal_interfaces()
                 echo_t "[RDKB_AGG_SELFHEAL] : Value of l3net_selfheal : $l3netRestart"
                 if [ "$MODEL_NUM" = "CVA601ZCOM" ]; then
                     : #Do nothing for XD4
-                elif [ "$XHSEnabled" == "false" ]; then
+                elif [ "$MODEL_NUM" = "SCER11BEL" ] && [ "$XHSEnabled" == "false" ]; then
                     : # Do nothing for XER10 and if HomeSecuritysupport disabled"
+                elif [ "$MODEL_NUM" = "AYER21BEL" ] && [ "$XHSEnabled" == "false" ]; then
+                    : # Do nothing for XER2 and if HomeSecuritysupport disabled"
                 elif [ "$l3netRestart" != "done" ]; then
 
                     check_if_brlan1_created=$(ifconfig | grep "brlan1")
@@ -1771,7 +1773,7 @@ if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
    [ "$MODEL_NUM" != "CWA438TCOM" ] &&
    [ "$MODEL_NUM" != "SCER11BEL" ] && [ "$MODEL_NAME" != "RPI" ] &&
    [ "$MODEL_NAME" != "BPI" ] && [ "$MODEL_NUM" != "SCXF11BFL" ] &&
-   [ "$MODEL_NAME" != "AYER21BEL" ]
+   [ "$MODEL_NUM" != "AYER21BEL" ]
 then
     exit
 fi
