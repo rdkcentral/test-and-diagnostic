@@ -2868,8 +2868,10 @@ case $SELFHEAL_TYPE in
 
             if [ "$MODEL_NUM" = "CVA601ZCOM" ]; then
                 : #Do nothing for XD4
-            elif [ "$HomeSecuritySupport" == "false" ]; then
+            elif [ "$MODEL_NUM" = "SCER11BEL" ] && [ "$HomeSecuritySupport" == "false" ]; then
                 : #Do  nothing for XER10 and if HomeSecurity Feature disabled.
+            elif [ "$MODEL_NUM" = "AYER21BEL" ] && [ "$HomeSecuritySupport" == "false" ]; then
+                : #Do  nothing for XER2 and if HomeSecurity Feature disabled.
             elif [ "$l3netRestart" != "done" ]; then
 
                 check_if_brlan1_created=$(ifconfig | grep "brlan1")
