@@ -507,11 +507,11 @@ fi
 
     # ---------------------------------------------------------------
     # Duplicate process detection
-    # RFC 1: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.SelfHeal.DualProcessDetect_Enable
+    # RFC 1: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.SoftwareProcessManager.SelfHeal.DualProcessDetect_Enable
     #        syscfg key: SelfHealDualProcDetectEnable  (default: true)
-    # RFC 2: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.SelfHeal.DualProcessExcludeList
+    # RFC 2: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.SoftwareProcessManager.SelfHeal.DualProcessExcludeList
     #        syscfg key: SelfHealDualProcExcludeList   (additive, comma-separated basenames)
-    # RFC 3: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.SelfHeal.DualProcessDetectInterval
+    # RFC 3: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.SoftwareProcessManager.SelfHeal.DualProcessDetectInterval
     #        syscfg key: SelfHealDualProcDetectInterval (minutes: 15|30|45|60, default: 15)
     # ---------------------------------------------------------------
 
