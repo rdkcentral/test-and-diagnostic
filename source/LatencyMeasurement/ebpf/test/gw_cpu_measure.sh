@@ -175,7 +175,10 @@ awk -v p1="$PROC1_NAME" -v d1="$D_P1" \
         printf " %-22s RSS: %4d kB  →  %4d kB\n", p2, m0p2, m1p2
     if (p2 != "")
         printf " %-22s RSS: %4d kB  →  %4d kB  (combined)\n", "TOTAL tool", ms, me
-    if (is_ebpf == 1)
-        printf " BPF kernel maps (fixed):  ~1024 kB  (syn_ts 256K + synack 512K + ring 256K)\n"
+    if (is_ebpf == 1) {
+        printf " BPF kernel maps (fixed):  ~5.1 MB raw  (syn ~384K + synack ~768K + ring 4096K)\n"
+        printf "   NOTE: BPF maps live in KERNEL space - not counted in RSS above.\n"
+        printf "   Measure the real kernel cost with gw_ebpf_launch.sh (before/after meminfo).\n"
+    }
     printf "============================================================\n"
 }'
