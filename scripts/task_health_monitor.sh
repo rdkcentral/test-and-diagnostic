@@ -307,6 +307,14 @@ check_xle_dns_route()
 
 }
 
+self_heal_meshAgent_ensure_running()
+{
+    if ! systemctl is-active --quiet meshAgent; then
+        echo_t "[RDKB_SELFHEAL] : meshAgent is not running. Restarting service..."
+        systemctl restart meshAgent
+    fi
+}
+
 self_heal_meshAgent()
 {
     cpu_max=20
@@ -5182,6 +5190,7 @@ if [ "$BOX_TYPE" = "WNXL11BWL" ]; then
     self_heal_rfc
 fi
 self_heal_dual_cron
+self_heal_meshAgent_ensure_running
 self_heal_meshAgent
 self_heal_meshAgent_hung
 self_heal_sedaemon
