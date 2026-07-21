@@ -541,10 +541,11 @@ static void server_bump_fail(const char *server_ip)
 
 /* Per-client query rate tracker — includes 1-second burst window for flood detection */
 typedef struct {
-    char     ip[MAX_IP_STR];
-    uint64_t query_count;          /* total queries since interval start      */
-    uint64_t burst_count;          /* queries in current 1-second window      */
-    time_t   burst_window_start;   /* start of the 1-second burst window      */
+    char     ip[MAX_IP_STR];   /* IP address string (IPv4 or IPv6)        */
+    char     mac[18];          /* Ethernet source MAC "aa:bb:cc:dd:ee:ff" */
+    uint64_t query_count;      /* total queries since interval start      */
+    uint64_t burst_count;      /* queries in current 1-second window      */
+    time_t   burst_window_start; /* start of the 1-second burst window    */
 } client_stat_t;
 static client_stat_t g_clients[MAX_CLIENT_TRACK];
 static int           g_client_count = 0;
@@ -554,39 +555,22 @@ static time_t        g_interval_start = 0;
  * @brief  Increment query counters for a client and return the current
  *         1-second burst count (for flood detection).
  *
- * Maintains two counters per client:
- *   query_count   - total queries since last report_and_reset()
- *   burst_count   - queries within the current 1-second window
- *
- * The burst window slides: when a new second begins (now_sec changes),
- * burst_count resets to 1. This gives an instantaneous queries/sec rate
- * rather than a cumulative average — correctly detecting a burst of
- * 35 queries in 1 second even if it happens 60 seconds into the interval.
- *
- * Used by:
- *   - packet_cb()      : checks burst_count >= flood_qps for real-time alert
- *   - report_and_reset(): checks peak burst_count for end-of-interval alert
- *   - top_client()     : reads query_count to find busiest client
+ * Also records the client's MAC address on first seen (from Ethernet header).
  *
  * @param  client_ip  Source IP string of the querying client
+ * @param  src_mac    Source MAC from Ethernet header (e.g. "28:f1:0e:12:a1:a4")
  * @return Current burst_count for this client (queries in current second).
  *         Returns 0 if g_clients[] table is full (MAX_CLIENT_TRACK=32).
- *
- * Example — normal browsing (1 query/sec, no flood):
- *   T=0s: client_bump("10.0.0.58") -> burst_count=1  (new second)
- *   T=0s: client_bump("10.0.0.58") -> burst_count=2  (same second)
- *   T=1s: client_bump("10.0.0.58") -> burst_count=1  (window reset)
- *
- * Example — flood (35 queries in <1s, threshold=20):
- *   T=5s: client_bump("10.0.0.58") -> burst_count=20 -> [DNS_FLOOD] fires
- *   T=5s: client_bump("10.0.0.58") -> burst_count=21 -> [DNS_FLOOD] fires again
  */
-static uint64_t client_bump(const char *client_ip)
+static uint64_t client_bump(const char *client_ip, const char *src_mac)
 {
     time_t now_sec = time(NULL);
     for (int i = 0; i < g_client_count; i++) {
         if (strncmp(g_clients[i].ip, client_ip, MAX_IP_STR) == 0) {
             g_clients[i].query_count++;             /* total for this interval */
+            /* Update MAC if not yet recorded (first packet from this client) */
+            if (g_clients[i].mac[0] == '\0' && src_mac)
+                strncpy(g_clients[i].mac, src_mac, sizeof(g_clients[i].mac) - 1);
             /* Slide the 1-second window if a new second has started */
             if (now_sec != g_clients[i].burst_window_start) {
                 g_clients[i].burst_count = 1;       /* first query in new second */
@@ -599,7 +583,10 @@ static uint64_t client_bump(const char *client_ip)
     }
     /* New client — allocate a slot */
     if (g_client_count < MAX_CLIENT_TRACK) {
-        strncpy(g_clients[g_client_count].ip, client_ip, MAX_IP_STR - 1);
+        strncpy(g_clients[g_client_count].ip,  client_ip, MAX_IP_STR - 1);
+        if (src_mac)
+            strncpy(g_clients[g_client_count].mac, src_mac,
+                    sizeof(g_clients[g_client_count].mac) - 1);
         g_clients[g_client_count].query_count        = 1;
         g_clients[g_client_count].burst_count        = 1;
         g_clients[g_client_count].burst_window_start = now_sec;
@@ -609,7 +596,75 @@ static uint64_t client_bump(const char *client_ip)
     return 0; /* table full — MAX_CLIENT_TRACK (32) clients already tracked */
 }
 
-/* Return IP of the client with most queries (for telemetry) */\nstatic void top_client(char *out_ip, uint64_t *out_count)\n{\n    uint64_t max = 0;\n    out_ip[0] = '\\0';\n    *out_count = 0;\n    for (int i = 0; i < g_client_count; i++) {\n        if (g_clients[i].query_count > max) {\n            max = g_clients[i].query_count;\n            strncpy(out_ip, g_clients[i].ip, MAX_IP_STR - 1);\n            *out_count = max;\n        }\n    }\n}
+/* Return IP of the client with most queries (for telemetry) */
+static void top_client(char *out_ip, uint64_t *out_count)
+{
+    uint64_t max = 0;
+    out_ip[0] = '\0';
+    *out_count = 0;
+    for (int i = 0; i < g_client_count; i++) {
+        if (g_clients[i].query_count > max) {
+            max = g_clients[i].query_count;
+            strncpy(out_ip, g_clients[i].ip, MAX_IP_STR - 1);
+            *out_count = max;
+        }
+    }
+}
+
+/**
+ * @brief  Print a formatted per-client query summary table.
+ *
+ * Emits a [CLIENT_SUMMARY] block showing every client seen in the current
+ * interval with their IP, MAC address, and query count. Also prints the
+ * total unique client count.
+ *
+ * Output format (one line per client + header + footer):
+ *   [CLIENT_SUMMARY] ts=... iface=... total_clients=3
+ *   [CLIENT_SUMMARY] #  IP                                    MAC               queries
+ *   [CLIENT_SUMMARY] 1  10.0.0.58                             28:f1:0e:12:a1:a4  72
+ *   [CLIENT_SUMMARY] 2  2001:558:6045:12:987:cc98:4d57:5740   (unknown)         18
+ *   [CLIENT_SUMMARY] 3  10.0.0.72                             aa:bb:cc:dd:ee:ff   5
+ *
+ * Called from report_and_reset() before resetting g_clients[].
+ *
+ * @param  now_ts  ISO-8601 timestamp string (from iso_ts())
+ */
+static void print_client_summary(const char *now_ts)
+{
+    if (g_client_count == 0) return;
+
+    /* Sort by query_count descending (simple insertion sort — max 32 elements) */
+    client_stat_t sorted[MAX_CLIENT_TRACK];
+    int n = g_client_count;
+    for (int i = 0; i < n; i++) sorted[i] = g_clients[i];
+    for (int i = 1; i < n; i++) {
+        client_stat_t key = sorted[i];
+        int j = i - 1;
+        while (j >= 0 && sorted[j].query_count < key.query_count) {
+            sorted[j + 1] = sorted[j];
+            j--;
+        }
+        sorted[j + 1] = key;
+    }
+
+    /* Header line */
+    fprintf(stdout,
+            "[CLIENT_SUMMARY] ts=%s iface=%s total_clients=%d\n"
+            "[CLIENT_SUMMARY] %-3s %-40s %-18s %s\n",
+            now_ts, g_cfg.iface, n,
+            "#", "IP", "MAC", "queries");
+
+    /* One row per client */
+    for (int i = 0; i < n; i++) {
+        fprintf(stdout,
+                "[CLIENT_SUMMARY] %-3d %-40s %-18s %llu\n",
+                i + 1,
+                sorted[i].ip,
+                sorted[i].mac[0] ? sorted[i].mac : "(unknown)",
+                (unsigned long long)sorted[i].query_count);
+    }
+    fflush(stdout);
+}
 
 /* ------------------------------------------------------------------ */
 /* Global config (set once at startup, then read-only)                 */
@@ -760,6 +815,9 @@ static void report_and_reset(void)
                  (i + 1 < g_server_count) ? "," : "");
         strncat(svr_buf, tmp, sizeof(svr_buf) - strlen(svr_buf) - 1);
     }
+
+    /* Per-client query table — printed before main summary line */
+    print_client_summary(iso_ts(&now_tv));
 
     /* [DNS_SUMMARY] - one line, all key=value, easy to grep/parse */
     fprintf(stdout,
@@ -923,8 +981,15 @@ static void packet_cb(u_char *user,
     int           rem = (int)header->caplen; /* remaining bytes — bounds guard */
     char src_ip[MAX_IP_STR] = {0};
     char dst_ip[MAX_IP_STR] = {0};
+    char src_mac[18] = {0};   /* Ethernet source MAC: "aa:bb:cc:dd:ee:ff" */
 
     if (rem < ETH_HDR_LEN) return;
+
+    /* Extract source MAC from Ethernet header (bytes 6-11) BEFORE advancing ptr.
+     * For a query (dport==53): src_mac is the CLIENT's MAC address.
+     * For a response (sport==53): src_mac is the DNS SERVER's MAC (less useful). */
+    snprintf(src_mac, sizeof(src_mac), "%02x:%02x:%02x:%02x:%02x:%02x",
+             ptr[6], ptr[7], ptr[8], ptr[9], ptr[10], ptr[11]);
 
     uint16_t ether_type = ntohs(*(const uint16_t *)(ptr + 12));
     ptr += ETH_HDR_LEN; rem -= ETH_HDR_LEN;
@@ -1015,8 +1080,9 @@ static void packet_cb(u_char *user,
         /* ── Outgoing DNS query ── */
         g_stats.query_count++;
 
-        /* Track per-client query count for flood detection */
-        uint64_t burst_qps = client_bump(client_ip); /* queries in current second */
+        /* Track per-client query count for flood detection.
+         * Pass src_mac so the client table records the MAC on first query seen. */
+        uint64_t burst_qps = client_bump(client_ip, src_mac);
         if (burst_qps >= (uint64_t)g_cfg.flood_qps) {
             fprintf(stdout,
                     "[DNS_FLOOD] ts=%s iface=%s"
