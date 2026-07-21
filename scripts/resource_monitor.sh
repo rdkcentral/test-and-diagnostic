@@ -560,10 +560,14 @@ fi
                 {
                     cmd = ""
                     for (i = 5; i <= NF; i++) cmd = (cmd == "") ? $i : cmd " " $i
+                    # Always skip kernel threads — check full $5 BEFORE splitting on /
+                    # This handles names like [jbd2/mmcblk0gp1] which contain a /
+                    if ($5 ~ /^\[.*\]$/) next
+                    # Extract basename for exclusion matching
                     n = split($5, parts, "/")
                     base = parts[n]
-                    # Always skip kernel threads
-                    if (base ~ /^\[.*\]$/) next
+                    # Strip leading dash (e.g. -sh -> sh)
+                    gsub(/^-/, "", base)
                     # Skip exclusion list (defaults + RFC additions)
                     if (base in excl) next
                     count[cmd]++
