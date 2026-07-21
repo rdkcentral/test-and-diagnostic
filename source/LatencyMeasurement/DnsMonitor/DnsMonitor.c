@@ -119,6 +119,23 @@ typedef struct __attribute__((packed)) {
 /* ------------------------------------------------------------------ */
 /* Helper: RCODE integer -> human-readable name                        */
 /* ------------------------------------------------------------------ */
+/**
+ * @brief  Convert a DNS RCODE integer to its RFC-standard name string.
+ *
+ * Used in [DNS_FAIL] log lines so analysts see "NXDOMAIN" instead of
+ * the raw number 3.
+ *
+ * @param  rcode  DNS response code (0-9) from the DNS flags field
+ *                (flags & 0x000F)
+ * @return Pointer to a static string literal. Never NULL.
+ *
+ * Example:
+ *   rcode_name(0)  -> "NOERROR"   (successful response)
+ *   rcode_name(2)  -> "SERVFAIL"  (upstream DNS server error)
+ *   rcode_name(3)  -> "NXDOMAIN"  (domain does not exist)
+ *   rcode_name(5)  -> "REFUSED"   (server refused the query)
+ *   rcode_name(99) -> "UNKNOWN"   (not in RFC 1035 / RFC 2136)
+ */
 static const char *rcode_name(int rcode)
 {
     switch (rcode) {
@@ -139,6 +156,21 @@ static const char *rcode_name(int rcode)
 /* ------------------------------------------------------------------ */
 /* Helper: QTYPE integer -> human-readable name                        */
 /* ------------------------------------------------------------------ */
+/**
+ * @brief  Convert a DNS QTYPE integer to its record-type name string.
+ *
+ * Used in every log line so analysts see "A", "AAAA", "PTR" instead
+ * of raw numbers.
+ *
+ * @param  qt  DNS question type (network-byte-order already swapped by caller)
+ * @return Pointer to a static string literal. Never NULL.
+ *
+ * Common values observed on XB8:
+ *   qtype_name(1)   -> "A"      IPv4 address lookup  (e.g. nslookup google.com)
+ *   qtype_name(12)  -> "PTR"   Reverse lookup       (e.g. 44 of 44 failures on XB8)
+ *   qtype_name(28)  -> "AAAA"  IPv6 address lookup  (dual-stack queries)
+ *   qtype_name(15)  -> "MX"    Mail exchanger
+ */
 static const char *qtype_name(uint16_t qt)
 {
     switch (qt) {
@@ -160,6 +192,32 @@ static const char *qtype_name(uint16_t qt)
 /* Helper: parse wire-format DNS QNAME into dotted string              */
 /* Returns pointer to static buffer - only used for logging.           */
 /* ------------------------------------------------------------------ */
+/**
+ * @brief  Decode a DNS wire-format QNAME (label-length encoded) into a
+ *         human-readable dotted string.
+ *
+ * DNS encodes hostnames as length-prefixed labels (RFC 1035 §3.1):
+ *   \x03www\x06google\x03com\x00  ->  "www.google.com"
+ *
+ * Pointer compression (\xC0 prefix, RFC 1035 §4.1.4) is detected and
+ * stopped — we do not follow the pointer since we only need the name
+ * for logging, not full resolution.
+ *
+ * @param  dns_payload   Pointer to the start of the DNS header (not UDP).
+ * @param  payload_len   Total bytes available from dns_payload.
+ * @param  offset        Byte offset into dns_payload where the QNAME starts.
+ *                       For the question section this is sizeof(dnshdr_t) = 12.
+ * @return Pointer to a static char buffer with the dotted name.
+ *         Returns "<root>" for a zero-length name (root DNS query).
+ *         CAUTION: static buffer — not re-entrant, copy before next call.
+ *
+ * Example (XB8 observed):
+ *   Input:  \x0Bconnectivity-check\x06ubuntu\x03com\x00
+ *   Output: "connectivity-check.ubuntu.com"
+ *
+ *   Input:  \x02 75 \x02 75 \x02 75 \x02 75 \x07in-addr\x04arpa\x00
+ *   Output: "75.75.75.75.in-addr.arpa"
+ */
 static const char *parse_qname(const uint8_t *dns_payload, int payload_len,
                                 int offset)
 {
@@ -188,6 +246,27 @@ static const char *parse_qname(const uint8_t *dns_payload, int payload_len,
 /* ------------------------------------------------------------------ */
 /* Helper: current time as ISO-8601 string  2026-07-10T14:32:01.123Z  */
 /* ------------------------------------------------------------------ */
+/**
+ * @brief  Format a struct timeval as an ISO-8601 UTC timestamp string
+ *         with millisecond precision.
+ *
+ * Output format: YYYY-MM-DDTHH:MM:SS.mmmZ  (always UTC, always 24 chars)
+ *
+ * All log line tags use this for the ts= field so timestamps are:
+ *   - Sortable (lexicographic == chronological)
+ *   - Parseable by ELK/Splunk/grep without configuration
+ *   - Unambiguous (Z suffix = UTC, no timezone confusion)
+ *
+ * @param  tv   Kernel-provided packet timestamp from pcap_pkthdr.ts
+ *              (set at NIC DMA interrupt time, more accurate than
+ *               calling gettimeofday() from application code).
+ * @return Pointer to a static 32-byte buffer. Never NULL.
+ *         CAUTION: static buffer — not re-entrant.
+ *
+ * Example:
+ *   tv = { .tv_sec=1752634218, .tv_usec=999000 }
+ *   result: "2026-07-16T04:50:18.999Z"
+ */
 static const char *iso_ts(const struct timeval *tv)
 {
     static char buf[32];
@@ -204,6 +283,32 @@ static const char *iso_ts(const struct timeval *tv)
 /* Composite hash key: mix(client_ip, txid) prevents cross-client      */
 /* txid collisions                                                      */
 /* ------------------------------------------------------------------ */
+/**
+ * @brief  Compute a hash bucket index from a (client_ip, txid) composite key.
+ *
+ * Problem solved: Two different LAN clients (e.g. 10.0.0.58 and phone
+ * 10.0.0.72) can independently generate DNS queries with the same 16-bit
+ * transaction ID (0xac9a in XB8 dual-stack test). A hash on txid alone
+ * would place both in the same bucket and pending_remove() might return
+ * the wrong entry.
+ *
+ * Solution: polynomial hash over the IP string XOR'd with txid so each
+ * (client, txid) pair maps to a unique-ish bucket.
+ *
+ * Algorithm:
+ *   h = txid
+ *   for each byte c in client_ip string:
+ *       h = h * 31 + c
+ *   bucket = h & (DNS_HASH_BUCKETS - 1)   // fast modulo (power-of-2)
+ *
+ * @param  client_ip  Null-terminated IP string ("10.0.0.58" or IPv6)
+ * @param  txid       DNS transaction ID (host byte order)
+ * @return Bucket index in [0, DNS_HASH_BUCKETS-1]  (always in range)
+ *
+ * Example:
+ *   make_hash("10.0.0.58", 0xac9a) -> 1847   (some bucket)
+ *   make_hash("10.0.0.72", 0xac9a) -> 2103   (different bucket)
+ */
 static unsigned int make_hash(const char *client_ip, uint16_t txid)
 {
     unsigned int h = (unsigned int)txid;
@@ -228,6 +333,29 @@ typedef struct pending_entry {
 static pending_entry_t *g_table[DNS_HASH_BUCKETS];
 static int              g_pending_count = 0;
 
+/**
+ * @brief  Record an outgoing DNS query in the pending table.
+ *
+ * Called for every QR=0 (query) packet. Stores all the information
+ * needed to:
+ *   a) Match the query when the response arrives (via txid + client_ip)
+ *   b) Compute latency (response_ts - query_ts)
+ *   c) Log the qname/qtype on the response line without re-parsing
+ *
+ * The entry lives in the hash table until:
+ *   - pending_remove() is called when the matching response arrives
+ *   - pending_expire() evicts it as a timeout after query_timeout_sec
+ *
+ * Memory: calloc'd per-entry. Freed by pending_remove() or pending_expire().
+ * Silently dropped if g_pending_count >= MAX_PENDING (4096).
+ *
+ * @param  txid       DNS transaction ID (host byte order, e.g. 0x07ac)
+ * @param  client_ip  Source IP of the query  (e.g. "10.0.0.58")
+ * @param  server_ip  Destination IP (upstream DNS, e.g. "75.75.75.75")
+ * @param  qname      Parsed hostname string  (e.g. "www.google.com")
+ * @param  qtype      Record type (1=A, 28=AAAA, 12=PTR, ...)
+ * @param  ts         Kernel timestamp of the query packet (from pcap_pkthdr)
+ */
 static void pending_insert(uint16_t txid, const char *client_ip,
                            const char *server_ip, const char *qname,
                            uint16_t qtype, const struct timeval *ts)
@@ -249,6 +377,26 @@ static void pending_insert(uint16_t txid, const char *client_ip,
     g_pending_count++;
 }
 
+/**
+ * @brief  Look up and unlink a pending query entry by (txid, client_ip).
+ *
+ * Called for every QR=1 (response) packet. The composite key prevents
+ * cross-client false matches (two clients with the same txid).
+ *
+ * The caller is responsible for free()ing the returned pointer.
+ * Returns NULL for unsolicited or duplicate responses — caller skips them.
+ *
+ * @param  txid       DNS transaction ID from the response header
+ * @param  client_ip  Client IP — used as second key component.
+ *                    For a response (sport==53), client_ip is dst_ip.
+ * @return Pointer to the unlinked pending_entry_t, or NULL if not found.
+ *
+ * Example:
+ *   Query stored:    pending_insert(0x07ac, "10.0.0.58", ...)
+ *   Response arrives: e = pending_remove(0x07ac, "10.0.0.58")
+ *   e != NULL -> latency = response_ts - e->query_ts
+ *   free(e);  // caller must free
+ */
 static pending_entry_t *pending_remove(uint16_t txid, const char *client_ip)
 {
     unsigned int b = make_hash(client_ip, txid);
@@ -269,6 +417,33 @@ static pending_entry_t *pending_remove(uint16_t txid, const char *client_ip)
 
 typedef void (*expire_cb_t)(const pending_entry_t *e, void *ctx);
 
+/**
+ * @brief  Sweep the hash table and evict entries older than timeout_sec.
+ *
+ * Called on every incoming packet (using the packet's kernel timestamp)
+ * so timeouts are detected lazily without a dedicated timer thread.
+ * Also called at report time with timeout_sec=0 to force-expire everything.
+ *
+ * For each expired entry:
+ *   1. The optional callback cb(entry, ctx) is called (used for [DNS_TIMEOUT])
+ *   2. The entry is unlinked from the hash chain and freed
+ *
+ * @param  now_sec      Current time in seconds (from packet ts or time())
+ * @param  timeout_sec  Expiry threshold. Entry expires when:
+ *                      now_sec - entry->query_ts.tv_sec >= timeout_sec
+ *                      Pass 0 to force-expire ALL entries immediately.
+ * @param  cb           Callback invoked for each expired entry (may be NULL)
+ * @param  ctx          Opaque pointer passed to cb (may be NULL)
+ * @return Number of entries expired in this sweep
+ *
+ * Example (lazy timeout detection on each packet):
+ *   pending_expire(pkt_ts.tv_sec, 5, on_timeout, NULL);
+ *   // Sweeps all 4096 buckets — entries older than 5s trigger on_timeout()
+ *
+ * Example (force-expire at report time):
+ *   pending_expire(now_tv.tv_sec, 0, on_timeout, NULL);
+ *   // timeout_sec=0 means ALL entries qualify (age >= 0 is always true)
+ */
 static int pending_expire(time_t now_sec, int timeout_sec,
                           expire_cb_t cb, void *ctx)
 {
@@ -329,19 +504,39 @@ typedef struct { char ip[MAX_IP_STR]; uint64_t fail_count; } server_stat_t;
 static server_stat_t g_servers[MAX_SERVER_TRACK];
 static int           g_server_count = 0;
 
+/**
+ * @brief  Increment the failure counter for an upstream DNS server.
+ *
+ * Called on every [DNS_FAIL] event to track which upstream server
+ * is returning errors. Appears in [DNS_SUMMARY] as:
+ *   server_fails=[75.75.75.75:42,75.75.76.76:2]
+ *
+ * Tracks up to MAX_SERVER_TRACK (8) distinct server IPs.
+ * If the table is full, new servers are silently dropped.
+ * Reset to zero at each report_and_reset() call.
+ *
+ * @param  server_ip  IP string of the DNS server that returned an error
+ *                    (e.g. "75.75.75.75" or "2001:558:feed::1")
+ *
+ * Example (from XB8 test run):
+ *   After 44 PTR NXDOMAIN failures all on 75.75.75.75:
+ *   g_servers[0] = { ip="75.75.75.75", fail_count=44 }
+ */
 static void server_bump_fail(const char *server_ip)
 {
     for (int i = 0; i < g_server_count; i++) {
         if (strncmp(g_servers[i].ip, server_ip, MAX_IP_STR) == 0) {
-            g_servers[i].fail_count++;
+            g_servers[i].fail_count++;  /* found existing slot — increment */
             return;
         }
     }
+    /* New server — allocate next slot */
     if (g_server_count < MAX_SERVER_TRACK) {
         strncpy(g_servers[g_server_count].ip, server_ip, MAX_IP_STR - 1);
         g_servers[g_server_count].fail_count = 1;
         g_server_count++;
     }
+    /* else: silently drop — table full, MAX_SERVER_TRACK exceeded */
 }
 
 /* Per-client query rate tracker — includes 1-second burst window for flood detection */
@@ -355,33 +550,63 @@ static client_stat_t g_clients[MAX_CLIENT_TRACK];
 static int           g_client_count = 0;
 static time_t        g_interval_start = 0;
 
-/* Returns the current 1-second burst count for the client.
- * Resets the window when a new second begins. */
+/**
+ * @brief  Increment query counters for a client and return the current
+ *         1-second burst count (for flood detection).
+ *
+ * Maintains two counters per client:
+ *   query_count   - total queries since last report_and_reset()
+ *   burst_count   - queries within the current 1-second window
+ *
+ * The burst window slides: when a new second begins (now_sec changes),
+ * burst_count resets to 1. This gives an instantaneous queries/sec rate
+ * rather than a cumulative average — correctly detecting a burst of
+ * 35 queries in 1 second even if it happens 60 seconds into the interval.
+ *
+ * Used by:
+ *   - packet_cb()      : checks burst_count >= flood_qps for real-time alert
+ *   - report_and_reset(): checks peak burst_count for end-of-interval alert
+ *   - top_client()     : reads query_count to find busiest client
+ *
+ * @param  client_ip  Source IP string of the querying client
+ * @return Current burst_count for this client (queries in current second).
+ *         Returns 0 if g_clients[] table is full (MAX_CLIENT_TRACK=32).
+ *
+ * Example — normal browsing (1 query/sec, no flood):
+ *   T=0s: client_bump("10.0.0.58") -> burst_count=1  (new second)
+ *   T=0s: client_bump("10.0.0.58") -> burst_count=2  (same second)
+ *   T=1s: client_bump("10.0.0.58") -> burst_count=1  (window reset)
+ *
+ * Example — flood (35 queries in <1s, threshold=20):
+ *   T=5s: client_bump("10.0.0.58") -> burst_count=20 -> [DNS_FLOOD] fires
+ *   T=5s: client_bump("10.0.0.58") -> burst_count=21 -> [DNS_FLOOD] fires again
+ */
 static uint64_t client_bump(const char *client_ip)
 {
     time_t now_sec = time(NULL);
     for (int i = 0; i < g_client_count; i++) {
         if (strncmp(g_clients[i].ip, client_ip, MAX_IP_STR) == 0) {
-            g_clients[i].query_count++;
-            /* Slide the window if a new second has started */
+            g_clients[i].query_count++;             /* total for this interval */
+            /* Slide the 1-second window if a new second has started */
             if (now_sec != g_clients[i].burst_window_start) {
-                g_clients[i].burst_count = 1;
+                g_clients[i].burst_count = 1;       /* first query in new second */
                 g_clients[i].burst_window_start = now_sec;
             } else {
-                g_clients[i].burst_count++;
+                g_clients[i].burst_count++;         /* another query same second */
             }
             return g_clients[i].burst_count;
         }
     }
+    /* New client — allocate a slot */
     if (g_client_count < MAX_CLIENT_TRACK) {
         strncpy(g_clients[g_client_count].ip, client_ip, MAX_IP_STR - 1);
-        g_clients[g_client_count].query_count       = 1;
-        g_clients[g_client_count].burst_count       = 1;
+        g_clients[g_client_count].query_count        = 1;
+        g_clients[g_client_count].burst_count        = 1;
         g_clients[g_client_count].burst_window_start = now_sec;
         g_client_count++;
         return 1;
     }
-    return 0; /* table full */
+    return 0; /* table full — MAX_CLIENT_TRACK (32) clients already tracked */
 }
 
 /* Return IP of the client with most queries (for telemetry) */\nstatic void top_client(char *out_ip, uint64_t *out_count)\n{\n    uint64_t max = 0;\n    out_ip[0] = '\\0';\n    *out_count = 0;\n    for (int i = 0; i < g_client_count; i++) {\n        if (g_clients[i].query_count > max) {\n            max = g_clients[i].query_count;\n            strncpy(out_ip, g_clients[i].ip, MAX_IP_STR - 1);\n            *out_count = max;\n        }\n    }\n}
@@ -406,9 +631,31 @@ static void sig_handler(int s) { (void)s; g_running = 0; }
 /* ------------------------------------------------------------------ */
 /* Timeout callback - one [DNS_TIMEOUT] line per expired query         */
 /* ------------------------------------------------------------------ */
+/**
+ * @brief  Callback invoked by pending_expire() for each timed-out query.
+ *
+ * A query times out when it has been in the pending table for
+ * query_timeout_sec seconds with no matching response. This indicates
+ * the upstream DNS server did not respond — a network or server issue.
+ *
+ * Emits a [DNS_TIMEOUT] log line and increments g_stats.timeout.
+ * The log line contains all the stored query information so analysts
+ * know exactly which client, server, domain and record type timed out.
+ *
+ * This function is a expire_cb_t callback — it does NOT free the entry;
+ * pending_expire() frees it after the callback returns.
+ *
+ * @param  e    The expired pending entry (client_ip, server_ip, qname, qtype)
+ * @param  ctx  Unused (NULL passed from all callers)
+ *
+ * Example output:
+ *   [DNS_TIMEOUT] ts=2026-07-17T06:30:15.000Z iface=brlan0
+ *     client=10.0.0.58 server=75.75.75.75 txid=0x4f50
+ *     qname=timeout-test.com qtype=A
+ */
 static void on_timeout(const pending_entry_t *e, void *ctx)
 {
-    (void)ctx;
+    (void)ctx;  /* ctx not used — suppress unused-parameter warning */
     struct timeval now_tv;
     gettimeofday(&now_tv, NULL);
     fprintf(stdout,
@@ -464,12 +711,23 @@ static void report_and_reset(void)
     }
 
     /* ── Slow internet / degraded network detection ── */
+    /* ── Degraded internet detection — three independent triggers ── */
+    /* Minimum sample requirements prevent false alarms on sparse traffic */
     uint64_t timeout_pct = (g_stats.query_count > 0)
                          ? (g_stats.timeout * 100 / g_stats.query_count) : 0;
+
+    /* Trigger 1: average latency too high (DNS server or path is congested)
+     * Requires >= 5 successes to have a meaningful average */
     int high_latency  = (g_stats.success_count >= 5 &&
                          avg_ms  >= (uint64_t)g_cfg.degrade_avg_ms);
+
+    /* Trigger 2: too many timeouts (DNS server unreachable or packet loss)
+     * Requires >= 10 queries to have a meaningful percentage */
     int high_timeouts = (g_stats.query_count >= 10 &&
                          timeout_pct >= (uint64_t)g_cfg.degrade_to_pct);
+
+    /* Trigger 3: DNS server returning SERVFAIL (upstream infrastructure issue)
+     * Requires >= 5 queries; threshold is 20% SERVFAIL rate */
     int high_servfail = (g_stats.query_count >= 5 &&
                          g_stats.servfail * 100 / g_stats.query_count >= 20);
     if (high_latency || high_timeouts || high_servfail) {
@@ -577,11 +835,40 @@ static void report_and_reset(void)
 /* ------------------------------------------------------------------ */
 /* IP-address extraction helpers                                        */
 /* ------------------------------------------------------------------ */
+/**
+ * @brief  Convert a 4-byte network-order IPv4 address to a dotted string.
+ *
+ * Wraps inet_ntop(AF_INET). Called during IPv4 header parsing in packet_cb.
+ *
+ * @param  addr_net  IPv4 address in network byte order (from ip4hdr_t.saddr)
+ * @param  out       Output buffer, must be at least INET_ADDRSTRLEN (16) bytes
+ * @param  len       Size of out buffer
+ *
+ * Example:
+ *   ip4_to_str(0xFD4BAC49, buf, sizeof(buf)) -> "73.252.171.253" (XB8 WAN IP)
+ *   ip4_to_str(0xFD4B4B4B, buf, sizeof(buf)) -> "75.75.75.75"    (Comcast DNS)
+ */
 static void ip4_to_str(uint32_t addr_net, char *out, size_t len)
 {
-    struct in_addr a; a.s_addr = addr_net;
+    struct in_addr a;
+    a.s_addr = addr_net;   /* no byte-swap needed — inet_ntop handles it */
     inet_ntop(AF_INET, &a, out, (socklen_t)len);
 }
+
+/**
+ * @brief  Convert a 16-byte IPv6 address to a colon-hex string.
+ *
+ * Wraps inet_ntop(AF_INET6). Called during IPv6 header parsing in packet_cb.
+ *
+ * @param  addr16  16-byte IPv6 address array (from ip6hdr_t.src or .dst)
+ * @param  out     Output buffer, must be at least INET6_ADDRSTRLEN (46) bytes
+ * @param  len     Size of out buffer
+ *
+ * Example:
+ *   ip6_to_str(ip6->src, buf, sizeof(buf))
+ *   -> "2001:558:6045:12:987:cc98:4d57:5740"  (XB8 IPv6 client observed)
+ *   -> "2001:558:feed::1"                      (Comcast IPv6 DNS)
+ */
 static void ip6_to_str(const uint8_t *addr16, char *out, size_t len)
 {
     inet_ntop(AF_INET6, addr16, out, (socklen_t)len);
@@ -592,13 +879,48 @@ static void ip6_to_str(const uint8_t *addr16, char *out, size_t len)
 /* ------------------------------------------------------------------ */
 typedef struct { int query_timeout_sec; } cb_args_t;
 
+/**
+ * @brief  libpcap packet callback — the heart of DnsMonitor.
+ *
+ * Registered via pcap_dispatch() and called for every UDP port-53 packet
+ * that passes the BPF kernel filter. Performs full packet dissection and
+ * routes each packet to either the query path or the response path.
+ *
+ * Packet dissection layers (each advances ptr and decrements rem):
+ *   1. Ethernet header (14 bytes)  -> extract EtherType
+ *   2. IPv4 or IPv6 header         -> extract src_ip, dst_ip, ip_proto
+ *   3. UDP header (8 bytes)        -> extract sport, dport
+ *   4. DNS header (12 bytes)       -> extract txid, QR bit, RCODE
+ *   5. DNS question section        -> parse_qname(), extract QTYPE
+ *
+ * Direction determination:
+ *   dport==53 -> query going OUT  (client=src_ip, server=dst_ip)
+ *   sport==53 -> response coming IN (client=dst_ip, server=src_ip)
+ *
+ * Query path  (QR=0):
+ *   - Increment g_stats.query_count
+ *   - client_bump() -> flood detection
+ *   - pending_insert() -> record timestamp for latency calculation
+ *   - if verbose: print [DNS_QUERY]
+ *
+ * Response path (QR=1):
+ *   - pending_remove() -> look up matching query
+ *   - Compute latency_ms = response_ts - query_ts
+ *   - if RCODE != 0: classify failure, server_bump_fail(), print [DNS_FAIL]
+ *   - if RCODE == 0: update latency stats, print [DNS_RESP_OK] or [DNS_SLOW]
+ *
+ * @param  user    Pointer to cb_args_t { query_timeout_sec }.  Cast from u_char*.
+ * @param  header  libpcap metadata: kernel timestamp (ts), captured length (caplen)
+ * @param  packet  Raw packet bytes starting from Ethernet header. Read-only.
+ *                 Valid only during this function call — do not store the pointer.
+ */
 static void packet_cb(u_char *user,
                       const struct pcap_pkthdr *header,
                       const u_char *packet)
 {
-    cb_args_t   *args = (cb_args_t *)user;
-    const u_char *ptr = packet;
-    int           rem = (int)header->caplen;
+    cb_args_t   *args = (cb_args_t *)user;  /* cast back from u_char* */
+    const u_char *ptr = packet;              /* walking pointer through layers */
+    int           rem = (int)header->caplen; /* remaining bytes — bounds guard */
     char src_ip[MAX_IP_STR] = {0};
     char dst_ip[MAX_IP_STR] = {0};
 
@@ -628,50 +950,63 @@ static void packet_cb(u_char *user,
         return;
     }
 
-    if (ip_proto != IP_PROTO_UDP) return;
+    /* ── Layer 4: UDP header ──────────────────────────────────────── */
     if (rem < (int)sizeof(udphdr_t)) return;
 
     const udphdr_t *udp = (const udphdr_t *)ptr;
-    uint16_t sport = ntohs(udp->sport);
-    uint16_t dport = ntohs(udp->dport);
+    uint16_t sport = ntohs(udp->sport);  /* source port (host byte order) */
+    uint16_t dport = ntohs(udp->dport);  /* destination port */
     ptr += sizeof(udphdr_t); rem -= (int)sizeof(udphdr_t);
 
+    /* BPF already filters udp port 53, but double-check direction:
+     * A query has dport==53, a response has sport==53. */
     if (sport != DNS_PORT && dport != DNS_PORT) return;
     if (rem < (int)sizeof(dnshdr_t)) return;
 
+    /* ── Layer 5: DNS header ─────────────────────────────────────── */
     const dnshdr_t *dns = (const dnshdr_t *)ptr;
-    uint16_t txid       = ntohs(dns->id);
-    uint16_t flags      = ntohs(dns->flags);
-    int is_response     = (flags & DNS_FLAG_QR) ? 1 : 0;
-    int rcode           = (int)(flags & DNS_FLAG_RCODE);
+    uint16_t txid  = ntohs(dns->id);     /* transaction ID (16-bit, chosen by client) */
+    uint16_t flags = ntohs(dns->flags);  /* flags word: QR|opcode|AA|TC|RD|RA|Z|RCODE */
 
-    /* Parse QNAME and QTYPE from question section */
-    const uint8_t *dns_start = ptr;
+    /* QR bit (bit 15): 0 = query, 1 = response */
+    int is_response = (flags & DNS_FLAG_QR) ? 1 : 0;
+
+    /* RCODE (bits 0-3): 0=NOERROR, 2=SERVFAIL, 3=NXDOMAIN, 5=REFUSED */
+    int rcode = (int)(flags & DNS_FLAG_RCODE);
+
+    /* ── Question section: QNAME + QTYPE ────────────────────────── */
+    const uint8_t *dns_start = ptr;      /* start of DNS payload (from header) */
     int dns_len              = rem;
-    int qoff                 = (int)sizeof(dnshdr_t);
+    int qoff                 = (int)sizeof(dnshdr_t); /* QNAME starts after 12-byte header */
     const char *qname_str    = "<unknown>";
     uint16_t    qtype        = 0;
 
     if (dns_len > qoff) {
+        /* Decode wire-format name: \x03www\x06google\x03com\x00 -> "www.google.com" */
         qname_str = parse_qname(dns_start, dns_len, qoff);
-        /* Walk the wire-format name to find QTYPE offset */
+        /* Walk the wire-format name to find QTYPE offset (2 bytes after the name) */
         int off = qoff;
         while (off < dns_len) {
             uint8_t lbl = dns_start[off];
-            if (lbl == 0)           { off++; break; }
-            if ((lbl & 0xC0) == 0xC0) { off += 2; break; }
-            off += 1 + lbl;
+            if (lbl == 0)             { off++; break; }       /* null terminator */
+            if ((lbl & 0xC0) == 0xC0) { off += 2; break; }   /* pointer compression */
+            off += 1 + lbl;           /* skip label: 1 byte length + lbl bytes data */
         }
         if (off + 2 <= dns_len)
             qtype = ntohs(*(const uint16_t *)(dns_start + off));
     }
 
+    /* Use the kernel-captured packet timestamp (more accurate than gettimeofday) */
     struct timeval pkt_ts = header->ts;
 
-    /* Expire timed-out pending queries before processing this packet */
+    /* ── Pre-processing: expire stale queries ───────────────────── */
+    /* Check for queries that have been waiting longer than query_timeout_sec.
+     * Using packet timestamp (not wall clock) keeps time monotonic with traffic. */
     pending_expire(pkt_ts.tv_sec, args->query_timeout_sec, on_timeout, NULL);
 
-    /* client = the side that sent the query (dport==53 means query going out) */
+    /* ── Direction: who is the client and who is the server? ─────── */
+    /* For a query  (dport==53): client sent it  -> src=client, dst=server
+     * For a response(sport==53): server sent it -> src=server, dst=client */
     const char *client_ip = (dport == DNS_PORT) ? src_ip : dst_ip;
     const char *server_ip = (dport == DNS_PORT) ? dst_ip : src_ip;
 
@@ -712,10 +1047,17 @@ static void packet_cb(u_char *user,
         pending_entry_t *e = pending_remove(txid, client_ip);
         if (!e) return; /* unsolicited / duplicate */
 
+        /* ── Latency calculation ─────────────────────────────────── */
+        /* response_ts and query_ts are both kernel timestamps set at NIC
+         * interrupt time, so the difference is true network round-trip time. */
         int64_t diff_sec   = (int64_t)pkt_ts.tv_sec  - (int64_t)e->query_ts.tv_sec;
         int64_t diff_usec  = (int64_t)pkt_ts.tv_usec - (int64_t)e->query_ts.tv_usec;
+        /* Convert to milliseconds:
+         * diff_sec*1000 handles the seconds part
+         * diff_usec/1000 handles the microseconds part (may be negative if
+         * usec wrapped across a second boundary, but diff_sec covers that) */
         int64_t latency_ms = diff_sec * 1000 + diff_usec / 1000;
-        if (latency_ms < 0) latency_ms = 0;
+        if (latency_ms < 0) latency_ms = 0;  /* guard: clock anomaly / wraparound */
 
         if (rcode != 0)
         {

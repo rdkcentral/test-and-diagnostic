@@ -65,46 +65,82 @@ source/diagnostic/BbhmDiagNSLookup/
 ## 4. Architecture Overview
 
 ```
- NIC (erouter0)
+ NIC (brlan0 / erouter0)
       │
-      │  UDP port 53 traffic (BPF kernel filter)
+      │  UDP port 53 packets only (BPF kernel filter)
       ▼
- ┌──────────────────────────────────┐
- │         libpcap                  │
- │  pcap_open_live()                │
- │  BPF: "udp port 53"              │
- │  pcap_dispatch() → packet_cb()   │
- └──────────────────┬───────────────┘
-                    │ per-packet callback
+ ┌──────────────────────────────────────┐
+ │  libpcap                             │
+ │  pcap_open_live()  — open raw socket │
+ │  pcap_compile()    — compile BPF     │
+ │  pcap_setfilter()  — install in kernel│
+ │  pcap_dispatch()   — deliver packets  │
+ └──────────────────┬───────────────────┘
+                    │ per-packet callback (max 128 at once)
                     ▼
- ┌──────────────────────────────────────────────────────┐
- │  packet_cb()                                         │
- │                                                      │
- │  1. Parse Ethernet → IP(v4/v6) → UDP → DNS headers  │
- │  2. Extract: src_ip, dst_ip, txid, flags, RCODE      │
- │  3. Parse QNAME (wire format → dotted string)        │
- │  4. Parse QTYPE (A, AAAA, MX …)                      │
- │  5. Expire timed-out pending queries                 │
- │                                                      │
- │  If QR=0 (query):                                    │
- │    pending_insert(txid, client_ip, …)                │
- │    stats.query_count++                               │
- │                                                      │
- │  If QR=1 (response):                                 │
- │    e = pending_remove(txid, client_ip)               │
- │    latency_ms = response_ts − e->query_ts            │
- │    RCODE==0  → [DNS_RESP_OK] / [DNS_SLOW]            │
- │    RCODE!=0  → [DNS_FAIL]  + server_bump_fail()      │
- └──────────────────┬───────────────────────────────────┘
-                    │ every report_sec
+ ┌──────────────────────────────────────────────────────────────────┐
+ │  packet_cb(user, header, packet)                                 │
+ │                                                                  │
+ │  /* Layer parsing — ptr walks forward, rem tracks bounds */      │
+ │  Ethernet (14B) → EtherType (0x0800/0x86DD)                     │
+ │  IPv4/IPv6      → ip4_to_str()/ip6_to_str() → src_ip, dst_ip   │
+ │  UDP (8B)       → sport, dport                                   │
+ │  DNS (12B)      → txid, QR bit, RCODE                           │
+ │  Question sect  → parse_qname() → qname_str, qtype              │
+ │                                                                  │
+ │  /* Direction: dport==53 = query out; sport==53 = response in */ │
+ │  client_ip = (dport==53) ? src_ip : dst_ip                      │
+ │  server_ip = (dport==53) ? dst_ip : src_ip                      │
+ │                                                                  │
+ │  pending_expire(pkt_ts, timeout=5s, on_timeout)                 │
+ │    └─ on_timeout() → [DNS_TIMEOUT] log + g_stats.timeout++      │
+ │                                                                  │
+ │  if QR=0 (query):                                                │
+ │    g_stats.query_count++                                        │
+ │    client_bump(client_ip)   → burst_count (flood detection)     │
+ │    if burst >= flood_qps  → [DNS_FLOOD] log immediately         │
+ │    pending_insert(txid, client_ip, server_ip, qname, ts)        │
+ │    if verbose             → [DNS_QUERY] log                     │
+ │                                                                  │
+ │  if QR=1 (response):                                             │
+ │    e = pending_remove(txid, client_ip)  ← O(1) hash lookup     │
+ │    if e==NULL → skip (unsolicited/duplicate)                    │
+ │    latency_ms = (pkt_ts - e->query_ts) in ms                   │
+ │    if RCODE != 0:                                               │
+ │      g_stats.nxdomain/servfail/refused++                       │
+ │      server_bump_fail(server_ip)                               │
+ │      [DNS_FAIL] log                                             │
+ │    else:                                                        │
+ │      g_stats.success_count++, total_latency_ms+=, max update   │
+ │      if latency >= slow_thresh → [DNS_SLOW] log                │
+ │      else if verbose           → [DNS_RESP_OK] log             │
+ │    free(e)                                                      │
+ └──────────────────┬───────────────────────────────────────────────┘
+                    │ every report_sec seconds
                     ▼
- ┌──────────────────────────────────────────────────────┐
- │  report_and_reset()                                  │
- │  • Force-expire all pending → [DNS_TIMEOUT] lines    │
- │  • Print [DNS_SUMMARY] log line                      │
- │  • Emit Telemetry-2 markers                          │
- │  • Zero all accumulators                             │
- └──────────────────────────────────────────────────────┘
+ ┌──────────────────────────────────────────────────────────────────┐
+ │  report_and_reset()                                              │
+ │                                                                  │
+ │  pending_expire(now, 0, on_timeout) → force-expire all pending  │
+ │  avg_ms = total_latency_ms / success_count                      │
+ │                                                                  │
+ │  /* Flood check: scan g_clients[] for peak burst_count */       │
+ │  if peak_burst >= flood_qps  → [DNS_FLOOD] + flood_events++    │
+ │                                                                  │
+ │  /* Degraded check: three independent triggers */               │
+ │  high_latency  = success>=5  AND avg_ms  >= degrade_avg_ms     │
+ │  high_timeouts = queries>=10 AND timeout_pct >= 15%            │
+ │  high_servfail = queries>=5  AND servfail/queries >= 20%       │
+ │  if any true → [NET_DEGRADED] log + degrade_events++           │
+ │                                                                  │
+ │  top_client() → scan g_clients[], find max query_count         │
+ │                                                                  │
+ │  [DNS_SUMMARY] log  (all counters on one grep-able line)        │
+ │                                                                  │
+ │  t2_event_d/s() × 10  → Telemetry-2 pipeline                  │
+ │                                                                  │
+ │  memset(g_stats, g_servers, g_clients) → reset for next interval│
+ └──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
