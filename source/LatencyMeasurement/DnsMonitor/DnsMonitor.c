@@ -81,7 +81,7 @@
 #define DNS_HASH_BUCKETS     4096   /* must be power-of-2 */
 #define MAX_QNAME_LEN        256
 #define MAX_IP_STR           INET6_ADDRSTRLEN
-#define MAX_CLIENT_TRACK     32    /* per-client query rate tracker slots        */
+#define CLIENT_HASH_BUCKETS  256   /* hash buckets for per-client tracker        */
 
 /* ------------------------------------------------------------------ */
 /* IP / UDP / DNS header layouts (packed, no system-header dependency) */
@@ -540,16 +540,57 @@ static void server_bump_fail(const char *server_ip)
 }
 
 /* Per-client query rate tracker — includes 1-second burst window for flood detection */
-typedef struct {
+typedef struct client_stat {
     char     ip[MAX_IP_STR];   /* IP address string (IPv4 or IPv6)        */
     char     mac[18];          /* Ethernet source MAC "aa:bb:cc:dd:ee:ff" */
     uint64_t query_count;      /* total queries since interval start      */
     uint64_t burst_count;      /* queries in current 1-second window      */
     time_t   burst_window_start; /* start of the 1-second burst window    */
+    uint32_t qtype_a;          /* per-client QTYPE counters (from net_telemetry) */
+    uint32_t qtype_aaaa;
+    uint32_t qtype_ptr;
+    uint32_t qtype_txt;
+    uint32_t qtype_mx;
+    uint32_t qtype_srv;
+    uint32_t qtype_other;
+    struct client_stat *next;  /* hash chain — replaces fixed array       */
 } client_stat_t;
-static client_stat_t g_clients[MAX_CLIENT_TRACK];
-static int           g_client_count = 0;
-static time_t        g_interval_start = 0;
+static client_stat_t *g_clients[CLIENT_HASH_BUCKETS]; /* hash table of pointers */
+static int            g_client_count = 0;
+static time_t         g_interval_start = 0;
+
+/* Per-client QTYPE helpers (ported from net_telemetry) */
+static unsigned int client_ip_hash(const char *ip)
+{
+    unsigned int h = 5381;
+    while (*ip) { h = ((h << 5) + h) + (unsigned char)*ip++; }
+    return h % CLIENT_HASH_BUCKETS;
+}
+
+static void increment_client_qtype(client_stat_t *c, uint16_t qtype)
+{
+    switch (qtype) {
+        case 1:  c->qtype_a++;     break;
+        case 28: c->qtype_aaaa++;  break;
+        case 12: c->qtype_ptr++;   break;
+        case 16: c->qtype_txt++;   break;
+        case 15: c->qtype_mx++;    break;
+        case 33: c->qtype_srv++;   break;
+        default: c->qtype_other++; break;
+    }
+}
+
+static const char *dominant_qtype(const client_stat_t *c)
+{
+    uint32_t max = c->qtype_a;  const char *label = "A";
+    if (c->qtype_aaaa  > max) { max = c->qtype_aaaa;  label = "AAAA"; }
+    if (c->qtype_ptr   > max) { max = c->qtype_ptr;   label = "PTR";  }
+    if (c->qtype_txt   > max) { max = c->qtype_txt;   label = "TXT";  }
+    if (c->qtype_mx    > max) { max = c->qtype_mx;    label = "MX";   }
+    if (c->qtype_srv   > max) { max = c->qtype_srv;   label = "SRV";  }
+    if (c->qtype_other > max) {                        label = "OTHER"; (void)max; }
+    return label;
+}
 
 /**
  * @brief  Increment query counters for a client and return the current
@@ -559,41 +600,44 @@ static time_t        g_interval_start = 0;
  *
  * @param  client_ip  Source IP string of the querying client
  * @param  src_mac    Source MAC from Ethernet header (e.g. "28:f1:0e:12:a1:a4")
+ * @param  qtype      DNS QTYPE of the query (for per-client QTYPE counters)
  * @return Current burst_count for this client (queries in current second).
- *         Returns 0 if g_clients[] table is full (MAX_CLIENT_TRACK=32).
+ *         Returns 0 on allocation failure.
  */
-static uint64_t client_bump(const char *client_ip, const char *src_mac)
+static uint64_t client_bump(const char *client_ip, const char *src_mac,
+                             uint16_t qtype)
 {
     time_t now_sec = time(NULL);
-    for (int i = 0; i < g_client_count; i++) {
-        if (strncmp(g_clients[i].ip, client_ip, MAX_IP_STR) == 0) {
-            g_clients[i].query_count++;             /* total for this interval */
-            /* Update MAC if not yet recorded (first packet from this client) */
-            if (g_clients[i].mac[0] == '\0' && src_mac)
-                strncpy(g_clients[i].mac, src_mac, sizeof(g_clients[i].mac) - 1);
-            /* Slide the 1-second window if a new second has started */
-            if (now_sec != g_clients[i].burst_window_start) {
-                g_clients[i].burst_count = 1;       /* first query in new second */
-                g_clients[i].burst_window_start = now_sec;
+    unsigned int b = client_ip_hash(client_ip);
+    for (client_stat_t *c = g_clients[b]; c; c = c->next) {
+        if (strncmp(c->ip, client_ip, MAX_IP_STR) == 0) {
+            c->query_count++;
+            if (c->mac[0] == '\0' && src_mac)
+                strncpy(c->mac, src_mac, sizeof(c->mac) - 1);
+            if (now_sec != c->burst_window_start) {
+                c->burst_count = 1;
+                c->burst_window_start = now_sec;
             } else {
-                g_clients[i].burst_count++;         /* another query same second */
+                c->burst_count++;
             }
-            return g_clients[i].burst_count;
+            increment_client_qtype(c, qtype);
+            return c->burst_count;
         }
     }
-    /* New client — allocate a slot */
-    if (g_client_count < MAX_CLIENT_TRACK) {
-        strncpy(g_clients[g_client_count].ip,  client_ip, MAX_IP_STR - 1);
-        if (src_mac)
-            strncpy(g_clients[g_client_count].mac, src_mac,
-                    sizeof(g_clients[g_client_count].mac) - 1);
-        g_clients[g_client_count].query_count        = 1;
-        g_clients[g_client_count].burst_count        = 1;
-        g_clients[g_client_count].burst_window_start = now_sec;
-        g_client_count++;
-        return 1;
-    }
-    return 0; /* table full — MAX_CLIENT_TRACK (32) clients already tracked */
+    /* New client — calloc and chain into hash bucket */
+    client_stat_t *c = calloc(1, sizeof(*c));
+    if (!c) return 0;
+    strncpy(c->ip, client_ip, MAX_IP_STR - 1);
+    if (src_mac)
+        strncpy(c->mac, src_mac, sizeof(c->mac) - 1);
+    c->query_count        = 1;
+    c->burst_count        = 1;
+    c->burst_window_start = now_sec;
+    increment_client_qtype(c, qtype);
+    c->next      = g_clients[b];
+    g_clients[b] = c;
+    g_client_count++;
+    return 1;
 }
 
 /* Return IP of the client with most queries (for telemetry) */
@@ -602,11 +646,13 @@ static void top_client(char *out_ip, uint64_t *out_count)
     uint64_t max = 0;
     out_ip[0] = '\0';
     *out_count = 0;
-    for (int i = 0; i < g_client_count; i++) {
-        if (g_clients[i].query_count > max) {
-            max = g_clients[i].query_count;
-            strncpy(out_ip, g_clients[i].ip, MAX_IP_STR - 1);
-            *out_count = max;
+    for (int b = 0; b < CLIENT_HASH_BUCKETS; b++) {
+        for (client_stat_t *c = g_clients[b]; c; c = c->next) {
+            if (c->query_count > max) {
+                max = c->query_count;
+                strncpy(out_ip, c->ip, MAX_IP_STR - 1);
+                *out_count = max;
+            }
         }
     }
 }
@@ -633,37 +679,47 @@ static void print_client_summary(const char *now_ts)
 {
     if (g_client_count == 0) return;
 
-    /* Sort by query_count descending (simple insertion sort — max 32 elements) */
-    client_stat_t sorted[MAX_CLIENT_TRACK];
+    /* Collect pointers from hash table into flat array for sorting */
     int n = g_client_count;
-    for (int i = 0; i < n; i++) sorted[i] = g_clients[i];
+    client_stat_t **ptrs = malloc((size_t)n * sizeof(client_stat_t *));
+    if (!ptrs) return;
+    int idx = 0;
+    for (int b = 0; b < CLIENT_HASH_BUCKETS && idx < n; b++) {
+        for (client_stat_t *c = g_clients[b]; c && idx < n; c = c->next)
+            ptrs[idx++] = c;
+    }
+    n = idx;
+
+    /* Insertion sort by query_count descending */
     for (int i = 1; i < n; i++) {
-        client_stat_t key = sorted[i];
+        client_stat_t *key = ptrs[i];
         int j = i - 1;
-        while (j >= 0 && sorted[j].query_count < key.query_count) {
-            sorted[j + 1] = sorted[j];
+        while (j >= 0 && ptrs[j]->query_count < key->query_count) {
+            ptrs[j + 1] = ptrs[j];
             j--;
         }
-        sorted[j + 1] = key;
+        ptrs[j + 1] = key;
     }
 
     /* Header line */
     fprintf(stdout,
             "[CLIENT_SUMMARY] ts=%s iface=%s total_clients=%d\n"
-            "[CLIENT_SUMMARY] %-3s %-40s %-18s %s\n",
+            "[CLIENT_SUMMARY] %-3s %-40s %-18s %-6s %s\n",
             now_ts, g_cfg.iface, n,
-            "#", "IP", "MAC", "queries");
+            "#", "IP", "MAC", "qtype", "queries");
 
     /* One row per client */
     for (int i = 0; i < n; i++) {
         fprintf(stdout,
-                "[CLIENT_SUMMARY] %-3d %-40s %-18s %llu\n",
+                "[CLIENT_SUMMARY] %-3d %-40s %-18s %-6s %llu\n",
                 i + 1,
-                sorted[i].ip,
-                sorted[i].mac[0] ? sorted[i].mac : "(unknown)",
-                (unsigned long long)sorted[i].query_count);
+                ptrs[i]->ip,
+                ptrs[i]->mac[0] ? ptrs[i]->mac : "(unknown)",
+                dominant_qtype(ptrs[i]),
+                (unsigned long long)ptrs[i]->query_count);
     }
     fflush(stdout);
+    free(ptrs);
 }
 
 /* ------------------------------------------------------------------ */
@@ -747,10 +803,12 @@ static void report_and_reset(void)
     top_client(top_ip, &top_cnt);
     uint64_t peak_burst = 0;
     char     flood_client[MAX_IP_STR] = "";
-    for (int ci = 0; ci < g_client_count; ci++) {
-        if (g_clients[ci].burst_count > peak_burst) {
-            peak_burst = g_clients[ci].burst_count;
-            strncpy(flood_client, g_clients[ci].ip, MAX_IP_STR - 1);
+    for (int b = 0; b < CLIENT_HASH_BUCKETS; b++) {
+        for (client_stat_t *c = g_clients[b]; c; c = c->next) {
+            if (c->burst_count > peak_burst) {
+                peak_burst = c->burst_count;
+                strncpy(flood_client, c->ip, MAX_IP_STR - 1);
+            }
         }
     }
     if (peak_burst >= (uint64_t)g_cfg.flood_qps) {
@@ -884,7 +942,12 @@ static void report_and_reset(void)
 
     memset(&g_stats,  0, sizeof(g_stats));
     memset(g_servers, 0, sizeof(g_servers));
-    memset(g_clients, 0, sizeof(g_clients));
+    /* Free all chained client entries, then zero the bucket pointers */
+    for (int b = 0; b < CLIENT_HASH_BUCKETS; b++) {
+        client_stat_t *c = g_clients[b];
+        while (c) { client_stat_t *nx = c->next; free(c); c = nx; }
+        g_clients[b] = NULL;
+    }
     g_server_count   = 0;
     g_client_count   = 0;
     g_interval_start = now_tv.tv_sec;
@@ -1082,7 +1145,7 @@ static void packet_cb(u_char *user,
 
         /* Track per-client query count for flood detection.
          * Pass src_mac so the client table records the MAC on first query seen. */
-        uint64_t burst_qps = client_bump(client_ip, src_mac);
+        uint64_t burst_qps = client_bump(client_ip, src_mac, qtype);
         if (burst_qps >= (uint64_t)g_cfg.flood_qps) {
             fprintf(stdout,
                     "[DNS_FLOOD] ts=%s iface=%s"
