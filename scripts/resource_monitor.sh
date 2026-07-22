@@ -539,7 +539,9 @@ fi
 
             # --- Exclusion list ---
             # Hardcoded defaults — always excluded regardless of RFC
-            DUAL_PROC_EXCLUDE_DEFAULT="sleep,dropbear,sh,ash,ssh,stunnel"
+            # Note: sh/ash are handled separately in awk — bare login shells are
+            # skipped but sh/ash invoked with a script argument are allowed through
+            DUAL_PROC_EXCLUDE_DEFAULT="sleep,dropbear,ssh,stunnel"
             # RFC-configured additions (appended to the default list)
             DUAL_PROC_EXCLUDE_RFC=$(syscfg get SelfHealDualProcExcludeList 2>/dev/null)
             if [ -n "$DUAL_PROC_EXCLUDE_RFC" ]; then
@@ -568,8 +570,16 @@ fi
                     base = parts[n]
                     # Strip leading dash (e.g. -sh -> sh)
                     gsub(/^-/, "", base)
-                    # Skip exclusion list (defaults + RFC additions)
-                    if (base in excl) next
+                    # For shell interpreters (sh/ash), only exclude bare login shells
+                    # (i.e. no script argument). Scripts invoked as "sh /path/script.sh"
+                    # should still be detected as duplicates.
+                    if (base == "sh" || base == "ash") {
+                        if (NF <= 5) next   # bare sh/ash with no arguments — skip
+                        # has arguments — allow through for duplicate detection
+                    } else {
+                        # For all other processes, apply exclusion list normally
+                        if (base in excl) next
+                    }
                     count[cmd]++
                     lines[cmd] = lines[cmd] "\n" $0
                 }
