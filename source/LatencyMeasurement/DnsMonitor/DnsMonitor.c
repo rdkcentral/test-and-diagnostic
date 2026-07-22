@@ -553,6 +553,7 @@ typedef struct client_stat {
     uint32_t qtype_mx;
     uint32_t qtype_srv;
     uint32_t qtype_other;
+    time_t   last_flood_sec;   /* last second a [DNS_FLOOD] was logged (throttle) */
     struct client_stat *next;  /* hash chain — replaces fixed array       */
 } client_stat_t;
 static client_stat_t *g_clients[CLIENT_HASH_BUCKETS]; /* hash table of pointers */
@@ -1147,14 +1148,24 @@ static void packet_cb(u_char *user,
          * Pass src_mac so the client table records the MAC on first query seen. */
         uint64_t burst_qps = client_bump(client_ip, src_mac, qtype);
         if (burst_qps >= (uint64_t)g_cfg.flood_qps) {
-            fprintf(stdout,
-                    "[DNS_FLOOD] ts=%s iface=%s"
-                    " client=%s burst_qps=%llu threshold_qps=%d\n",
-                    iso_ts(&pkt_ts), g_cfg.iface,
-                    client_ip,
-                    (unsigned long long)burst_qps,
-                    g_cfg.flood_qps);
-            fflush(stdout);
+            /* Throttle to one [DNS_FLOOD] log line per second per client */
+            unsigned int b2 = client_ip_hash(client_ip);
+            for (client_stat_t *c2 = g_clients[b2]; c2; c2 = c2->next) {
+                if (strncmp(c2->ip, client_ip, MAX_IP_STR) == 0) {
+                    if (c2->last_flood_sec != pkt_ts.tv_sec) {
+                        c2->last_flood_sec = pkt_ts.tv_sec;
+                        fprintf(stdout,
+                                "[DNS_FLOOD] ts=%s iface=%s"
+                                " client=%s burst_qps=%llu threshold_qps=%d\n",
+                                iso_ts(&pkt_ts), g_cfg.iface,
+                                client_ip,
+                                (unsigned long long)burst_qps,
+                                g_cfg.flood_qps);
+                        fflush(stdout);
+                    }
+                    break;
+                }
+            }
         }
 
         if (g_cfg.verbose) {
