@@ -97,8 +97,10 @@ source/diagnostic/BbhmDiagNSLookup/
  │                                                                  │
  │  if QR=0 (query):                                                │
  │    g_stats.query_count++                                        │
- │    client_bump(client_ip)   → burst_count (flood detection)     │
- │    if burst >= flood_qps  → [DNS_FLOOD] log immediately         │
+ │    client_bump(client_ip, src_mac, qtype)  → burst_count       │
+ │      increments QTYPE counter + per-client query count         │
+ │    if burst >= flood_qps AND last_flood_sec != pkt_sec:        │
+ │      → [DNS_FLOOD] log (throttled: once per second per client) │
  │    pending_insert(txid, client_ip, server_ip, qname, ts)        │
  │    if verbose             → [DNS_QUERY] log                     │
  │                                                                  │
@@ -124,7 +126,7 @@ source/diagnostic/BbhmDiagNSLookup/
  │  pending_expire(now, 0, on_timeout) → force-expire all pending  │
  │  avg_ms = total_latency_ms / success_count                      │
  │                                                                  │
- │  /* Flood check: scan g_clients[] for peak burst_count */       │
+ │  /* Flood check: iterate g_clients[] hash table for peak burst */│
  │  if peak_burst >= flood_qps  → [DNS_FLOOD] + flood_events++    │
  │                                                                  │
  │  /* Degraded check: three independent triggers */               │
@@ -133,13 +135,16 @@ source/diagnostic/BbhmDiagNSLookup/
  │  high_servfail = queries>=5  AND servfail/queries >= 20%       │
  │  if any true → [NET_DEGRADED] log + degrade_events++           │
  │                                                                  │
- │  top_client() → scan g_clients[], find max query_count         │
+ │  top_client()  → iterate hash table, find max query_count      │
+ │  print_client_summary() → [CLIENT_SUMMARY] per-client table    │
+ │    dominant_qtype(c) → most frequent QTYPE for each client     │
  │                                                                  │
  │  [DNS_SUMMARY] log  (all counters on one grep-able line)        │
  │                                                                  │
  │  t2_event_d/s() × 10  → Telemetry-2 pipeline                  │
  │                                                                  │
- │  memset(g_stats, g_servers, g_clients) → reset for next interval│
+ │  free all g_clients[] chain entries → reset hash table          │
+ │  memset(g_stats, g_servers) → reset for next interval           │
  └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -185,6 +190,8 @@ typedef struct {
     uint64_t refused;            // RCODE=5
     uint64_t other_rcode;        // any other non-zero RCODE
     uint64_t timeout;            // queries expired with no response
+    uint64_t flood_events;       // intervals where a client exceeded flood_qps
+    uint64_t degrade_events;     // intervals where network was flagged degraded
 } stats_t;
 ```
 
@@ -201,6 +208,49 @@ static server_stat_t g_servers[MAX_SERVER_TRACK];
 Tracks up to 8 upstream DNS server IPs. Each RCODE failure or timeout increments
 the counter for the responsible server. Reported in `[DNS_SUMMARY]` as
 `server_fails=[8.8.8.8:12,1.1.1.1:3]`.
+
+### 5.4 Per-client tracker (hash table)
+
+Each LAN client that issues DNS queries gets a `client_stat_t` entry, keyed by
+source IP. The table uses a 256-bucket open-addressing hash with linked-list
+chaining so the number of tracked clients is unbounded.
+
+```c
+#define CLIENT_HASH_BUCKETS 256
+
+typedef struct client_stat {
+    char     ip[46];               // source IP (lookup key)
+    char     mac[18];              // Ethernet MAC "aa:bb:cc:dd:ee:ff"
+    uint64_t query_count;          // total queries this interval
+    uint64_t burst_count;          // queries in current 1-second window
+    time_t   burst_window_start;   // start of the 1-second burst window
+    uint32_t qtype_a;              // per-client QTYPE counters
+    uint32_t qtype_aaaa;
+    uint32_t qtype_ptr;
+    uint32_t qtype_txt;
+    uint32_t qtype_mx;
+    uint32_t qtype_srv;
+    uint32_t qtype_other;
+    time_t   last_flood_sec;       // last second [DNS_FLOOD] was logged (throttle)
+    struct client_stat *next;      // hash-chain next pointer
+} client_stat_t;
+
+static client_stat_t *g_clients[CLIENT_HASH_BUCKETS];
+```
+
+**QTYPE counters** are incremented by `increment_client_qtype()` on every outgoing
+query and used by `dominant_qtype()` to identify the most frequent record type for
+that client — shown as the `qtype` column in `[CLIENT_SUMMARY]`.
+
+**Flood throttle:** `last_flood_sec` prevents the `[DNS_FLOOD]` alert from firing
+on every packet. It is set to the current second when an alert is logged; the check
+in `packet_cb` only prints if `last_flood_sec != pkt_ts.tv_sec`.
+
+Entries are `calloc`'d on first query from a new client and freed inside
+`report_and_reset()` at each interval boundary.
+
+**Hash function:** djb2 variant — `h = h*33 + c` over each byte of the IP string,
+modulo `CLIENT_HASH_BUCKETS`.
 
 ---
 
@@ -292,6 +342,54 @@ Emitted when a tracked query receives no response within `query_timeout` seconds
   qname=slow.example.com qtype=MX
 ```
 
+#### `[DNS_FLOOD]`
+Emitted when a single client's 1-second burst rate reaches or exceeds `flood_qps`
+(default 50 qps). **Throttled to one line per second per client** to prevent log
+spam. Also emitted once in `report_and_reset()` for the interval peak.
+
+```
+[DNS_FLOOD] ts=2026-07-10T14:32:03.001Z iface=brlan0
+  client=10.0.0.58 burst_qps=72 threshold_qps=50
+```
+
+| Field | Description |
+|---|---|
+| `client` | IP of the flooding client |
+| `burst_qps` | Queries counted in the current 1-second window |
+| `threshold_qps` | Configured flood threshold (`-f` option) |
+
+#### `[NET_DEGRADED]`
+Emitted when any of three degraded-network triggers fire. **Always written.**
+
+```
+[NET_DEGRADED] ts=2026-07-10T14:33:00.000Z iface=erouter0
+  reason=high_latency avg_ms=340 timeout_pct=0 servfail=0 queries=30
+```
+
+| Trigger | Condition |
+|---|---|
+| `high_latency` | `success_count >= 5` AND `avg_ms >= degrade_avg_ms` (default 300) |
+| `high_timeouts` | `query_count >= 10` AND `timeout_pct >= 15%` |
+| `high_servfail` | `query_count >= 5` AND `servfail / queries >= 20%` |
+
+#### `[CLIENT_SUMMARY]`
+Emitted once per interval just before `[DNS_SUMMARY]`. Shows per-client stats
+sorted by descending query count.
+
+```
+[CLIENT_SUMMARY] ts=2026-07-10T14:37:01.000Z iface=brlan0 total_clients=2
+[CLIENT_SUMMARY] #   IP                                       MAC                qtype  queries
+[CLIENT_SUMMARY] 1   10.0.0.58                                28:f1:0e:12:a1:a4  A      72
+[CLIENT_SUMMARY] 2   2001:558:6045:12:987:cc98:4d57:5740      (unknown)          PTR    18
+```
+
+| Column | Description |
+|---|---|
+| `IP` | Client source IP (IPv4 or IPv6) |
+| `MAC` | Ethernet MAC from the query packet; `(unknown)` if not yet seen |
+| `qtype` | Dominant record type — whichever QTYPE this client queried most |
+| `queries` | Total query count for this report interval |
+
 #### `[DNS_SUMMARY]`
 Emitted once per report interval and once at START/STOP. **Always written.**
 This is also the point where Telemetry-2 markers are sent.
@@ -300,8 +398,10 @@ This is also the point where Telemetry-2 markers are sent.
 [DNS_SUMMARY] ts=2026-07-10T14:37:01.000Z iface=erouter0
   queries=842 success=829 slow=4
   fail_total=13
-  nxdomain=8 servfail=2 refused=1 other_rcode=0 timeout=2
+  nxdomain=8 servfail=2 refused=1 other_rcode=0 timeout=2 timeout_pct=0
   avg_ms=38 max_ms=412
+  flood_events=0 degrade_events=0
+  top_client=10.0.0.58:829
   server_fails=[8.8.8.8:3,1.1.1.1:2]
 ```
 
@@ -319,6 +419,10 @@ All markers are emitted inside `report_and_reset()` via the Telemetry-2 API.
 | `NET_DNS_PCAP_SLOW_CNT_split` | int | always | Queries that succeeded but exceeded slow threshold |
 | `NET_DNS_PCAP_FAIL_CNT_split` | int | always | Total failures (rcode errors + timeouts) |
 | `NET_DNS_PCAP_FAIL_TYPE_split` | string | fail_total > 0 | `"nxdomain=N,servfail=N,refused=N,other_rcode=N,timeout=N"` |
+| `NET_DNS_PCAP_TIMEOUT_RATE_pct_split` | int | always | Timeout percentage: `timeout * 100 / queries` |
+| `NET_DNS_PCAP_FLOOD_CNT_split` | int | always | Number of per-interval flood events detected |
+| `NET_DNS_PCAP_DEGRADED_split` | int | always | `1` if any degraded trigger fired this interval, else `0` |
+| `NET_DNS_PCAP_TOP_CLIENT_split` | string | client seen | `"<ip>:<count>"` for the client with most queries |
 
 These markers complement the existing `BbhmDiagNSLookup` telemetry markers
 (`NET_DNS_LATENCY_AVG_ms_split`, `NET_DNS_FAIL_CNT_split`, `NET_DNS_FAIL_TYPE_split`)
@@ -339,6 +443,8 @@ DnsMonitor -i <iface> [-r <report_sec>] [-t <timeout_sec>] [-s <slow_ms>] [-v]
 | `-r <report_sec>` | 300 | Telemetry reporting interval in seconds |
 | `-t <timeout_sec>` | 5 | Seconds before an unanswered query is declared a timeout |
 | `-s <slow_ms>` | 200 | Latency threshold in ms above which a `[DNS_SLOW]` line is emitted |
+| `-f <flood_qps>` | 50 | Per-client queries/second threshold for `[DNS_FLOOD]` alert |
+| `-d <degrade_avg_ms>` | 300 | Average latency threshold (ms) for `high_latency` degraded trigger |
 | `-v` | off | Verbose mode — also logs `[DNS_QUERY]` and `[DNS_RESP_OK]` |
 
 ### Example invocations
@@ -500,6 +606,7 @@ step would add:
 | Per-server tracker limited to 8 entries | More than 8 upstream servers: oldest entries are dropped | Use a proper hash map |
 | Single-threaded | Very high DNS rates (> ~50k qps) may cause dropped packets | Use `pcap_loop` with ring buffer or AF_PACKET |
 | txid collision on duplicate queries | Retransmitted query overwrites the earlier timestamp | Add retransmit counter and keep earliest timestamp |
+| Client tracked by IP, not MAC | IPv6 SLAAC addresses can rotate; same device appears as multiple clients | Use MAC as primary key (already recorded — change hash key) |
 
 ---
 

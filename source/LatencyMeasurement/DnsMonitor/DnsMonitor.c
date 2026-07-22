@@ -539,15 +539,19 @@ static void server_bump_fail(const char *server_ip)
     /* else: silently drop — table full, MAX_SERVER_TRACK exceeded */
 }
 
-/* Per-client query rate tracker — includes 1-second burst window for flood detection */
+/* Per-client query rate tracker
+ * - 1-second burst window for flood detection
+ * - per-QTYPE histogram for dominant_qtype() / [CLIENT_SUMMARY]
+ * - dynamically allocated; stored in a 256-bucket hash table keyed by IP
+ */
 typedef struct client_stat {
     char     ip[MAX_IP_STR];   /* IP address string (IPv4 or IPv6)        */
     char     mac[18];          /* Ethernet source MAC "aa:bb:cc:dd:ee:ff" */
     uint64_t query_count;      /* total queries since interval start      */
     uint64_t burst_count;      /* queries in current 1-second window      */
     time_t   burst_window_start; /* start of the 1-second burst window    */
-    uint32_t qtype_a;          /* per-client QTYPE counters (from net_telemetry) */
-    uint32_t qtype_aaaa;
+    uint32_t qtype_a;          /* per-client QTYPE histogram              */
+    uint32_t qtype_aaaa;       /*   (A, AAAA, PTR, TXT, MX, SRV, OTHER)  */
     uint32_t qtype_ptr;
     uint32_t qtype_txt;
     uint32_t qtype_mx;
@@ -561,6 +565,18 @@ static int            g_client_count = 0;
 static time_t         g_interval_start = 0;
 
 /* Per-client QTYPE helpers (ported from net_telemetry) */
+
+/**
+ * @brief  Map a client IP string to a hash bucket index.
+ *
+ * djb2 variant: h = h*33 + c, modulo CLIENT_HASH_BUCKETS.
+ * Keying on IP (not MAC) keeps the lookup O(1) per packet because
+ * the IP is already parsed from the network header; MAC would require
+ * an additional Ethernet header read on the response path.
+ *
+ * @param  ip   Null-terminated IP string ("10.0.0.58" or IPv6)
+ * @return Bucket index in [0, CLIENT_HASH_BUCKETS-1]
+ */
 static unsigned int client_ip_hash(const char *ip)
 {
     unsigned int h = 5381;
@@ -568,6 +584,17 @@ static unsigned int client_ip_hash(const char *ip)
     return h % CLIENT_HASH_BUCKETS;
 }
 
+/**
+ * @brief  Increment the per-client QTYPE counter for the given record type.
+ *
+ * Called by client_bump() on every outgoing query so that each client_stat_t
+ * entry accumulates a per-type histogram over the report interval.
+ * The histogram is read by dominant_qtype() to populate the [CLIENT_SUMMARY]
+ * qtype column.
+ *
+ * @param  c      Per-client stats entry to update
+ * @param  qtype  DNS record type (1=A, 28=AAAA, 12=PTR, 16=TXT, 15=MX, 33=SRV)
+ */
 static void increment_client_qtype(client_stat_t *c, uint16_t qtype)
 {
     switch (qtype) {
@@ -581,6 +608,19 @@ static void increment_client_qtype(client_stat_t *c, uint16_t qtype)
     }
 }
 
+/**
+ * @brief  Return the name of the most-queried record type for a client.
+ *
+ * Scans the per-client QTYPE histogram and returns the label of whichever
+ * counter is highest. Used as the 'qtype' column in [CLIENT_SUMMARY].
+ *
+ * Example: a Raspberry Pi that runs mDNS discovery will show "PTR" here.
+ *          A laptop doing normal web browsing will show "A" or "AAAA".
+ *
+ * @param  c  Per-client stats entry (read-only)
+ * @return Pointer to a static string literal ("A", "AAAA", "PTR", "TXT",
+ *         "MX", "SRV", or "OTHER"). Never NULL.
+ */
 static const char *dominant_qtype(const client_stat_t *c)
 {
     uint32_t max = c->qtype_a;  const char *label = "A";
@@ -1148,7 +1188,11 @@ static void packet_cb(u_char *user,
          * Pass src_mac so the client table records the MAC on first query seen. */
         uint64_t burst_qps = client_bump(client_ip, src_mac, qtype);
         if (burst_qps >= (uint64_t)g_cfg.flood_qps) {
-            /* Throttle to one [DNS_FLOOD] log line per second per client */
+            /* Throttle [DNS_FLOOD] to one line per second per client.
+             * Without this, every packet above the threshold would emit a
+             * line — 50+ lines/sec for a 100-qps flooder at flood_qps=50.
+             * We look up the same hash bucket we just updated in client_bump()
+             * and compare last_flood_sec to the current packet second. */
             unsigned int b2 = client_ip_hash(client_ip);
             for (client_stat_t *c2 = g_clients[b2]; c2; c2 = c2->next) {
                 if (strncmp(c2->ip, client_ip, MAX_IP_STR) == 0) {
