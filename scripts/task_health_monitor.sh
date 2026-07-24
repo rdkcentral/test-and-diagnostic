@@ -479,7 +479,7 @@ self_heal_sedaemon()
 {
     if [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
 
-    	if systemctl list-unit-files | grep -q "^accessmanager.service"; then
+    	if systemctl list-unit-files --type=service --no-legend --no-pager accessmanager.service 2>/dev/null | grep -q '^accessmanager\.service'; then
         	accessmgr=$(pidof accessManager)
         	accessmgr_supported=1
     	else
@@ -503,15 +503,15 @@ self_heal_sedaemon()
 			systemctl stop "$daemon_service"
 
         	if [ "$accessmgr_supported" -eq 1 ]; then
-			    echo_t "[RDKB_SELFHEAL] : Restarting accessmanager"		
-            	systemctl stop accessmanager.service
-				systemctl start accessmanager.service
-				t2CountNotify "SYS_SH_SERestart"			
+		    echo_t "[RDKB_SELFHEAL] : Restarting accessmanager"		
+            	    systemctl stop accessmanager.service
+		    systemctl start accessmanager.service
+		    t2CountNotify "SYS_SH_SERestart"			
 	    	fi
         	systemctl start "$daemon_service"
-			if [ "$accessmgr_supported" -eq 1 ]; then
-				t2CountNotify "SYS_SH_TEERestart"
-			fi
+		if [ "$accessmgr_supported" -eq 0 ]; then
+		    t2CountNotify "SYS_SH_TEERestart"
+		fi
     	fi
 	fi
 }
