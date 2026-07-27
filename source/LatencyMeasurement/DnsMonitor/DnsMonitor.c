@@ -698,6 +698,20 @@ static void top_client(char *out_ip, uint64_t *out_count)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Global config (set once at startup, then read-only)                 */
+/* ------------------------------------------------------------------ */
+static struct {
+    char iface[64];
+    int  report_sec;
+    int  query_timeout;
+    int  slow_thresh_ms;
+    int  flood_qps;        /* per-client queries/sec threshold for flood alert */
+    int  degrade_avg_ms;   /* avg latency threshold for degraded internet alert */
+    int  degrade_to_pct;   /* timeout % threshold for degraded internet alert  */
+    int  verbose;
+} g_cfg;
+
 /**
  * @brief  Print a formatted per-client query summary table.
  *
@@ -762,20 +776,6 @@ static void print_client_summary(const char *now_ts)
     fflush(stdout);
     free(ptrs);
 }
-
-/* ------------------------------------------------------------------ */
-/* Global config (set once at startup, then read-only)                 */
-/* ------------------------------------------------------------------ */
-static struct {
-    char iface[64];
-    int  report_sec;
-    int  query_timeout;
-    int  slow_thresh_ms;
-    int  flood_qps;        /* per-client queries/sec threshold for flood alert */
-    int  degrade_avg_ms;   /* avg latency threshold for degraded internet alert */
-    int  degrade_to_pct;   /* timeout % threshold for degraded internet alert  */
-    int  verbose;
-} g_cfg;
 
 static volatile int g_running = 1;
 static void sig_handler(int s) { (void)s; g_running = 0; }
@@ -1118,6 +1118,10 @@ static void packet_cb(u_char *user,
     } else {
         return;
     }
+
+    /* BPF ensures only UDP port-53 packets arrive, but guard explicitly so
+     * ip_proto is considered "used" and to reject any non-UDP edge case. */
+    if (ip_proto != IP_PROTO_UDP) return;
 
     /* ── Layer 4: UDP header ──────────────────────────────────────── */
     if (rem < (int)sizeof(udphdr_t)) return;
