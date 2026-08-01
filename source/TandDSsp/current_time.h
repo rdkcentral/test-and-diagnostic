@@ -58,3 +58,4 @@ void* updateTimeThread(void* arg);
 void get_sleep_time(unsigned int *sleep_time);
 void updateTimeThread_create();
 void UpdatedeviceTimeorbuildTime(long long currentEpochTime, long long build_epoch);
+void setClockEventFile(void);
