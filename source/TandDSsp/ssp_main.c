@@ -51,6 +51,7 @@
 #include "current_time.h"
 #include <telemetry_busmessage_sender.h>
 #include "webcfg_selfheal.h"
+#include "ntp_sync_monitor.h"
 
 #ifdef DEVICE_PRIORITIZATION_ENABLED
 #include "device_prio_apis.h"
@@ -393,6 +394,14 @@ int main(int argc, char* argv[])
         updateTimeThread_create();
     }
 
+    /*
+     * Start the daemon-agnostic NTP sync monitor (first-sync detection +
+     * periodic offset/frequency telemetry). This MUST remain UNCONDITIONAL —
+     * it runs on every platform regardless of EthWAN, extender, or RFC
+     * (chrony/ntpd). Do NOT move it inside the ethwanEnabled/callUpdate gate.
+     */
+    ntp_sync_monitor_start();
+	
 #ifdef DEVICE_PRIORITIZATION_ENABLED
     // Init device prioritization
     DevicePrioInit();
