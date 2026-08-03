@@ -4146,12 +4146,19 @@ case $SELFHEAL_TYPE in
     "BASE")
         #Checking the ntpd is running or not
         if [ "$WAN_TYPE" != "EPON" ]; then
-            NTPD_PID=$(busybox pidof ntpd)
-            if [ "$NTPD_PID" = "" ]; then
-                echo_t "RDKB_PROCESS_CRASHED : NTPD is not running, restarting the NTPD"
-                sysevent set ntpd-restart
+           if [ -f /nvram/chrony_enabled ]; then
+                CHRONYD_PID=$(busybox pidof chronyd)
+                if [ "$CHRONYD_PID" = "" ]; then
+                    echo_t "RDKB_PROCESS_CRASHED : chronyd is not running, restarting chronyd"
+                    sysevent set chrony-restart
+                fi
+           else
+                NTPD_PID=$(busybox pidof ntpd)
+                if [ "$NTPD_PID" = "" ]; then
+                    echo_t "RDKB_PROCESS_CRASHED : NTPD is not running, restarting the NTPD"
+                    sysevent set ntpd-restart
+                fi
             fi
-
 
             #Checking if rpcserver is running
             RPCSERVER_PID=$(busybox pidof rpcserver)
@@ -4164,11 +4171,19 @@ case $SELFHEAL_TYPE in
     "TCCBR")
         #Checking the ntpd is running or not for TCCBR
         if [ "$WAN_TYPE" != "EPON" ]; then
-            NTPD_PID=$(busybox pidof ntpd)
-            if [ "$NTPD_PID" = "" ]; then
-                echo_t "RDKB_PROCESS_CRASHED : NTPD is not running, restarting the NTPD"
-                sysevent set ntpd-restart
-            fi
+          if [ -f /nvram/chrony_enabled ]; then
+                CHRONYD_PID=$(busybox pidof chronyd)
+                if [ "$CHRONYD_PID" = "" ]; then
+                    echo_t "RDKB_PROCESS_CRASHED : chronyd is not running, restarting chronyd"
+                    sysevent set chrony-restart
+                fi
+           else
+                NTPD_PID=$(busybox pidof ntpd)
+                if [ "$NTPD_PID" = "" ]; then
+                    echo_t "RDKB_PROCESS_CRASHED : NTPD is not running, restarting the NTPD"
+                    sysevent set ntpd-restart
+                fi
+           fi
         fi
     ;;
     "SYSTEMD")
