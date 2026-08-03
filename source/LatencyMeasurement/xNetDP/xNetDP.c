@@ -1058,6 +1058,8 @@ void MeasureTCPLatency(int hashIndex)
     if ( args.verbose_mode == false )
     {
         UpdateReportingTable(hashIndex);
+        if ( args.dbg_mode == true )
+            display();
         dbg_log("latency is computed for mac %s, seq %u, clearing data\n",hashArray[hashIndex].mac,hashArray[hashIndex].TcpInfo[INDEX_SYN].th_seq);
         memset(&hashArray[hashIndex],0,sizeof(TcpSniffer));
         g_HashCount--;  
@@ -1065,10 +1067,9 @@ void MeasureTCPLatency(int hashIndex)
     else
     {
         hashArray[hashIndex].bComputed = TRUE;
+        if ( args.dbg_mode == true )
+            display();
     }
-             
-    if ( args.dbg_mode == true )
-        display();
 }
 void* LatencyReportThread(void* arg)
 {
@@ -1870,8 +1871,8 @@ int main(int argc,char **argv)
                 hashArray[hashIndex].TcpInfo[INDEX_ACK].th_seq  = message.th_seq;
                 hashArray[hashIndex].TcpInfo[INDEX_ACK].th_ack  = message.th_ack;
                 hashArray[hashIndex].TcpInfo[INDEX_ACK].tv_sec  = message.tv_sec;
-                hashArray[hashIndex].TcpInfo[INDEX_ACK].tv_usec  = message.tv_usec; 
-		MeasureTCPLatency(hashIndex);
+                hashArray[hashIndex].TcpInfo[INDEX_ACK].tv_usec  = message.tv_usec;
+                MeasureTCPLatency(hashIndex);
             }
         }
     }
