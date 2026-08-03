@@ -133,7 +133,7 @@ static int notify_first_sync(void)
     int se_fd = sysevent_open(SE_IP, SE_SERVER_WELL_KNOWN_PORT, SE_VERSION,
                               SE_PROG, &token);
     if (se_fd >= 0) {
-        if (sysevent_set_value(se_fd, token, "ntp_time_sync", "1", 0) != 0) {
+        if (sysevent_set(se_fd, token, "ntp_time_sync", "1", 0) != 0) {
             CcspTraceError(("NTP_SYNC_MONITOR : sysevent set ntp_time_sync failed\n"));
             rc = -1;
         }
