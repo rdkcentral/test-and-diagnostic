@@ -4150,7 +4150,7 @@ case $SELFHEAL_TYPE in
                 CHRONYD_PID=$(busybox pidof chronyd)
                 if [ "$CHRONYD_PID" = "" ]; then
                     echo_t "RDKB_PROCESS_CRASHED : chronyd is not running, restarting chronyd"
-                    sysevent set chrony-restart
+                    sysevent set chronyd-restart
                 fi
            else
                 NTPD_PID=$(busybox pidof ntpd)
@@ -4175,7 +4175,7 @@ case $SELFHEAL_TYPE in
                 CHRONYD_PID=$(busybox pidof chronyd)
                 if [ "$CHRONYD_PID" = "" ]; then
                     echo_t "RDKB_PROCESS_CRASHED : chronyd is not running, restarting chronyd"
-                    sysevent set chrony-restart
+                    sysevent set chronyd-restart
                 fi
            else
                 NTPD_PID=$(busybox pidof ntpd)
