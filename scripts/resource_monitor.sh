@@ -504,6 +504,118 @@ fi
             t2ValNotify "SlabUsage_split" "${8},${7},${16},${15},${24},${23}"
         )
     fi
+
+    # ---------------------------------------------------------------
+    # Duplicate process detection
+    # RFC 1: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.MultiProcessDetect.Enable
+    #        syscfg key: MultiProcDetectEnable  (default: true)
+    # RFC 2: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.MultiProcessDetect.ExcludeList
+    #        syscfg key: MultiProcDetectExcludeList   (additive, comma-separated basenames)
+    #        syscfg key: MultiProcDetectExcludeDefaultList (default exclusions, set via syscfg defaults)
+    # RFC 3: Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.MultiProcessDetect.DetectionInterval
+    #        syscfg key: MultiProcDetectInterval (minutes: 15|30|45|60, default: 15)
+    # ---------------------------------------------------------------
+
+    MULTI_PROC_DETECT_ENABLE=$(syscfg get MultiProcDetectEnable 2>/dev/null)
+    # Default: enabled
+    if [ -z "$MULTI_PROC_DETECT_ENABLE" ] || [ "$MULTI_PROC_DETECT_ENABLE" = "true" ]; then
+
+        # --- Interval control ---
+        # resource_monitor.sh runs every 15 min. Compute how many cycles to skip.
+        MULTI_PROC_INTERVAL=$(syscfg get MultiProcDetectInterval 2>/dev/null)
+        case "$MULTI_PROC_INTERVAL" in
+            30) MULTI_PROC_CYCLE_THRESHOLD=2 ;;
+            45) MULTI_PROC_CYCLE_THRESHOLD=3 ;;
+            60) MULTI_PROC_CYCLE_THRESHOLD=4 ;;
+            *)  MULTI_PROC_CYCLE_THRESHOLD=1 ;;  # 15 min or unset: run every cycle
+        esac
+
+        MULTI_PROC_COUNT_FILE="/tmp/.multi_proc_detect_count"
+        MULTI_PROC_COUNT=$(cat "$MULTI_PROC_COUNT_FILE" 2>/dev/null)
+        case "$MULTI_PROC_COUNT" in ''|*[!0-9]*) MULTI_PROC_COUNT=0 ;; esac
+        MULTI_PROC_COUNT=$((MULTI_PROC_COUNT + 1))
+
+        if [ "$MULTI_PROC_COUNT" -ge "$MULTI_PROC_CYCLE_THRESHOLD" ]; then
+            MULTI_PROC_COUNT=0
+
+            # --- Exclusion list ---
+            # Read default exclusions from syscfg (set via syscfg defaults in utopia)
+            MULTI_PROC_EXCLUDE_DEFAULT=$(syscfg get MultiProcDetectExcludeDefaultList 2>/dev/null)
+            # Fallback if syscfg key is unset
+            if [ -z "$MULTI_PROC_EXCLUDE_DEFAULT" ]; then
+                MULTI_PROC_EXCLUDE_DEFAULT="sleep,dropbear,sh,ash,ssh,stunnel"
+            fi
+            # RFC-configured additions (appended to the default list)
+            MULTI_PROC_EXCLUDE_RFC=$(syscfg get MultiProcDetectExcludeList 2>/dev/null)
+            if [ -n "$MULTI_PROC_EXCLUDE_RFC" ]; then
+                MULTI_PROC_EXCLUDE_LIST="${MULTI_PROC_EXCLUDE_DEFAULT},${MULTI_PROC_EXCLUDE_RFC}"
+            else
+                MULTI_PROC_EXCLUDE_LIST="$MULTI_PROC_EXCLUDE_DEFAULT"
+            fi
+
+            ps | awk -v excl_list="$MULTI_PROC_EXCLUDE_LIST" '
+                BEGIN {
+                    n = split(excl_list, entries, ",")
+                    for (i = 1; i <= n; i++) {
+                        gsub(/^[ \t]+|[ \t]+$/, "", entries[i])
+                        if (entries[i] != "") excl[entries[i]] = 1
+                    }
+                }
+                NR == 1 { next }
+                {
+                    cmd = ""
+                    for (i = 5; i <= NF; i++) cmd = (cmd == "") ? $i : cmd " " $i
+                    # Always skip kernel threads — check full $5 BEFORE splitting on /
+                    # This handles names like [jbd2/mmcblk0gp1] which contain a /
+                    if ($5 ~ /^\[.*\]$/) next
+                    # Extract basename for exclusion matching
+                    n = split($5, parts, "/")
+                    base = parts[n]
+                    # Strip leading dash (e.g. -sh -> sh)
+                    gsub(/^-/, "", base)
+                    # For shell interpreters (sh/ash), only exclude bare login shells
+                    # (i.e. no script argument). Scripts invoked as "sh /path/script.sh"
+                    # should still be detected as duplicates.
+                    if (base == "sh" || base == "ash") {
+                        if (NF <= 5) next   # bare sh/ash with no arguments — skip
+                        # has arguments — allow through for duplicate detection
+                    } else {
+                        # For all other processes, apply exclusion list normally
+                        if (base in excl) next
+                    }
+                    count[cmd]++
+                    lines[cmd] = lines[cmd] "\n" $0
+                }
+                END {
+                    found = 0
+                    for (cmd in count) {
+                        if (count[cmd] > 1) {
+                            if (!found) { print "DETECTED"; found = 1 }
+                            print "COUNT=" count[cmd] lines[cmd]
+                        }
+                    }
+                }
+            ' | {
+                read firstline
+                if [ "$firstline" = "DETECTED" ]; then
+                    echo_t "RDKB_SELFHEAL : Duplicate processes detected:"
+                    while IFS= read -r line; do
+                        case "$line" in
+                            COUNT=*)
+                                dup_count="${line#COUNT=}"
+                                echo_t "RDKB_SELFHEAL : MULTI_PROCESS_RUNNING - $dup_count instances:"
+                                ;;
+                            *)
+                                echo_t "RDKB_SELFHEAL :   $line"
+                                ;;
+                        esac
+                    done
+                fi
+            }
+        fi
+
+        echo "$MULTI_PROC_COUNT" > "$MULTI_PROC_COUNT_FILE"
+    fi
 }
 
 Bootup_HealthCheck()
