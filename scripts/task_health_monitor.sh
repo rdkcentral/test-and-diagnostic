@@ -512,15 +512,15 @@ self_heal_sedaemon()
 			systemctl stop "$daemon_service"
 
         	if [ "$accessmgr_supported" -eq 1 ]; then
-		    echo_t "[RDKB_SELFHEAL] : Restarting accessmanager"		
-            	    systemctl stop accessmanager.service
-		    systemctl start accessmanager.service
-		    t2CountNotify "SYS_SH_SERestart"			
+		   	    echo_t "[RDKB_SELFHEAL] : Restarting accessmanager"		
+            	systemctl stop accessmanager.service
+		        systemctl start accessmanager.service
+		        t2CountNotify "SYS_SH_SERestart"			
 	    	fi
         	systemctl start "$daemon_service"
-		if [ "$accessmgr_supported" -eq 0 ]; then
-		    t2CountNotify "SYS_SH_TEERestart"
-		fi
+			if [ "$accessmgr_supported" -eq 0 ]; then
+		        t2CountNotify "SYS_SH_TEERestart"
+		    fi
     	fi
 	fi
 }
