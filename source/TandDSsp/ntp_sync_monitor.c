@@ -80,6 +80,36 @@ static int read_clock_state(int *synced, long long *offset_ns, double *freq_ppm)
         return -1;
     }
 
+     CcspTraceInfo((
+        "NTP_SYNC_MONITOR : %s : "
+        "state=%d modes=0x%x offset=%ld freq=%ld maxerror=%ld esterror=%ld "
+        "status=0x%x constant=%ld precision=%ld tolerance=%ld "
+        "time.tv_sec=%ld time.tv_usec=%ld tick=%ld ppsfreq=%ld "
+        "jitter=%ld shift=%d stabil=%ld jitcnt=%ld calcnt=%ld errcnt=%ld stbcnt=%ld tai=%d\n",
+        tag,
+        state,
+        tx->modes,
+        tx->offset,
+        tx->freq,
+        tx->maxerror,
+        tx->esterror,
+        tx->status,
+        tx->constant,
+        tx->precision,
+        tx->tolerance,
+        (long)tx->time.tv_sec,
+        (long)tx->time.tv_usec,
+        tx->tick,
+        tx->ppsfreq,
+        tx->jitter,
+        tx->shift,
+        tx->stabil,
+        tx->jitcnt,
+        tx->calcnt,
+        tx->errcnt,
+        tx->stbcnt,
+        tx->tai
+    ));
     if (synced != NULL) {
         *synced = (state != TIME_ERROR && !(tx.status & STA_UNSYNC)) ? 1 : 0;
     }
@@ -196,7 +226,8 @@ static void *first_sync_thread(void *arg)
 
         if (read_clock_state(&synced, &offset_ns, &freq_ppm) == 0 && synced) {
             emit_ntp_delta(offset_ns, freq_ppm);
-
+ CcspTraceInfo(("NTP_SYNC_MONITOR : firstsync - Identified"));
+            
             if (notify_first_sync() == 0) {
                 int fd = open(FIRST_SYNC_MARKER, O_WRONLY | O_CREAT | O_TRUNC, 0644);
                 if (fd >= 0)
