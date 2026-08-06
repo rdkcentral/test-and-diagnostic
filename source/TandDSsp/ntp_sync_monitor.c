@@ -20,10 +20,14 @@
 /*
  * ntp_sync_monitor.c
  *
- * Two-thread, daemon-agnostic NTP clock observer hosted in CcspTandDSsp. See
+ * Chrony-gated two-thread NTP clock observer hosted in CcspTandDSsp. See
  * ntp_sync_monitor.h for the design summary. All state in this translation unit
  * is file-static; this file deliberately does NOT touch current_time.c globals
  * (buf, stored_time, ...) to remain thread-safe alongside updateTimeThread.
+ *
+ * Both threads are spawned only when syscfg:chrony_enabled == "true".
+ * Thread 1 uses adjtimex() for daemon-agnostic convergence detection.
+ * Thread 2 uses chronyctl_get_offset() (libchronyctl) for periodic metrics.
  */
 
 #include <stdio.h>
@@ -43,14 +47,18 @@
 #include "sysevent/sysevent.h"
 #include "telemetry_busmessage_sender.h"
 #include "current_time.h"        /* reuse setClockEventFile() */
+#include "libchronyctl.h"        /* chronyctl_get_offset(), chronyctl_init/cleanup */
 #include "ntp_sync_monitor.h"
 
 #define T2_COMPONENT            "ntp_sync_monitor"
 #define FIRST_SYNC_MARKER       "/tmp/.ntp_first_sync_done"
 #define NTP_SYNCED_FILE         "/tmp/.ntp_time_synced"
 
-/* Single unified Telemetry 2.0 marker for first-sync and periodic offsets. */
-#define T2_MARKER_NTP_DELTA     "SYS_INFO_NTP_DELTA_split"
+/* T2 marker for Thread 1: first-sync kernel offset/frequency. */
+#define T2_MARKER_NTP_DELTA         "SYS_INFO_NTP_DELTA_split"
+
+/* T2 marker for Thread 2: periodic chrony offset via libchronyctl. */
+#define T2_MARKER_CHRONY_TRACKING   "SYS_INFO_CHRONY_TRACKING_split"
 
 /* Thread 1: poll kernel sync state once per second, unbounded, until synced. */
 #define FIRSTSYNC_POLL_SEC      1
@@ -63,8 +71,14 @@
 #define SE_PROG                 "ntp_sync_monitor"
 
 /*
+ * g_chronyctl_mutex — serializes all chronyctl_*() calls except chronyctl_strerror().
+ * Per the libchronyctl API contract, the library is not internally thread-safe.
+ */
+static pthread_mutex_t g_chronyctl_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/*
  * read_clock_state
- *   Query kernel clock-discipline state via adjtimex(). Fills *synced (1 if
+ *   Query kernel clock-discipline state via ntp_adjtime(). Fills *synced (1 if
  *   the clock is currently disciplined), *offset_ns (offset in nanoseconds,
  *   STA_NANO honoured else microseconds*1000) and *freq_ppm (freq/65536.0).
  *   Returns 0 on success, -1 on adjtimex() failure. Daemon-agnostic: reads the
@@ -75,7 +89,7 @@ static int read_clock_state(int *synced, long long *offset_ns, double *freq_ppm)
     struct timex tx;
     memset(&tx, 0, sizeof(tx));
 
-    int state = adjtimex(&tx);   /* mode 0 (all-zero) = read-only query */
+    int state = ntp_adjtime(&tx);   /* mode 0 (all-zero) = read-only query */
     if (state < 0) {
         return -1;
     }
@@ -196,8 +210,7 @@ static void *first_sync_thread(void *arg)
 
         if (read_clock_state(&synced, &offset_ns, &freq_ppm) == 0 && synced) {
             emit_ntp_delta(offset_ns, freq_ppm);
- CcspTraceInfo(("NTP_SYNC_MONITOR : firstsync - Identified"));
-            
+
             if (notify_first_sync() == 0) {
                 int fd = open(FIRST_SYNC_MARKER, O_WRONLY | O_CREAT | O_TRUNC, 0644);
                 if (fd >= 0)
@@ -217,10 +230,12 @@ static void *first_sync_thread(void *arg)
 
 /*
  * metrics_thread (Thread 2)
- *   Emits offset/frequency every 10 minutes, independently of first sync. Uses
- *   timerfd rather than sleep(600): CcspTandDSsp installs many signal handlers
- *   and sleep() returns early on EINTR, whereas the timerfd interval is owned by
- *   the kernel — drift-free and immune to signal interruption.
+ *   Every 10 minutes queries the current NTP clock offset from chronyd via
+ *   chronyctl_get_offset() (libchronyctl Unix-socket API) and emits it under
+ *   T2_MARKER_CHRONY_TRACKING. Uses timerfd rather than sleep(600) for
+ *   drift-free, signal-safe intervals.
+ *   All chronyctl_*() calls are serialized by g_chronyctl_mutex per the
+ *   libchronyctl thread-safety contract.
  */
 static void *metrics_thread(void *arg)
 {
@@ -257,12 +272,21 @@ static void *metrics_thread(void *arg)
             break;
         }
 
-        long long offset_ns = 0;
-        double freq_ppm = 0.0;
-        if (read_clock_state(NULL, &offset_ns, &freq_ppm) == 0) {
-            emit_ntp_delta(offset_ns, freq_ppm);
+        double offset_s = 0.0;
+        int ret;
+
+        pthread_mutex_lock(&g_chronyctl_mutex);
+        ret = chronyctl_get_offset(&offset_s);
+        pthread_mutex_unlock(&g_chronyctl_mutex);
+
+        if (ret == CHRONYCTL_SUCCESS) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "offset_s=%.9f", offset_s);
+            t2_event_s(T2_MARKER_CHRONY_TRACKING, buf);
+            CcspTraceInfo(("NTP_SYNC_MONITOR : metrics - %s\n", buf));
         } else {
-            CcspTraceError(("NTP_SYNC_MONITOR : metrics - ntp_adjtime() failed\n"));
+            CcspTraceError(("NTP_SYNC_MONITOR : metrics - chronyctl_get_offset failed: %s\n",
+                            chronyctl_strerror(ret)));
         }
     }
 
@@ -272,11 +296,35 @@ static void *metrics_thread(void *arg)
 
 /*
  * ntp_sync_monitor_start
- *   Entry point invoked unconditionally from ssp_main.c. Initialises Telemetry
- *   2.0 and spawns both detached threads. Safe to call once at startup.
+ *   Entry point called from ssp_main.c. Guards on syscfg:chrony_enabled;
+ *   returns immediately (no threads spawned) when chrony is not the active
+ *   NTP client. When chrony_enabled=="true", initialises libchronyctl and
+ *   Telemetry 2.0, then spawns both detached threads.
  */
 void ntp_sync_monitor_start(void)
 {
+    char chrony_enabled[8] = {0};
+    int rc = syscfg_get(NULL, "chrony_enabled", chrony_enabled, sizeof(chrony_enabled));
+    if (rc != 0) {
+        CcspTraceError(("NTP_SYNC_MONITOR : syscfg_get chrony_enabled failed (rc=%d), not starting\n", rc));
+        return;
+    }
+    if (strcmp(chrony_enabled, "true") != 0) {
+        CcspTraceInfo(("NTP_SYNC_MONITOR : chrony_enabled='%s', skipping NTP monitor threads\n",
+                       chrony_enabled));
+        return;
+    }
+
+    /* Initialise libchronyctl before spawning threads. */
+    pthread_mutex_lock(&g_chronyctl_mutex);
+    rc = chronyctl_init();
+    pthread_mutex_unlock(&g_chronyctl_mutex);
+    if (rc != CHRONYCTL_SUCCESS) {
+        CcspTraceError(("NTP_SYNC_MONITOR : chronyctl_init failed: %s, not starting\n",
+                        chronyctl_strerror(rc)));
+        return;
+    }
+
     pthread_t tid;
 
     t2_init(T2_COMPONENT);
@@ -287,5 +335,5 @@ void ntp_sync_monitor_start(void)
     if (pthread_create(&tid, NULL, metrics_thread, NULL) != 0)
         CcspTraceError(("NTP_SYNC_MONITOR : failed to start metrics thread\n"));
 
-    CcspTraceInfo(("NTP_SYNC_MONITOR : threads started\n"));
+    CcspTraceInfo(("NTP_SYNC_MONITOR : chrony_enabled=true, threads started\n"));
 }
