@@ -86,7 +86,6 @@ static int read_clock_state(int *synced, long long *offset_ns, double *freq_ppm)
         "status=0x%x constant=%ld precision=%ld tolerance=%ld "
         "time.tv_sec=%ld time.tv_usec=%ld tick=%ld ppsfreq=%ld "
         "jitter=%ld shift=%d stabil=%ld jitcnt=%ld calcnt=%ld errcnt=%ld stbcnt=%ld tai=%d\n",
-        tag,
         state,
         tx->modes,
         tx->offset,
