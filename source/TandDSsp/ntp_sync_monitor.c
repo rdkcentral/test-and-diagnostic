@@ -80,35 +80,6 @@ static int read_clock_state(int *synced, long long *offset_ns, double *freq_ppm)
         return -1;
     }
 
-     CcspTraceInfo((
-        "NTP_SYNC_MONITOR :"
-        "state=%d modes=0x%x offset=%ld freq=%ld maxerror=%ld esterror=%ld "
-        "status=0x%x constant=%ld precision=%ld tolerance=%ld "
-        "time.tv_sec=%ld time.tv_usec=%ld tick=%ld ppsfreq=%ld "
-        "jitter=%ld shift=%d stabil=%ld jitcnt=%ld calcnt=%ld errcnt=%ld stbcnt=%ld tai=%d\n",
-        state,
-        tx.modes,
-        tx.offset,
-        tx.freq,
-        tx.maxerror,
-        tx.esterror,
-        tx.status,
-        tx.constant,
-        tx.precision,
-        tx.tolerance,
-        (long)tx.time.tv_sec,
-        (long)tx.time.tv_usec,
-        tx.tick,
-        tx.ppsfreq,
-        tx.jitter,
-        tx.shift,
-        tx.stabil,
-        tx.jitcnt,
-        tx.calcnt,
-        tx.errcnt,
-        tx.stbcnt,
-        tx.tai
-    ));
     if (synced != NULL) {
         *synced = (state != TIME_ERROR && !(tx.status & STA_UNSYNC)) ? 1 : 0;
     }
