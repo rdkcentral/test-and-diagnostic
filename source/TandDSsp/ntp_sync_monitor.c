@@ -64,7 +64,7 @@
 
 /*
  * read_clock_state
- *   Query kernel clock-discipline state via ntp_adjtime(). Fills *synced (1 if
+ *   Query kernel clock-discipline state via adjtimex(). Fills *synced (1 if
  *   the clock is currently disciplined), *offset_ns (offset in nanoseconds,
  *   STA_NANO honoured else microseconds*1000) and *freq_ppm (freq/65536.0).
  *   Returns 0 on success, -1 on adjtimex() failure. Daemon-agnostic: reads the
@@ -75,7 +75,7 @@ static int read_clock_state(int *synced, long long *offset_ns, double *freq_ppm)
     struct timex tx;
     memset(&tx, 0, sizeof(tx));
 
-    int state = ntp_adjtime(&tx);   /* mode 0 (all-zero) = read-only query */
+    int state = adjtimex(&tx);   /* mode 0 (all-zero) = read-only query */
     if (state < 0) {
         return -1;
     }
