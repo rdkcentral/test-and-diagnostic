@@ -81,7 +81,7 @@ static int read_clock_state(int *synced, long long *offset_ns, double *freq_ppm)
     }
 
      CcspTraceInfo((
-        "NTP_SYNC_MONITOR : %s : "
+        "NTP_SYNC_MONITOR :"
         "state=%d modes=0x%x offset=%ld freq=%ld maxerror=%ld esterror=%ld "
         "status=0x%x constant=%ld precision=%ld tolerance=%ld "
         "time.tv_sec=%ld time.tv_usec=%ld tick=%ld ppsfreq=%ld "
