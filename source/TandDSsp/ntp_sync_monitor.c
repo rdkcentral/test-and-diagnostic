@@ -89,7 +89,7 @@ static int read_clock_state(int *synced, long long *offset_ns, double *freq_ppm)
     struct timex tx;
     memset(&tx, 0, sizeof(tx));
 
-    int state = ntp_adjtime(&tx);   /* mode 0 (all-zero) = read-only query */
+    int state = adjtimex(&tx);   /* mode 0 (all-zero) = read-only query */
     if (state < 0) {
         return -1;
     }
