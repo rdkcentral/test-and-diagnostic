@@ -567,20 +567,30 @@ fi
                     for (i = 5; i <= NF; i++) cmd = (cmd == "") ? $i : cmd " " $i
                     # Always skip kernel threads — check full $5 BEFORE splitting on /
                     # This handles names like [jbd2/mmcblk0gp1] which contain a /
-                    if ($5 ~ /^\[.*\]$/) next
-                    # Extract basename for exclusion matching
+                    # Also skip processes with curly braces e.g. {systemd}
+                    if ($5 ~ /^\[.*\]$/ || $5 ~ /^\{.*\}$/) next
+                    # Extract basename of $5 for exclusion matching
                     n = split($5, parts, "/")
                     base = parts[n]
                     # Strip leading dash (e.g. -sh -> sh)
                     gsub(/^-/, "", base)
-                    # For shell interpreters (sh/ash), only exclude bare login shells
-                    # (i.e. no script argument). Scripts invoked as "sh /path/script.sh"
-                    # should still be detected as duplicates.
+                    # For shell interpreters (sh/ash):
                     if (base == "sh" || base == "ash") {
                         if (NF <= 5) next   # bare sh/ash with no arguments — skip
-                        # has arguments — allow through for duplicate detection
+                        # Find the script name — first non-flag argument from $6 onwards
+                        # This handles cases like: sh -x /path/script.sh
+                        script = ""
+                        for (i = 6; i <= NF; i++) {
+                            if (substr($i, 1, 1) != "-") {
+                                m = split($i, sparts, "/")
+                                script = sparts[m]
+                                break
+                            }
+                        }
+                        # Use script name for exclusion check if found
+                        if (script != "" && script in excl) next
                     } else {
-                        # For all other processes, apply exclusion list normally
+                        # For native binaries, use $5 basename for exclusion
                         if (base in excl) next
                     }
                     count[cmd]++
