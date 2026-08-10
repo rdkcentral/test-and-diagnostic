@@ -498,7 +498,7 @@ self_heal_sedaemon()
              daemon_name="se05xd"
          fi
 		 
-         if [[ "$UseTEEBasedCert" == "true" ]] && [[ -z "$accessmgr" ]];  then
+         if [[ "$TEECEDM_4x" == "true" ]] && [[ -z "$ssadaemon" ]];  then
 		     echo_t "[RDKB_SELFHEAL] : Restarting $daemon_name"
 		     t2CountNotify "SYS_SH_TEERestart"
 		     systemctl stop $daemon_service
