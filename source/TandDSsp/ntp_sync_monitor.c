@@ -66,7 +66,7 @@
 /* Thread 2: sample every 10 minutes. */
 #define METRICS_INTERVAL_SEC    600
 
-/* sysevent connection parameters (mirror other TandDSsp producers). */
+/* sysevent connection parameters */
 #define SE_IP                   "127.0.0.1"
 #define SE_PROG                 "ntp_sync_monitor"
 
@@ -157,7 +157,7 @@ static int notify_first_sync(void)
         rc = -1;
     }
 
-    /* Reuse the existing helper (idempotent) to create /tmp/clock-event. */
+    /* Reuse the existing helper to create /tmp/clock-event. */
     setClockEventFile();
 
     int fd = open(NTP_SYNCED_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -197,7 +197,7 @@ static void *first_sync_thread(void *arg)
     (void)arg;
     pthread_detach(pthread_self());
 
-    if (access(FIRST_SYNC_MARKER, F_OK) == 0) {
+    if (access(NTP_SYNCED_FILE, F_OK) == 0) {
         return NULL;    /* already recorded this boot */
     }
 
@@ -212,9 +212,6 @@ static void *first_sync_thread(void *arg)
             emit_ntp_delta(offset_ns, freq_ppm);
 
             if (notify_first_sync() == 0) {
-                int fd = open(FIRST_SYNC_MARKER, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                if (fd >= 0)
-                    close(fd);
                 CcspTraceInfo(("NTP_SYNC_MONITOR : firstsync - first NTP sync recorded\n"));
                 return NULL;
             }
@@ -282,10 +279,10 @@ static void *metrics_thread(void *arg)
         if (ret == CHRONYCTL_SUCCESS) {
             char buf[64];
             snprintf(buf, sizeof(buf), "offset_s=%.9f", offset_s);
-            t2_event_s(T2_MARKER_CHRONY_TRACKING, buf);
-            CcspTraceInfo(("NTP_SYNC_MONITOR : metrics - %s\n", buf));
+            t2_event_s(SYS_INFO_NTP_DELTA_split, buf);
+            CcspTraceInfo(("NTP_SYNC_MONITOR : Offset - %s\n", buf));
         } else {
-            CcspTraceError(("NTP_SYNC_MONITOR : metrics - chronyctl_get_offset failed: %s\n",
+            CcspTraceError(("NTP_SYNC_MONITOR :chronyctl_get_offset failed: %s\n",
                             chronyctl_strerror(ret)));
         }
     }
@@ -326,8 +323,6 @@ void ntp_sync_monitor_start(void)
     }
 
     pthread_t tid;
-
-    t2_init(T2_COMPONENT);
 
     if (pthread_create(&tid, NULL, first_sync_thread, NULL) != 0)
         CcspTraceError(("NTP_SYNC_MONITOR : failed to start first-sync thread\n"));
