@@ -46,13 +46,13 @@
 #include "syscfg/syscfg.h"
 #include "sysevent/sysevent.h"
 #include "telemetry_busmessage_sender.h"
-#include "current_time.h"        /* reuse setClockEventFile() */
 #include "libchronyctl.h"        /* chronyctl_get_offset(), chronyctl_init/cleanup */
 #include "ntp_sync_monitor.h"
 
 #define T2_COMPONENT            "ntp_sync_monitor"
 #define FIRST_SYNC_MARKER       "/tmp/.ntp_first_sync_done"
 #define NTP_SYNCED_FILE         "/tmp/.ntp_time_synced"
+#define NTP_CLOCK_FILE          "/tmp/clock-event"
 
 /* T2 marker for Thread 1: first-sync kernel offset/frequency. */
 #define T2_MARKER_NTP_DELTA         "SYS_INFO_NTP_DELTA_split"
@@ -157,10 +157,14 @@ static int notify_first_sync(void)
         rc = -1;
     }
 
-    /* Reuse the existing helper to create /tmp/clock-event. */
-    setClockEventFile();
 
-    int fd = open(NTP_SYNCED_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      int fd = open(NTP_CLOCK_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0)
+        close(fd);
+    else
+        rc = -1;
+
+    fd = open(NTP_SYNCED_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0)
         close(fd);
     else
@@ -195,7 +199,7 @@ static int notify_first_sync(void)
 static void *first_sync_thread(void *arg)
 {
     (void)arg;
-    pthread_detach(pthread_self());
+   // pthread_detach(pthread_self());
 
     if (access(NTP_SYNCED_FILE, F_OK) == 0) {
         return NULL;    /* already recorded this boot */
@@ -237,7 +241,7 @@ static void *first_sync_thread(void *arg)
 static void *metrics_thread(void *arg)
 {
     (void)arg;
-    pthread_detach(pthread_self());
+   // pthread_detach(pthread_self());
 
     int tfd = timerfd_create(CLOCK_MONOTONIC, 0);
     if (tfd < 0) {
@@ -279,7 +283,7 @@ static void *metrics_thread(void *arg)
         if (ret == CHRONYCTL_SUCCESS) {
             char buf[64];
             snprintf(buf, sizeof(buf), "offset_s=%.9f", offset_s);
-            t2_event_s(SYS_INFO_NTP_DELTA_split, buf);
+            t2_event_s("SYS_INFO_NTP_DELTA_split", buf);
             CcspTraceInfo(("NTP_SYNC_MONITOR : Offset - %s\n", buf));
         } else {
             CcspTraceError(("NTP_SYNC_MONITOR :chronyctl_get_offset failed: %s\n",
@@ -298,7 +302,7 @@ static void *metrics_thread(void *arg)
  *   NTP client. When chrony_enabled=="true", initialises libchronyctl and
  *   Telemetry 2.0, then spawns both detached threads.
  */
-void ntp_sync_monitor_start(void)
+int main(void)
 {
     char chrony_enabled[8] = {0};
     int rc = syscfg_get(NULL, "chrony_enabled", chrony_enabled, sizeof(chrony_enabled));
@@ -324,11 +328,16 @@ void ntp_sync_monitor_start(void)
 
     pthread_t tid;
 
-    if (pthread_create(&tid, NULL, first_sync_thread, NULL) != 0)
+    if (pthread_create(&tid1, NULL, first_sync_thread, NULL) != 0)
         CcspTraceError(("NTP_SYNC_MONITOR : failed to start first-sync thread\n"));
 
-    if (pthread_create(&tid, NULL, metrics_thread, NULL) != 0)
+    if (pthread_create(&tid2, NULL, metrics_thread, NULL) != 0)
         CcspTraceError(("NTP_SYNC_MONITOR : failed to start metrics thread\n"));
+  
+      pthread_join(tid1, NULL);
+    pthread_join(tid2, NULL);
+
 
     CcspTraceInfo(("NTP_SYNC_MONITOR : chrony_enabled=true, threads started\n"));
+  return 0;
 }
