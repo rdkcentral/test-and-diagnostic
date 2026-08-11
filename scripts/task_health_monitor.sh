@@ -23,7 +23,7 @@ RDKLOGGER_PATH="/rdklogger"
 PRIVATE_LAN="brlan0"
 BR_MODE=0
 CONSOLE_LOG="/rdklogs/logs/Consolelog.txt.0"
-
+source /etc/ssl/certsel/hrot.properties
 #upflowed INTCS-125.patch as part of RDKB-41505.
 if [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "TG4482A" ]; then
 	DCM_LOGS_TMP=/tmp/dcmscript_tmp.txt
@@ -485,7 +485,7 @@ self_heal_dual_cron()
 
 self_heal_sedaemon()
 {
-     if [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
+     if [ "$hrottype" != "pkcs11" ] && [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
          accessmgr=`pidof accessManager`
 
          if [ "$kdftype" = "ECC" ]; then
