@@ -1,0 +1,11 @@
+[Unit]
+Description=RDK-B NTP first-sync detection + clock metrics sampler (daemon-agnostic)
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ntp_sync_metrics
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
