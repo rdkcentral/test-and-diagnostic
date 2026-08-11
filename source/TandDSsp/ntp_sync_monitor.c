@@ -47,7 +47,7 @@
 #include "sysevent/sysevent.h"
 #include "telemetry_busmessage_sender.h"
 #include "libchronyctl.h"        /* chronyctl_get_offset(), chronyctl_init/cleanup */
-#include "ntp_sync_monitor.h"
+
 
 #define T2_COMPONENT            "ntp_sync_monitor"
 #define FIRST_SYNC_MARKER       "/tmp/.ntp_first_sync_done"
