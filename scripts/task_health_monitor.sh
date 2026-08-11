@@ -485,7 +485,7 @@ self_heal_dual_cron()
 
 self_heal_sedaemon()
 {
-     if [ "$hrottype" != "pkcs11" ] && [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
+    if [ "$hrottype" != "pkcs11" ] && [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
          accessmgr=`pidof accessManager`
 
          if [ "$kdftype" = "ECC" ]; then
@@ -497,22 +497,16 @@ self_heal_sedaemon()
              daemon_service="startse05xd.service"
              daemon_name="se05xd"
          fi
-		 
-         if [[ "$TEECEDM_4x" == "true" ]] && [[ -z "$ssadaemon" ]];  then
-		     echo_t "[RDKB_SELFHEAL] : Restarting $daemon_name"
-		     t2CountNotify "SYS_SH_TEERestart"
-		     systemctl stop $daemon_service
-			 systemctl start $daemon_service
-		 else
-             if [[ -z "$ssadaemon" ]] || [[ -z "$accessmgr" ]]; then
-                 echo_t "[RDKB_SELFHEAL] : Restarting accessmanager and $daemon_name"
-                 t2CountNotify "SYS_SH_SERestart"
-                 systemctl stop $daemon_service
-                 systemctl stop accessmanager.service
-                 systemctl start accessmanager.service
-                 systemctl start $daemon_service
-             fi
+
+         if [[ -z "$ssadaemon" ]] || [[ -z "$accessmgr" ]]; then
+               echo_t "[RDKB_SELFHEAL] : Restarting accessmanager and $daemon_name"
+               t2CountNotify "SYS_SH_SERestart"
+               systemctl stop $daemon_service
+               systemctl stop accessmanager.service
+               systemctl start accessmanager.service
+               systemctl start $daemon_service
          fi
+    fi
 }
 
 xle_device_mode=0
