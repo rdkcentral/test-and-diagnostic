@@ -23,7 +23,11 @@ RDKLOGGER_PATH="/rdklogger"
 PRIVATE_LAN="brlan0"
 BR_MODE=0
 CONSOLE_LOG="/rdklogs/logs/Consolelog.txt.0"
-source /etc/ssl/certsel/hrot.properties
+
+if [ -f /etc/ssl/certsel/hrot.properties ]; then
+    source /etc/ssl/certsel/hrot.properties
+fi
+
 #upflowed INTCS-125.patch as part of RDKB-41505.
 if [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "TG4482A" ]; then
 	DCM_LOGS_TMP=/tmp/dcmscript_tmp.txt
