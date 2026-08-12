@@ -40,6 +40,7 @@ case $BOX_TYPE in
     "VNTXER5") SELFHEAL_TYPE="SYSTEMD";;
     "SCER11BEL") SELFHEAL_TYPE="SYSTEMD";;
     "SCXF11BFL") SELFHEAL_TYPE="SYSTEMD";;
+    "XER2") SELFHEAL_TYPE="SYSTEMD";;
     *)
         echo_t "RDKB_SELFHEAL : ERROR: Unknown BOX_TYPE '$BOX_TYPE', using SELFHEAL_TYPE='BASE'"
         SELFHEAL_TYPE="BASE";;
@@ -83,7 +84,7 @@ case $SELFHEAL_TYPE in
         fi
 
         source $UTOPIA_PATH/log_env_var.sh
-        if [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ]  || [ "$BOX_TYPE" = "SCXF11BFL" ]; then
+        if [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ]  || [ "$BOX_TYPE" = "SCXF11BFL" ] || [ "$BOX_TYPE" = "XER2" ]; then
             WAN_INTERFACE=erouter0
         else
             WAN_INTERFACE=$CM_IF
@@ -915,6 +916,11 @@ resetNeeded()
                     fi
                     advsec_restart_agent
                 fi
+
+            elif [ "$ProcessName" = "cujo-qosd" ]; then
+                echo_t "RDKB_SELFHEAL : Resetting process $ProcessName"
+                systemctl start cujo-ni
+                t2CountNotify "SYS_SH_CUJO_NI_restart"
 
             elif [ "$ProcessName" = "PING" ]; then
                 REBOOTINTERVAL=$(syscfg get router_reboot_Interval)

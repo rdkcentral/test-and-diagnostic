@@ -119,13 +119,21 @@ Dhcpv6_Client_restart ()
             if [ -f /tmp/dhcpmgr_initialized ]; then
                 sysevent set dhcpv6_client-stop
             else
-                $DHCPV6_HANDLER dhcpv6_client_service_disable
+                if [ "$BOX_TYPE" = "genericarm" ]; then
+                    $DHCPV6_HANDLER dhcpv6_client-stop
+                else
+                    $DHCPV6_HANDLER dhcpv6_client_service_disable
+                fi
             fi
             sleep 2
             if [ -f /tmp/dhcpmgr_initialized ]; then
                 sysevent set dhcpv6_client-start
             else
-                $DHCPV6_HANDLER dhcpv6_client_service_enable
+                if [ "$BOX_TYPE" = "genericarm" ]; then
+                    $DHCPV6_HANDLER dhcpv6_client-start
+                else
+                    $DHCPV6_HANDLER dhcpv6_client_service_enable
+                fi
             fi
             sleep 8
 		fi
@@ -579,6 +587,8 @@ self_heal_interfaces()
                     : #Do nothing for XD4
                 elif [ "$MODEL_NUM" = "SCER11BEL" ] && [ "$XHSEnabled" == "false" ]; then
                     : # Do nothing for XER10 and if HomeSecuritysupport disabled"
+                elif [ "$MODEL_NUM" = "AYER21BEL" ] && [ "$XHSEnabled" == "false" ]; then
+                    : # Do nothing for XER2 and if HomeSecuritysupport disabled"
                 elif [ "$l3netRestart" != "done" ]; then
 
                     check_if_brlan1_created=$(ifconfig | grep "brlan1")
@@ -645,6 +655,9 @@ self_heal_interfaces()
         fi
     fi
 
+    # Here LANIPv6GUASupport used to identify the region of the device. For example LANIPv6GUASupport is true for EU region devices and false for NA region devices. 
+    # Eth WAN failover recovery action is taken only for NA region devices.
+    # TODO : LANIPv6GUASupport shouldn't be used here. Need a generic self heal mechanism which is independent of region specific parameters.
     UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
     if [ "$ETHWAN_ENABLED" = "true" ] && [ "$UseLANIFIPV6" != "true" ] ; then
         # Do Not interfere with Auto WAN Hunting for first 15 Minutes of Uptime
@@ -676,7 +689,7 @@ self_heal_interfaces()
 
     # Recovery in case erouter0 doesn't have LinkLocal Address (XER10). 
     # Force the physical wan interface to re-generate its IPv6 link-local address.
-    if [ "$MODEL_NUM" == "SCER11BEL" ] || [ "$BOX_TYPE" == "SCXF11BFL" ] ; then
+    if [ "$MODEL_NUM" == "SCER11BEL" ] || [ "$BOX_TYPE" == "SCXF11BFL" ] || [ "$BOX_TYPE" == "XER2" ] ; then
         LL_ADDR=$(ip -6 addr show dev "$WAN_INTERFACE" | awk '/inet6 fe80::/ { print $2 }' | cut -d/ -f1)
         if [ -z "$LL_ADDR" ]; then
             echo_t "[RDKB_AGG_SELFHEAL] :No link-local address assigned on $WAN_INTERFACE. Restarting wan physical interface port to recover"
@@ -765,7 +778,7 @@ self_heal_dibbler_server()
                                     t2CountNotify "SYS_ERROR_DibblerServer_emptyconf"
                                 fi
                                 #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-                            elif [ "$DHCPv6_ServerType" -eq 2 ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SR213" ] &&  [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ];then
+                            elif [ "$DHCPv6_ServerType" -eq 2 ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SR213" ] &&  [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ] && [ "$BOX_TYPE" != "XER2" ]; then
                                 #if servertype is stateless(1-stateful,2-stateless),the ip assignment will be done through zebra process.Hence dibbler-server won't required.
                                 echo_t "DHCPv6 servertype is stateless,dibbler-server restart not required"
                             else
@@ -834,7 +847,11 @@ self_heal_dibbler_server()
                                     if [ -f /tmp/dhcpmgr_initialized ]; then
                                         sysevent set dhcpv6_client-stop
                                     else
-                                        $DHCPV6_HANDLER dhcpv6_client_service_disable
+                                        if [ "$BOX_TYPE" = "genericarm" ]; then
+                                            $DHCPV6_HANDLER dhcpv6_client-stop
+                                        else
+                                            $DHCPV6_HANDLER dhcpv6_client_service_disable
+                                        fi
                                     fi
                                     sysctl -w net.ipv6.conf.$PRIVATE_LAN.disable_ipv6=1
                                     sysctl -w net.ipv6.conf.$PRIVATE_LAN.accept_dad=0
@@ -845,7 +862,11 @@ self_heal_dibbler_server()
                                     if [ -f /tmp/dhcpmgr_initialized ]; then
                                         sysevent set dhcpv6_client-start
                                     else
-                                        $DHCPV6_HANDLER dhcpv6_client_service_enable
+                                        if [ "$BOX_TYPE" = "genericarm" ]; then
+                                            $DHCPV6_HANDLER dhcpv6_client-start
+                                        else
+                                            $DHCPV6_HANDLER dhcpv6_client_service_enable
+                                        fi
                                     fi
                                     # re-add global ipv6 address after enabled it
                                     ip -6 addr add $v6addr dev $PRIVATE_LAN
@@ -860,7 +881,7 @@ self_heal_dibbler_server()
                                     t2CountNotify "SYS_ERROR_DibblerServer_emptyconf"
                                 fi
                                 #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-                            elif [ "$DHCPv6_ServerType" -eq 2 ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] &&  [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ];then
+                            elif [ "$DHCPv6_ServerType" -eq 2 ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] &&  [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ] && [ "$BOX_TYPE" != "XER2" ]; then
                                 #if servertype is stateless(1-stateful,2-stateless),the ip assignment will be done through zebra process.Hence dibbler-server won't required.
                                 echo_t "DHCPv6 servertype is stateless,dibbler-server restart not required"
                             else
@@ -926,7 +947,7 @@ self_heal_dhcp_clients()
             ;;
     esac
     #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ -f "$DHCPV6_ERROR_FILE" ] && [ "$WAN_STATUS" = "started" ] && [ "$WAN_IPv6_Addr" != "" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ]; then
+    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ -f "$DHCPV6_ERROR_FILE" ] && [ "$WAN_STATUS" = "started" ] && [ "$WAN_IPv6_Addr" != "" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ] && [ "$BOX_TYPE" != "XER2" ]; then
         isIPv6=$(ifconfig $WAN_INTERFACE | grep "inet6" | grep "Scope:Global")
         echo_t "isIPv6 = $isIPv6"
         if [ "$isIPv6" = "" ] && [ "$Unit_Activated" != "0" ]; then
@@ -1071,7 +1092,7 @@ self_heal_dhcp_clients()
         fi
     #Logic ends here for RDKB-25714
     #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$WAN_STATUS" = "started" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" = "SCER11BEL" ] && [ "$BOX_TYPE" = "SCXF11BFL" ]; then
+    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$WAN_STATUS" = "started" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" = "SCER11BEL" ] && [ "$BOX_TYPE" = "SCXF11BFL" ] && [ "$BOX_TYPE" != "XER2" ]; then
         wan_dhcp_client_v4=1
         wan_dhcp_client_v6=1
         case $SELFHEAL_TYPE in
@@ -1288,7 +1309,7 @@ self_heal_dhcp_clients()
 	;;
 	"SYSTEMD")
         if [ "$WAN_STATUS" = "started" ]; then
-            if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ]; then
+            if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ] && [ "$BOX_TYPE" != "XER2" ]; then
                 if [ $wan_dhcp_client_v4 -eq 0 ] && [ "x$MAPT_CONFIG" != "xset" ] && [ $DHCPV4C_STATUS != "false" ]; then
                     if [ "$MANUFACTURE" = "Technicolor" ] || [ "$MANUFACTURE" = "Sercomm" ]; then
                         V4_EXEC_CMD="sysevent set dhcp_client-start"
@@ -1389,7 +1410,7 @@ self_heal_dropbear()
              fi
          ;;
          "SYSTEMD")
-             if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SCER11BEL" ] &&  [ "$BOX_TYPE" != "SCXF11BFL" ]; then
+             if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$BOX_TYPE" != "SCER11BEL" ] &&  [ "$BOX_TYPE" != "SCXF11BFL" ] && [ "$BOX_TYPE" != "XER2" ]; then
                  #Checking dropbear PID
                  DROPBEAR_PID=$(busybox pidof dropbear)
                  if [ "$DROPBEAR_PID" = "" ]; then
@@ -1757,6 +1778,7 @@ self_heal_conntrack()
 # Tech XB9    => MODEL_NUM=CWA438TCOM
 # Sercomm XB10 => MODEL_NUM=SG417DBCT
 # Sercomm XER10 => MODEL_NUM=SCER11BEL
+# Arcadyan XER2 ==> MODEL_NUM=AYER21BEL
 
 if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
    [ "$MODEL_NUM" != "CGM4140COM" ] && [ "$MODEL_NUM" != "CGM4331COM" ] && 
@@ -1766,7 +1788,8 @@ if [ "$MODEL_NUM" != "TG3482G" ] && [ "$MODEL_NUM" != "CGA4131COM" ] &&
    [ "$MODEL_NUM" != "CGM601TCOM" ] && [ "$MODEL_NUM" != "SG417DBCT" ] &&
    [ "$MODEL_NUM" != "CWA438TCOM" ] &&
    [ "$MODEL_NUM" != "SCER11BEL" ] && [ "$MODEL_NAME" != "RPI" ] &&
-   [ "$MODEL_NAME" != "BPI" ] && [ "$MODEL_NUM" != "SCXF11BFL" ]
+   [ "$MODEL_NAME" != "BPI" ] && [ "$MODEL_NUM" != "SCXF11BFL" ] &&
+   [ "$MODEL_NUM" != "AYER21BEL" ]
 then
     exit
 fi

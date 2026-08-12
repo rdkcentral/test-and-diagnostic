@@ -569,7 +569,7 @@ if [ "$WAN_TYPE" != "EPON" ]; then
 	   	    check_if_brlan0_hasip=`ifconfig brlan0 | grep "inet addr"`
 
                     # l2sd0.100 is an interface specific to intel platform. Not applicable for other soc vendors.
-                    if [ "$BOX_TYPE" = "XB6" ] || [ "$BOX_TYPE" = "HUB4" ] || [ "$BOX_TYPE" = "SR300" ] || [ "$BOX_TYPE" = "SE501" ] || [ "$BOX_TYPE" = "SR213" ] || [ "$BOX_TYPE" = "WNXL11BWL" ] || [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ] || [ "$BOX_TYPE" = "SCXF11BFL" ]
+                    if [ "$BOX_TYPE" = "XB6" ] || [ "$BOX_TYPE" = "HUB4" ] || [ "$BOX_TYPE" = "SR300" ] || [ "$BOX_TYPE" = "SE501" ] || [ "$BOX_TYPE" = "SR213" ] || [ "$BOX_TYPE" = "WNXL11BWL" ] || [ "$BOX_TYPE" = "VNTXER5" ] || [ "$BOX_TYPE" = "SCER11BEL" ] || [ "$BOX_TYPE" = "SCXF11BFL" ] || [ "$BOX_TYPE" = "XER2" ]
                     then
                         check_if_l2sd0_100_created="NotApplicable"
                         check_if_l2sd0_100_up="NotApplicable"
@@ -945,6 +945,9 @@ dumpLogs()
     ifconfig -a  >> /rdklogs/logs/dbg_wan_ip_missing.txt
 }
 
+# Here LANIPv6GUASupport used to identify the region of the device. For example LANIPv6GUASupport is true for EU region devices and false for NA region devices. 
+# Eth WAN failover recovery action is taken only for NA region devices.
+# TODO : LANIPv6GUASupport shouldn't be used here. Need a generic self heal mechanism which is independent of region specific parameters.
 UseLANIFIPV6=`sysevent get LANIPv6GUASupport`
 eth_wan_enabled=$(syscfg get eth_wan_enabled)
 if [ "$eth_wan_enabled" = "true" ] && [ "$UseLANIFIPV6" != "true" ];then
