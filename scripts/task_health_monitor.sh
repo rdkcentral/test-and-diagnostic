@@ -4144,7 +4144,7 @@ if [ "$xle_device_mode" -ne "1" ]; then #zebra for non xle
 fi
 case $SELFHEAL_TYPE in
     "BASE")
-        #Checking the ntpd is running or not
+        #Checking the time sync daemon (chronyd/ntpd) is running
         if [ "$WAN_TYPE" != "EPON" ]; then
            if [ "$(syscfg get chrony_enabled)" = "true" ]; then
 		        CHRONYD_PID=$(busybox pidof chronyd)
