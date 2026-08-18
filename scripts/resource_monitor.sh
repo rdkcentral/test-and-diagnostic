@@ -592,7 +592,13 @@ fi
                     } else {
                         # For native binaries, use $5 basename for exclusion
                         if (base in excl) next
-                        pname = base
+                        # Handle busybox {comm} truncation — recover full name from $6 if present
+                        if ($5 ~ /^\{.*\}$/ && NF >= 6) {
+                            m = split($6, sparts, "/")
+                            pname = sparts[m]
+                        } else {
+                            pname = base
+                        }
                     }
                     count[cmd]++
                     procname[cmd] = pname
