@@ -46,7 +46,7 @@ COUNT=0
 
 sysevent set atom_hang_count 0
 
-
+echo_t "Start of resource_monitor.sh"
 Selfheal_res_monitor()
 {
 	totalMemSys=`free | awk 'FNR == 2 {print $2}'`
