@@ -1482,7 +1482,7 @@ if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ]; then
 elif [ "$MODEL_NUM" = "CVA601ZCOM" ]; then
     echo_t "Disabling CcspHomeSecurity and CcspAdvSecurity for XD4 "
 else
-    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$CcspHome_Security" != "false" ]; then
+    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$CcspHome_Security" != "false" ] && [ "$MODEL_NUM" != "CGA4332COM" ]; then
         
         case $SELFHEAL_TYPE in
             "BASE"|"SYSTEMD")
@@ -1508,6 +1508,15 @@ else
     fi #Not HUb4
 
                 isADVPID=0
+		if [ "$MODEL_NUM" = "CGA4332COM" ]; then
+                    ADV_PID=$(busybox pidof CcspAdvSecuritySsp)
+                    if [ "$ADV_PID" = "" ] ; then
+                        echo_t "RDKB_PROCESS_CRASHED : CcspAdvSecurity_process is not running, need restart"
+                        echo_t "RDKB_SELFHEAL : Resetting process CcspAdvSecuritySsp"
+                        systemctl start CcspAdvSecuritySsp.service
+                        isADVPID=1
+                    fi
+                fi
                 case $SELFHEAL_TYPE in
                     "BASE")
                         # CcspAdvSecurity
