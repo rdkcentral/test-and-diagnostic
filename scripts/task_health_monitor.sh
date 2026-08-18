@@ -1477,14 +1477,15 @@ case $SELFHEAL_TYPE in
 esac
 
 CcspHome_Security=`sysevent get HomeSecuritySupport`
-if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ] || [ "$MODEL_NUM" = "CGA4332COM" ]; then
+if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ]; then
     echo_t "Disabling CcspHomeSecurity and CcspAdvSecurity for BWG"
 elif [ "$MODEL_NUM" = "CVA601ZCOM" ]; then
     echo_t "Disabling CcspHomeSecurity and CcspAdvSecurity for XD4 "
 else
-    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$CcspHome_Security" != "false" ]; then
+    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$CcspHome_Security" != "false" ] && [ "$MODEL_NUM" != "CGA4332COM" ]; then
         
-        case $SELFHEAL_TYPE in
+        
+	case $SELFHEAL_TYPE in
             "BASE"|"SYSTEMD")
 
                 HOMESEC_PID=$(busybox pidof CcspHomeSecurity)
@@ -1503,7 +1504,7 @@ else
                     esac
                     resetNeeded "" CcspHomeSecurity
                 fi
-	esac
+        esac
 
     fi #Not HUb4
 
@@ -1521,6 +1522,15 @@ else
                     "TCCBR")
                     ;;
                     "SYSTEMD")
+                        if [ "$MODEL_NUM" = "CGA4332COM" ]; then
+                            ADV_PID=$(busybox pidof CcspAdvSecuritySsp)
+                            if [ "$ADV_PID" = "" ] ; then
+                                echo_t "RDKB_PROCESS_CRASHED : CcspAdvSecurity_process is not running, need restart"
+                                echo_t "RDKB_SELFHEAL : Resetting process CcspAdvSecuritySsp"
+                                systemctl start CcspAdvSecuritySsp.service
+                                isADVPID=1
+                            fi
+                        fi
                     ;;
                 esac
                 advsec_bridge_mode=$(syscfg get bridge_mode)
