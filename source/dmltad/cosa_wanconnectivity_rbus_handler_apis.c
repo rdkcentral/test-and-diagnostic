@@ -972,6 +972,8 @@ rbusError_t WANCNCTVTYCHK_StartConnectivityCheck(rbusHandle_t handle, char const
     PWANCNCTVTY_CHK_GLOBAL_INTF_INFO gIntfInfo = NULL;
     ANSC_STATUS returnStatus = ANSC_STATUS_SUCCESS;
 
+    WANCHK_LOG_INFO("%s: Enter - method=%s\n", __FUNCTION__, methodName);
+
     value = rbusObject_GetValue(inParams, "linux_interface_name");
     if (value == NULL) {
         WANCHK_LOG_ERROR("%s: Missing required param: linux_interface_name\n", __FUNCTION__);
