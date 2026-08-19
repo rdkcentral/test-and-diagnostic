@@ -573,6 +573,8 @@ fi
                     base = parts[n]
                     # Strip leading dash (e.g. -sh -> sh)
                     gsub(/^-/, "", base)
+					# Strip busybox {} comm wrapper (e.g. {sh} -> sh)
+					gsub(/^\{|\}$/, "", base)
                     # For shell interpreters (sh/ash):
                     if (base == "sh" || base == "ash") {
                         if (NF <= 5) next   # bare sh/ash with no arguments — skip
