@@ -594,10 +594,20 @@ fi
                     } else {
                         # For native binaries, use $5 basename for exclusion
                         if (base in excl) next
-                        # Handle busybox {comm} truncation — recover full name from $6 if present
+                        # Handle busybox {comm} truncation — recover full name from args if present
+                        # Scan from $6 onwards and take the first non-flag argument basename
                         if ($5 ~ /^\{.*\}$/ && NF >= 6) {
-                            m = split($6, sparts, "/")
-                            pname = sparts[m]
+                            pname = base
+                            for (i = 6; i <= NF; i++) {
+                                if (substr($i, 1, 1) != "-") {
+                                    m = split($i, sparts, "/")
+                                    recovered = sparts[m]
+                                    # Skip shell interpreters, keep scanning for the actual script/binary
+                                    if (recovered == "sh" || recovered == "ash" || recovered == "bash") continue
+                                    pname = recovered
+                                    break
+                                }
+                            }
                         } else {
                             pname = base
                         }
