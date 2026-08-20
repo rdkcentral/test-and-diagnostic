@@ -543,7 +543,7 @@ fi
             MULTI_PROC_EXCLUDE_DEFAULT=$(syscfg get MultiProcDetectExcludeDefaultList 2>/dev/null)
             # Fallback if syscfg key is unset
             if [ -z "$MULTI_PROC_EXCLUDE_DEFAULT" ]; then
-                MULTI_PROC_EXCLUDE_DEFAULT="sleep,dropbear,sh,ash,ssh,stunnel"
+                MULTI_PROC_EXCLUDE_DEFAULT="sleep,dropbear,sh,ash,ssh,stunnel,resource_monitor.sh"
             fi
             # RFC-configured additions (appended to the default list)
             MULTI_PROC_EXCLUDE_RFC=$(syscfg get MultiProcDetectExcludeList 2>/dev/null)
@@ -609,6 +609,8 @@ fi
                                     break
                                 }
                             }
+                            # Check recovered name against exclusion list
+                            if (pname in excl) next
                         } else {
                             pname = base
                         }
