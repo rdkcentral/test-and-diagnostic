@@ -596,7 +596,8 @@ fi
                         if (base in excl) next
                         # Handle busybox {comm} truncation — recover full name from args if present
                         # Scan from $6 onwards and take the first non-flag argument basename
-                        if ($5 ~ /^\{.*\}$/ && NF >= 6) {
+                        # Covers both {comm} wrapper and plain truncated bare names (no path separator)
+                        if (($5 ~ /^\{.*\}$/ || $5 !~ /\//) && NF >= 6) {
                             pname = base
                             for (i = 6; i <= NF; i++) {
                                 if (substr($i, 1, 1) != "-") {
