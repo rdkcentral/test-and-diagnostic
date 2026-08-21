@@ -1483,7 +1483,7 @@ elif [ "$MODEL_NUM" = "CVA601ZCOM" ]; then
     echo_t "Disabling CcspHomeSecurity and CcspAdvSecurity for XD4 "
 else
     if [ "$MODEL_NUM" = "CGA4332COM" ]; then
-        echo_t "Disabling CcspHomeSecurity for CBRv2 "
+        echo_t "CcspHomeSecurity disabled for CBRv2 "
     fi
     if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$CcspHome_Security" != "false" ] && [ "$MODEL_NUM" != "CGA4332COM" ]; then
         
