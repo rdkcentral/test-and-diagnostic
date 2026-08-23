@@ -4147,13 +4147,21 @@ if [ "$xle_device_mode" -ne "1" ]; then #zebra for non xle
 fi
 case $SELFHEAL_TYPE in
     "BASE")
-        #Checking the ntpd is running or not
+        #Checking the time sync daemon (chronyd/ntpd) is running
         if [ "$WAN_TYPE" != "EPON" ]; then
-            NTPD_PID=$(busybox pidof ntpd)
-            if [ "$NTPD_PID" = "" ]; then
-                echo_t "RDKB_PROCESS_CRASHED : NTPD is not running, restarting the NTPD"
-                sysevent set ntpd-restart
-            fi
+           if [ "$(syscfg get chrony_enabled)" = "true" ]; then
+		        CHRONYD_PID=$(busybox pidof chronyd)
+                if [ "$CHRONYD_PID" = "" ]; then
+                    echo_t "RDKB_PROCESS_CRASHED : chronyd is not running, restarting chronyd"
+                    sysevent set chronyd-restart
+                fi
+		  else
+                NTPD_PID=$(busybox pidof ntpd)
+                if [ "$NTPD_PID" = "" ]; then
+                    echo_t "RDKB_PROCESS_CRASHED : NTPD is not running, restarting the NTPD"
+                    sysevent set ntpd-restart
+                fi
+		  fi
 
 
             #Checking if rpcserver is running
@@ -4167,6 +4175,19 @@ case $SELFHEAL_TYPE in
     "TCCBR")
         #Checking the ntpd is running or not for TCCBR
         if [ "$WAN_TYPE" != "EPON" ]; then
+		  if [ "$(syscfg get chrony_enabled)" = "true" ]; then
+		        CHRONYD_PID=$(busybox pidof chronyd)
+                if [ "$CHRONYD_PID" = "" ]; then
+                    echo_t "RDKB_PROCESS_CRASHED : chronyd is not running, restarting chronyd"
+                    sysevent set chronyd-restart
+                fi
+		  else
+                NTPD_PID=$(busybox pidof ntpd)
+                if [ "$NTPD_PID" = "" ]; then
+                    echo_t "RDKB_PROCESS_CRASHED : NTPD is not running, restarting the NTPD"
+                    sysevent set ntpd-restart
+                fi
+		 fi
             NTPD_PID=$(busybox pidof ntpd)
             if [ "$NTPD_PID" = "" ]; then
                 echo_t "RDKB_PROCESS_CRASHED : NTPD is not running, restarting the NTPD"
