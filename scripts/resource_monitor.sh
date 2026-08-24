@@ -552,7 +552,7 @@ fi
             else
                 MULTI_PROC_EXCLUDE_LIST="$MULTI_PROC_EXCLUDE_DEFAULT"
             fi
-
+            ps > /tmp/ps_debug.txt
             ps | awk -v excl_list="$MULTI_PROC_EXCLUDE_LIST" '
                 BEGIN {
                     n = split(excl_list, entries, ",")
