@@ -17,13 +17,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #######################################################################################
-
 UTOPIA_PATH="/etc/utopia/service.d"
 TAD_PATH="/usr/ccsp/tad"
 RDKLOGGER_PATH="/rdklogger"
 PRIVATE_LAN="brlan0"
 BR_MODE=0
 CONSOLE_LOG="/rdklogs/logs/Consolelog.txt.0"
+
+if [ -f /etc/ssl/certsel/hrot.properties ]; then
+    source /etc/ssl/certsel/hrot.properties
+fi
 
 #upflowed INTCS-125.patch as part of RDKB-41505.
 if [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "TG4482A" ]; then
@@ -486,7 +489,7 @@ self_heal_dual_cron()
 
 self_heal_sedaemon()
 {
-    if [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
+    if [ "$hrottype" != "pkcs11" ] && [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
          accessmgr=`pidof accessManager`
 
          if [ "$kdftype" = "ECC" ]; then
@@ -1474,12 +1477,15 @@ case $SELFHEAL_TYPE in
 esac
 
 CcspHome_Security=`sysevent get HomeSecuritySupport`
-if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ] || [ "$MODEL_NUM" = "CGA4332COM" ]; then
+if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ]; then
     echo_t "Disabling CcspHomeSecurity and CcspAdvSecurity for BWG"
 elif [ "$MODEL_NUM" = "CVA601ZCOM" ]; then
     echo_t "Disabling CcspHomeSecurity and CcspAdvSecurity for XD4 "
 else
-    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$CcspHome_Security" != "false" ]; then
+    if [ "$MODEL_NUM" = "CGA4332COM" ]; then
+        echo_t "CcspHomeSecurity disabled for CBRv2 "
+    fi
+    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$CcspHome_Security" != "false" ] && [ "$MODEL_NUM" != "CGA4332COM" ]; then
         
         case $SELFHEAL_TYPE in
             "BASE"|"SYSTEMD")
