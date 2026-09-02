@@ -163,6 +163,7 @@ AC_CONFIG_FILES(
   source/LatencyMeasurement/xNetDP/Makefile
   source/DevicePrioritization/Makefile
   source/DevicePrioritization/TR-181/Makefile
+  source/DnsConntrackFailover/Makefile
 	Makefile
 )
 
