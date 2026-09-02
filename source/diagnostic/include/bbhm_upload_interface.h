@@ -97,6 +97,8 @@
 #define  BBHM_UPLOAD_RR_NAME_DSCP                 "DSCP"
 #define  BBHM_UPLOAD_RR_NAME_EthernetPriority     "EthernetPriority"
 #define  BBHM_UPLOAD_RR_NAME_TestFileLength       "TestFileLength"
+#define  BBHM_UPLOAD_RR_NAME_TimeBasedTestDuration                "TimeBasedTestDuration"
+#define  BBHM_UPLOAD_RR_NAME_TimeBasedTestMeasurementOffset       "TimeBasedTestMeasurementOffset"
 
 /***********************************************************
       TR143 UPLOAD DIAGNOSTICS STATS STRUCTURE
@@ -106,7 +108,10 @@ typedef struct
 _DSLH_TR143_UPLOAD_DIAG_STATS
 {
     ULONG                           DiagStates;
+    ULONG                           TestBytesSent;
     ULONG                           TotalBytesSent;
+    ULONG                           TimeBasedTestMeasurementOffset;
+    DOUBLE                          TimeBasedTestDuration;
     ANSC_UNIVERSAL_TIME             ROMTime;
     ANSC_UNIVERSAL_TIME             BOMTime;
     ANSC_UNIVERSAL_TIME             EOMTime;
@@ -118,6 +123,7 @@ DSLH_TR143_UPLOAD_DIAG_STATS, *PDSLH_TR143_UPLOAD_DIAG_STATS;
 #define DslhResetUploadDiagStats(d_info)                                      \
         {                                                                     \
             AnscZeroMemory(d_info, sizeof(DSLH_TR143_UPLOAD_DIAG_STATS));     \
+            d_info->TimeBasedTestMeasurementOffset = 2;                         \
         }                                                                     \
     
 

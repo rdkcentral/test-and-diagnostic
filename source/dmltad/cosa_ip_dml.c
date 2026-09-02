@@ -67,6 +67,7 @@
 **************************************************************************/
 
 #include <ctype.h>
+#include <errno.h>
 #include "ansc_platform.h"
 #include "cosa_diagnostic_apis.h"
 #include "plugin_main_apis.h"
@@ -83,6 +84,11 @@
 #include "ccsp_hal_emmc.h"
 #endif
 #include "safec_lib_common.h"
+#include "ccsp_base_api.h"
+#include "cosa_apis_ip_priv.h"
+
+/* Implemented in bbhm_upload_auto_tfl.c — avoid pulling BbhmDiagUpload headers into DML. */
+void AutoTfl_MarkManual(ULONG testFileLength);
 
 #ifdef WAN_FAILOVER_SUPPORTED
 #include "sysevent/sysevent.h"
@@ -127,6 +133,12 @@ int g_status_speedtest = 0;
 
 extern  COSAGetParamValueByPathNameProc     g_GetParamValueByPathNameProc;
 extern  ANSC_HANDLE                         bus_handle;
+extern  PBBHM_DOWNLOAD_DIAG_OBJECT          g_DiagDownloadObj;
+extern  PBBHM_UPLOAD_DIAG_OBJECT            g_DiagUploadObj;
+extern  pthread_cond_t                      DownloadDiagCond;
+extern  pthread_mutex_t                     DownloadDiagMutex;
+extern  pthread_cond_t                      UploadDiagCond;
+extern  pthread_mutex_t                     UploadDiagMutex;
 
 static int validate_hostname (char *host, char *wrapped_host, size_t sizelimit)
 {
@@ -3446,6 +3458,22 @@ DownloadDiagnostics_GetParamUlongValue
         return TRUE;
     }
 
+    if (strcmp(ParamName, "TimeBasedTestMeasurementOffset") == 0)
+    {
+        if ( pDownloadInfo )
+        {
+            *puLong = pDownloadInfo->TimeBasedTestMeasurementOffset;
+        }
+        else
+        {
+            AnscTraceWarning(("Download Diagnostics---Failed to get TimeBasedTestMeasurementOffset \n!"));
+            *puLong = 0;
+            return FALSE;
+        }
+
+        return TRUE;
+    }
+
     if (strcmp(ParamName, "TestBytesReceived") == 0)
     {
         pDownloadDiagStats = (PDSLH_TR143_DOWNLOAD_DIAG_STATS)CosaDmlDiagGetResults
@@ -3571,12 +3599,58 @@ DownloadDiagnostics_GetParamStringValue
     {
         if ( pDownloadInfo )
         {
+            if (pDownloadInfo->DownloadURL != NULL)
+            {
+                if (syscfg_get(NULL, "speedtest_downloadurl", pDownloadInfo->DownloadURL, sizeof(pDownloadInfo->DownloadURL)) != 0)
+                {
+                    AnscTraceWarning(("%s: syscfg_get for speedtest_downloadurl failed\n", __FUNCTION__));
+                    return -1;
+                }
+            }
+
             rc = strcpy_s(pValue, *pUlSize ,pDownloadInfo->DownloadURL);
             ERR_CHK(rc);
         }
         else
         {
             AnscTraceWarning(("Download Diagnostics---Failed to get DownloadURL \n!"));
+            return -1;
+        }
+
+        return 0;
+    }
+
+    if ( AnscEqualString(ParamName, "TimeBasedTestDuration", TRUE))
+    {
+        pDownloadDiagStats = (PDSLH_TR143_DOWNLOAD_DIAG_STATS)CosaDmlDiagGetResults
+                                (
+                                    DSLH_DIAGNOSTIC_TYPE_Download
+                                );
+
+        if ( pDownloadDiagStats )
+        {
+            double duration;
+
+            if (pDownloadDiagStats->TimeBasedTestDuration > 0.0)
+            {
+                duration = pDownloadDiagStats->TimeBasedTestDuration;
+            }
+            else
+            {
+                duration = (double)pDownloadInfo->TimeBasedTestDuration;
+            }
+
+            rc = sprintf_s(pBuf, sizeof(pBuf), "%.3f", duration);
+            if(rc < EOK)
+            {
+                ERR_CHK(rc);
+            }
+            rc = strcpy_s(pValue, *pUlSize, pBuf);
+            ERR_CHK(rc);
+        }
+        else
+        {
+            AnscTraceWarning(("Download Diagnostics---Failed to get TimeBasedTestDuration!\n"));
             return -1;
         }
 
@@ -3944,13 +4018,29 @@ DownloadDiagnostics_SetParamUlongValue
     if (strcmp(ParamName, "DiagnosticsState") == 0)
     {
         uValue--;
-        if ( uValue != (ULONG)DSLH_TR143_DIAGNOSTIC_Requested )
+        if (uValue == (ULONG)DSLH_TR143_DIAGNOSTIC_Requested )
         {
-            return FALSE;
+            /*Checking if a test is on-going or not*/
+            if (g_DiagDownloadObj && g_DiagDownloadObj->bDownDiagOn)
+            {
+                return FALSE;
+            }
+            else
+            {
+                pDownloadInfo->DiagnosticsState = DSLH_TR143_DIAGNOSTIC_Requested;
+                return TRUE;
+            }
+        }
+        else if (uValue == (ULONG)DSLH_TR143_DIAGNOSTIC_Canceled)
+        {
+            if (g_DiagDownloadObj && g_DiagDownloadObj->bDownDiagOn)
+            {
+                pDownloadInfo->DiagnosticsState = DSLH_TR143_DIAGNOSTIC_Canceled;
+                return TRUE;
+            }
         }
 
-        pDownloadInfo->DiagnosticsState = DSLH_TR143_DIAGNOSTIC_Requested;
-        return TRUE;
+        return FALSE;
     }
 
     if (strcmp(ParamName, "DSCP") == 0)
@@ -3962,6 +4052,12 @@ DownloadDiagnostics_SetParamUlongValue
     if (strcmp(ParamName, "EthernetPriority") == 0)
     {
         pDownloadInfo->EthernetPriority = uValue;
+        return TRUE;
+    }
+
+    if (strcmp(ParamName, "TimeBasedTestMeasurementOffset") == 0)
+    {
+        pDownloadInfo->TimeBasedTestMeasurementOffset = uValue;
         return TRUE;
     }
 
@@ -4010,6 +4106,7 @@ DownloadDiagnostics_SetParamStringValue
 {
     PCOSA_DATAMODEL_DIAG            pMyObject          = (PCOSA_DATAMODEL_DIAG)g_pCosaBEManager->hDiag;
     PDSLH_TR143_DOWNLOAD_DIAG_INFO  pDownloadInfo      = pMyObject->hDiagDownloadInfo;
+    PDSLH_TR143_DOWNLOAD_DIAG_STATS pDownloadDiagStats = NULL;
 
 	/* according to TR-181, set writable params other than DiagnosticsState,
 	 * must set DiagnosticsState to "NONE". */
@@ -4031,8 +4128,59 @@ DownloadDiagnostics_SetParamStringValue
             return FALSE;
         }
 
+        if (syscfg_set(NULL, "speedtest_downloadurl", pString) != 0)
+        {
+            CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
+            return FALSE;
+        }
+        if (syscfg_commit() != 0)
+        {
+            CcspTraceWarning(("%s: syscfg commit failed for %s\n", __FUNCTION__, ParamName));
+            return FALSE;
+        }
+
         rc = strcpy_s(pDownloadInfo->DownloadURL, sizeof(pDownloadInfo->DownloadURL) , pString);
         ERR_CHK(rc);
+        return TRUE;
+    }
+
+    if (AnscEqualString(ParamName, "TimeBasedTestDuration", TRUE))
+    {
+        char* endptr = NULL;
+        unsigned long value = 0;
+
+        if ( !pString || !(*pString) )
+        {
+            return FALSE;
+        }
+
+        errno = 0;
+        value = strtoul(pString, &endptr, 10);
+
+        /* Validation checks */
+        if (
+            errno != 0 ||          /* conversion error */
+            endptr == pString ||   /* no digits found */
+            *endptr != '\0' ||     /* extra characters like "10s" */
+            value < 1 || value > 999
+        )
+        {
+            CcspTraceWarning(("Invalid TimeBasedTestDuration value: %s (allowed range: 1–999)\n", pString));
+            return FALSE;
+        }
+
+        pDownloadInfo->TimeBasedTestDuration = value;
+
+        pDownloadDiagStats = (PDSLH_TR143_DOWNLOAD_DIAG_STATS)CosaDmlDiagGetResults
+                                (
+                                    DSLH_DIAGNOSTIC_TYPE_Download
+                                );
+
+        if ( pDownloadDiagStats )
+        {
+            pDownloadDiagStats->TimeBasedTestDuration = (DOUBLE)pDownloadInfo->TimeBasedTestDuration;
+        }
+
         return TRUE;
     }
 
@@ -4084,10 +4232,13 @@ DownloadDiagnostics_Validate
     if ( pDownloadInfo->DiagnosticsState == DSLH_TR143_DIAGNOSTIC_Requested
       && !AnscSizeOfString(pDownloadInfo->DownloadURL) )
     {
-        errno_t rc = -1;
-        rc = strcpy_s(pReturnParamName, *puLength ,"DownloadURL");
-        ERR_CHK(rc);
-        return FALSE;
+        if (!AnscSizeOfString(pDownloadInfo->DownloadURL))
+        {
+            errno_t rc = -1;
+            rc = strcpy_s(pReturnParamName, *puLength ,"DownloadURL");
+            ERR_CHK(rc);
+            return FALSE;
+        }
     }
 
     return  TRUE;
@@ -4123,34 +4274,79 @@ DownloadDiagnostics_Commit
 {
     PCOSA_DATAMODEL_DIAG            pMyObject          = (PCOSA_DATAMODEL_DIAG)g_pCosaBEManager->hDiag;
     PDSLH_TR143_DOWNLOAD_DIAG_INFO  pDownloadInfo      = pMyObject->hDiagDownloadInfo;
-	char*							pAddrName			= NULL;
-    errno_t rc = -1;
+    ANSC_STATUS                     returnStatus       = ANSC_STATUS_FAILURE;
+    char*                           pAddrName          = NULL;
+    char                            PrevDiagState[DEF_SIZE]     = {0};
+    char                            CurrDiagState[DEF_SIZE]     = {0};
+    char                            buffer[DEF_SIZE_128]        = {0};
 
-    if ( pDownloadInfo->DiagnosticsState != DSLH_TR143_DIAGNOSTIC_Requested )
+    if ((pAddrName = CosaGetInterfaceAddrByName(pDownloadInfo->Interface)) != NULL
+            && _ansc_strcmp(pAddrName, "::") != 0)
     {
-        pDownloadInfo->DiagnosticsState = DSLH_TR143_DIAGNOSTIC_None;
+        AnscCopyString(pDownloadInfo->IfAddrName, pAddrName);
+    }
+    else
+    {
+        AnscCopyString(pDownloadInfo->IfAddrName, "");
+    }
+    if (pAddrName)
+        AnscFreeMemory(pAddrName);
+
+    if (g_Tr143SpeedTestTestUsable)
+    {
+        getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, PrevDiagState);
+
+        if (!(g_DiagDownloadObj && g_DiagDownloadObj->bDownDiagOn) && (pDownloadInfo->DiagnosticsState == DSLH_TR143_DIAGNOSTIC_Requested))
+        {
+            returnStatus = CosaDmlDiagScheduleDiagnostic(DSLH_DIAGNOSTIC_TYPE_Download,(ANSC_HANDLE)pDownloadInfo);
+        }
+        else if (g_DiagDownloadObj && g_DiagDownloadObj->bDownDiagOn && ((pDownloadInfo->DiagnosticsState == DSLH_TR143_DIAGNOSTIC_Requested) || (pDownloadInfo->DiagnosticsState == DSLH_TR143_DIAGNOSTIC_Canceled)))
+        {
+            struct timespec ts;
+
+            if (clock_gettime(CLOCK_REALTIME, &ts) == -1)
+            {
+                CcspTraceError(("%s: Error fetching realtime\n", __FUNCTION__));
+            }
+            ts.tv_sec += 5;     /*5s timeout for the wait*/
+
+            pthread_mutex_lock(&DownloadDiagMutex);
+            CcspTraceWarning(("%s : Cancelling on-going download diagnostics\n", __FUNCTION__));
+            CosaDmlDiagCancelDiagnostic(DSLH_DIAGNOSTIC_TYPE_Download);
+            pthread_cond_timedwait(&DownloadDiagCond, &DownloadDiagMutex, &ts);
+            pthread_mutex_unlock(&DownloadDiagMutex);
+
+            if ((pDownloadInfo->DiagnosticsState == DSLH_TR143_DIAGNOSTIC_Requested) && !(g_DiagDownloadObj && g_DiagDownloadObj->bDownDiagOn))
+            {
+                returnStatus = CosaDmlDiagScheduleDiagnostic(DSLH_DIAGNOSTIC_TYPE_Download,(ANSC_HANDLE)pDownloadInfo);
+            }
+            else
+            {
+                CosaDmlDiagSetState(DSLH_DIAGNOSTIC_TYPE_Download, DSLH_TR143_DIAGNOSTIC_None);
+                getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, CurrDiagState);
+                snprintf(buffer, sizeof(buffer), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+                Notify_change("Device.IP.Diagnostics.DownloadDiagnostics.DiagnosticsState", buffer);
+            }
+        }
+        else
+        {
+            pDownloadInfo->DiagnosticsState = DSLH_TR143_DIAGNOSTIC_None;
+            getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, CurrDiagState);
+            snprintf(buffer, sizeof(buffer), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+            Notify_change("Device.IP.Diagnostics.DownloadDiagnostics.DiagnosticsState", buffer);
+        }
+    }
+    else
+    {
+        getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, PrevDiagState);
+        CosaDmlDiagSetState(DSLH_DIAGNOSTIC_TYPE_Download, DSLH_TR143_DIAGNOSTIC_Error_Internal);
+        getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, CurrDiagState);
+        snprintf(buffer, sizeof(buffer), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+        Notify_change("Device.IP.Diagnostics.DownloadDiagnostics.DiagnosticsState", buffer);
+        CcspTraceError(("%s: TestUsable is false; set Device.IP.Diagnostics.X_RDK_SpeedTest.TestUsable to true\n", __FUNCTION__));
     }
 
-	if ((pAddrName = CosaGetInterfaceAddrByName(pDownloadInfo->Interface)) != NULL
-			&& _ansc_strcmp(pAddrName, "::") != 0)
-	{
-		rc = strcpy_s(pDownloadInfo->IfAddrName, sizeof(pDownloadInfo->IfAddrName) ,pAddrName);
-		ERR_CHK(rc);
-	}
-	else
-	{
-		pDownloadInfo->IfAddrName[0] = '\0';
-	}
-	if (pAddrName)
-		AnscFreeMemory(pAddrName);
-
-    CosaDmlDiagScheduleDiagnostic
-                    (
-                        DSLH_DIAGNOSTIC_TYPE_Download,
-                        (ANSC_HANDLE)pDownloadInfo
-                    );
-
-    return 0;
+    return (returnStatus == ANSC_STATUS_SUCCESS) ? 0 : 1;
 }
 
 
@@ -4208,7 +4404,10 @@ DownloadDiagnostics_Rollback
         ERR_CHK(rc);
         pDownloadInfo->DSCP             = pDownloadPreInfo->DSCP;
         pDownloadInfo->EthernetPriority = pDownloadPreInfo->EthernetPriority;
+        pDownloadInfo->TimeBasedTestDuration = pDownloadPreInfo->TimeBasedTestDuration;
+        pDownloadInfo->TimeBasedTestMeasurementOffset = pDownloadPreInfo->TimeBasedTestMeasurementOffset;
         pDownloadInfo->DiagnosticsState = pDownloadPreInfo->DiagnosticsState;
+        AnscFreeMemory(pDownloadPreInfo);
     }
     else
     {
@@ -4424,15 +4623,61 @@ UploadDiagnostics_GetParamUlongValue
         return TRUE;
     }
 
-    if (strcmp(ParamName, "TestFileLength") == 0)
+    if (strcmp(ParamName, "TimeBasedTestMeasurementOffset") == 0)
     {
         if ( pUploadInfo )
+        {
+            *puLong = pUploadInfo->TimeBasedTestMeasurementOffset;
+        }
+        else
+        {
+            AnscTraceWarning(("Upload Diagnostics---Failed to get TimeBasedTestMeasurementOffset \n!"));
+            *puLong = 0;
+            return FALSE;
+        }
+
+        return TRUE;
+    }
+
+    if (strcmp(ParamName, "TestFileLength") == 0)
+    {
+        /* Read from Bbhm config (updated by updateTestFileLength) so DM reflects SRU/ONT value */
+        PDSLH_TR143_UPLOAD_DIAG_INFO pBbhmConfig = (PDSLH_TR143_UPLOAD_DIAG_INFO)CosaDmlDiagGetConfigs(DSLH_DIAGNOSTIC_TYPE_Upload);
+        if ( pBbhmConfig )
+        {
+            *puLong = pBbhmConfig->TestFileLength;
+            AnscFreeMemory(pBbhmConfig);
+        }
+        else if ( pUploadInfo )
         {
             *puLong = pUploadInfo->TestFileLength;
         }
         else
         {
             AnscTraceWarning(("Upload Diagnostics---Failed to get TestFileLength \n!"));
+            *puLong = 0;
+            return FALSE;
+        }
+
+        return TRUE;
+    }
+
+
+    if( AnscEqualString(ParamName, "TestBytesSent", TRUE))
+    {
+        pUploadDiagStats = (PDSLH_TR143_UPLOAD_DIAG_STATS)CosaDmlDiagGetResults
+                            (
+                                DSLH_DIAGNOSTIC_TYPE_Upload
+                            );
+
+        if ( pUploadDiagStats )
+        {
+            *puLong = pUploadDiagStats->TestBytesSent;
+        }
+        else
+        {
+            AnscTraceWarning(("Upload Diagnostics---Failed to get TestBytesSent!\n"));
+
             *puLong = 0;
             return FALSE;
         }
@@ -4543,12 +4788,58 @@ UploadDiagnostics_GetParamStringValue
     {
         if ( pUploadInfo )
         {
+            if (pUploadInfo->UploadURL != NULL)
+            {
+                if (syscfg_get(NULL, "speedtest_uploadurl", pUploadInfo->UploadURL, sizeof(pUploadInfo->UploadURL)) != 0)
+                {
+                    AnscTraceWarning(("%s: syscfg_get for speedtest_uploadurl failed\n", __FUNCTION__));
+                    return -1;
+                }
+            }
+
             rc = strcpy_s(pValue, *pUlSize , pUploadInfo->UploadURL);
             ERR_CHK(rc);
         }
         else
         {
             AnscTraceWarning(("Upload Diagnostics---Failed to get UploadURL \n!"));
+            return -1;
+        }
+
+        return 0;
+    }
+
+    if ( AnscEqualString(ParamName, "TimeBasedTestDuration", TRUE))
+    {
+        pUploadDiagStats = (PDSLH_TR143_UPLOAD_DIAG_STATS)CosaDmlDiagGetResults
+                                (
+                                    DSLH_DIAGNOSTIC_TYPE_Upload
+                                );
+
+        if ( pUploadDiagStats )
+        {
+            double duration;
+
+            if (pUploadDiagStats->TimeBasedTestDuration > 0.0)
+            {
+                duration = pUploadDiagStats->TimeBasedTestDuration;
+            }
+            else
+            {
+                duration = (double)pUploadInfo->TimeBasedTestDuration;
+            }
+
+            rc = sprintf_s(pBuf, sizeof(pBuf), "%.3f", duration);
+            if(rc < EOK)
+            {
+                ERR_CHK(rc);
+            }
+            rc = strcpy_s(pValue, *pUlSize, pBuf);
+            ERR_CHK(rc);
+        }
+        else
+        {
+            AnscTraceWarning(("upload Diagnostics---Failed to get TimeBasedTestDuration!\n"));
             return -1;
         }
 
@@ -4898,13 +5189,29 @@ UploadDiagnostics_SetParamUlongValue
     if (strcmp(ParamName, "DiagnosticsState") == 0)
     {
         uValue--;
-        if ( uValue != (ULONG)DSLH_TR143_DIAGNOSTIC_Requested )
+        if (uValue == (ULONG)DSLH_TR143_DIAGNOSTIC_Requested )
         {
-            return FALSE;
+            /*Checking if a test is on-going or not*/
+            if (g_DiagUploadObj && g_DiagUploadObj->bUpDiagOn)
+            {
+                return FALSE;
+            }
+            else
+            {
+                pUploadInfo->DiagnosticsState = DSLH_TR143_DIAGNOSTIC_Requested;
+                return TRUE;
+            }
+        }
+        else if (uValue == (ULONG)DSLH_TR143_DIAGNOSTIC_Canceled)
+        {
+            if (g_DiagUploadObj && g_DiagUploadObj->bUpDiagOn)
+            {
+                pUploadInfo->DiagnosticsState = DSLH_TR143_DIAGNOSTIC_Canceled;
+                return TRUE;
+            }
         }
 
-        pUploadInfo->DiagnosticsState = DSLH_TR143_DIAGNOSTIC_Requested;
-        return TRUE;
+        return FALSE;
     }
 
     if (strcmp(ParamName, "DSCP") == 0)
@@ -4927,6 +5234,20 @@ UploadDiagnostics_SetParamUlongValue
         }
 
         pUploadInfo->TestFileLength = uValue;
+        /* Keep Bbhm in sync so getv (reads Bbhm via GetConfigs) sees ACS/dmcli sets */
+        if ( g_DiagUploadObj )
+        {
+            g_DiagUploadObj->UploadDiagInfo.TestFileLength = uValue;
+        }
+
+        AutoTfl_MarkManual(uValue);
+
+        return TRUE;
+    }
+
+    if (strcmp(ParamName, "TimeBasedTestMeasurementOffset") == 0)
+    {
+        pUploadInfo->TimeBasedTestMeasurementOffset = uValue;
         return TRUE;
     }
 
@@ -4974,6 +5295,7 @@ UploadDiagnostics_SetParamStringValue
 {
     PCOSA_DATAMODEL_DIAG            pMyObject        = (PCOSA_DATAMODEL_DIAG)g_pCosaBEManager->hDiag;
     PDSLH_TR143_UPLOAD_DIAG_INFO    pUploadInfo      = pMyObject->hDiagUploadInfo;
+    PDSLH_TR143_UPLOAD_DIAG_STATS   pUploadDiagStats = NULL;
     errno_t rc = -1;
 
 	/* according to TR-181, set writable params other than DiagnosticsState,
@@ -4995,11 +5317,61 @@ UploadDiagnostics_SetParamStringValue
             return FALSE;
         }
 
+        if (syscfg_set(NULL, "speedtest_uploadurl", pString) != 0)
+        {
+            CcspTraceWarning(("%s: syscfg_set failed for %s\n", __FUNCTION__, ParamName));
+            return FALSE;
+        }
+        if (syscfg_commit() != 0)
+        {
+            CcspTraceWarning(("%s: syscfg commit failed for %s\n", __FUNCTION__, ParamName));
+            return FALSE;
+        }
+
         rc = strcpy_s(pUploadInfo->UploadURL, sizeof(pUploadInfo->UploadURL) , pString);
         ERR_CHK(rc);
         return TRUE;
     }
 
+    if (AnscEqualString(ParamName, "TimeBasedTestDuration", TRUE))
+    {
+        char* endptr = NULL;
+        unsigned long value = 0;
+
+        if ( !pString || !(*pString) )
+        {
+            return FALSE;
+        }
+
+        errno = 0;
+        value = strtoul(pString, &endptr, 10);
+
+        /* Validation checks */
+        if (
+            errno != 0 ||          /* conversion error */
+            endptr == pString ||   /* no digits found */
+            *endptr != '\0' ||     /* extra characters like "10s" */
+            value < 1 || value > 999
+        )
+        {
+            CcspTraceWarning(("Invalid TimeBasedTestDuration value: %s (allowed range: 1–999)\n", pString));
+            return FALSE;
+        }
+
+        pUploadInfo->TimeBasedTestDuration = value;
+
+        pUploadDiagStats = (PDSLH_TR143_UPLOAD_DIAG_STATS)CosaDmlDiagGetResults
+                            (
+                                DSLH_DIAGNOSTIC_TYPE_Upload
+                            );
+
+        if ( pUploadDiagStats )
+        {
+            pUploadDiagStats->TimeBasedTestDuration = (DOUBLE)pUploadInfo->TimeBasedTestDuration;
+        }
+
+        return TRUE;
+    }
 
     /* AnscTraceWarning(("Unsupported parameter '%s'\n", ParamName)); */
     return FALSE;
@@ -5049,10 +5421,13 @@ UploadDiagnostics_Validate
     if ( pUploadInfo->DiagnosticsState == DSLH_TR143_DIAGNOSTIC_Requested
        && !AnscSizeOfString(pUploadInfo->UploadURL) )
     {
-        errno_t rc = -1;
-        rc = strcpy_s(pReturnParamName, *puLength , "UploadURL");
-        ERR_CHK(rc);
-        return FALSE;
+        if (!AnscSizeOfString(pUploadInfo->UploadURL))
+        {
+            errno_t rc = -1;
+            rc = strcpy_s(pReturnParamName, *puLength , "UploadURL");
+            ERR_CHK(rc);
+            return FALSE;
+        }
     }
     return  TRUE;
 }
@@ -5086,37 +5461,81 @@ UploadDiagnostics_Commit
         ANSC_HANDLE                 hInsContext
     )
 {
+    ANSC_STATUS                     returnStatus = ANSC_STATUS_FAILURE;
     PCOSA_DATAMODEL_DIAG            pMyObject    = (PCOSA_DATAMODEL_DIAG)g_pCosaBEManager->hDiag;
     PDSLH_TR143_UPLOAD_DIAG_INFO    pUploadInfo  = pMyObject->hDiagUploadInfo;
-	char*							pAddrName			= NULL;
-	errno_t                         rc           = -1;
+    char*                           pAddrName    = NULL;
+    char                            PrevDiagState[DEF_SIZE]     = {0};
+    char                            CurrDiagState[DEF_SIZE]     = {0};
+    char                            buffer[DEF_SIZE_128]          = {0};
 
-    if ( pUploadInfo->DiagnosticsState != DSLH_TR143_DIAGNOSTIC_Requested )
+    if ((pAddrName = CosaGetInterfaceAddrByName(pUploadInfo->Interface)) != NULL && _ansc_strcmp(pAddrName, "::") != 0)
     {
-        pUploadInfo->DiagnosticsState = DSLH_TR143_DIAGNOSTIC_None;
+        AnscCopyString(pUploadInfo->IfAddrName, pAddrName);
+    }
+    else
+    {
+        AnscCopyString(pUploadInfo->IfAddrName, "");
     }
 
-	if ((pAddrName = CosaGetInterfaceAddrByName(pUploadInfo->Interface)) != NULL
-			&& _ansc_strcmp(pAddrName, "::") != 0)
-	{
-		rc = strcpy_s(pUploadInfo->IfAddrName, sizeof(pUploadInfo->IfAddrName) , pAddrName);
-		ERR_CHK(rc);
-	}
-	else
-	{
-		pUploadInfo->IfAddrName[0] = '\0' ;
-	}
-	if (pAddrName)
-		AnscFreeMemory(pAddrName);
+    if (pAddrName)
+        AnscFreeMemory(pAddrName);
 
+    if (g_Tr143SpeedTestTestUsable)
+    {
+        getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, PrevDiagState);
 
-    CosaDmlDiagScheduleDiagnostic
-                    (
-                        DSLH_DIAGNOSTIC_TYPE_Upload,
-                        (ANSC_HANDLE)pUploadInfo
-                    );
+        if (!(g_DiagUploadObj && g_DiagUploadObj->bUpDiagOn) && (pUploadInfo->DiagnosticsState == DSLH_TR143_DIAGNOSTIC_Requested))
+        {
+            returnStatus = CosaDmlDiagScheduleDiagnostic(DSLH_DIAGNOSTIC_TYPE_Upload,(ANSC_HANDLE)pUploadInfo);
+        }
+        else if (g_DiagUploadObj && g_DiagUploadObj->bUpDiagOn && ((pUploadInfo->DiagnosticsState == DSLH_TR143_DIAGNOSTIC_Canceled) || (pUploadInfo->DiagnosticsState == DSLH_TR143_DIAGNOSTIC_Requested)))
+        {
+            struct timespec ts;
 
-    return 0;
+            if (clock_gettime(CLOCK_REALTIME, &ts) == -1)
+            {
+                CcspTraceError(("%s: Error fetching realtime\n", __FUNCTION__));
+            }
+            ts.tv_sec += 5;     /*5s timeout for the wait*/
+
+            pthread_mutex_lock(&UploadDiagMutex);
+            CcspTraceWarning(("%s : Cancelling on-going upload diagnostics\n", __FUNCTION__));
+            CosaDmlDiagCancelDiagnostic(DSLH_DIAGNOSTIC_TYPE_Upload);
+            pthread_cond_timedwait(&UploadDiagCond, &UploadDiagMutex, &ts);
+            pthread_mutex_unlock(&UploadDiagMutex);
+
+            if ((pUploadInfo->DiagnosticsState == DSLH_TR143_DIAGNOSTIC_Requested) && !(g_DiagUploadObj && g_DiagUploadObj->bUpDiagOn))
+            {
+                returnStatus = CosaDmlDiagScheduleDiagnostic(DSLH_DIAGNOSTIC_TYPE_Upload,(ANSC_HANDLE)pUploadInfo);
+            }
+            else
+            {
+                CosaDmlDiagSetState(DSLH_DIAGNOSTIC_TYPE_Upload, DSLH_TR143_DIAGNOSTIC_None);
+                getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, CurrDiagState);
+                snprintf(buffer, sizeof(buffer), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+                Notify_change("Device.IP.Diagnostics.UploadDiagnostics.DiagnosticsState", buffer);
+            }
+        }
+        else
+        {
+            pUploadInfo->DiagnosticsState = DSLH_TR143_DIAGNOSTIC_None;
+            getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, CurrDiagState);
+            snprintf(buffer, sizeof(buffer), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+            Notify_change("Device.IP.Diagnostics.UploadDiagnostics.DiagnosticsState", buffer);
+        }
+    }
+    else
+    {
+        getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, PrevDiagState);
+        CosaDmlDiagSetState(DSLH_DIAGNOSTIC_TYPE_Upload, DSLH_TR143_DIAGNOSTIC_Error_Internal);
+        getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, CurrDiagState);
+        snprintf(buffer, sizeof(buffer), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+        Notify_change("Device.IP.Diagnostics.UploadDiagnostics.DiagnosticsState", buffer);
+        CcspTraceError(("%s: TestUsable is false; set Device.IP.Diagnostics.X_RDK_SpeedTest.TestUsable to true\n", __FUNCTION__));
+    }
+
+    return (returnStatus == ANSC_STATUS_SUCCESS) ? 0 : 1;
 }
 
 /**********************************************************************
@@ -5174,7 +5593,10 @@ UploadDiagnostics_Rollback
         pUploadInfo->DSCP                 = pUploadPreInfo->DSCP;
         pUploadInfo->EthernetPriority     = pUploadPreInfo->EthernetPriority;
         pUploadInfo->TestFileLength       = pUploadPreInfo->TestFileLength;
+        pUploadInfo->TimeBasedTestDuration = pUploadPreInfo->TimeBasedTestDuration;
+        pUploadInfo->TimeBasedTestMeasurementOffset = pUploadPreInfo->TimeBasedTestMeasurementOffset;
         pUploadInfo->DiagnosticsState     = pUploadPreInfo->DiagnosticsState;
+        AnscFreeMemory(pUploadPreInfo);
     }
     else
     {
@@ -6086,6 +6508,7 @@ UDPEchoConfig_Rollback
         pUdpEchoInfo->UDPPort              = pUdpEchoPreInfo->UDPPort;
         pUdpEchoInfo->EchoPlusEnabled      = pUdpEchoPreInfo->EchoPlusEnabled;
         pUdpEchoInfo->EchoPlusSupported    = pUdpEchoPreInfo->EchoPlusSupported;
+        AnscFreeMemory(pUdpEchoPreInfo);
     }
     else
     {
@@ -6506,6 +6929,75 @@ RDK_SpeedTest_SetParamUlongValue
     }
 
     return FALSE;
+}
+
+BOOL
+RDK_SpeedTest_GetParamBoolValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        BOOL*                       pBool
+    )
+{
+    if (strcmp(ParamName, "TestUsable") == 0)
+    {
+        *pBool = g_Tr143SpeedTestTestUsable;
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+BOOL
+RDK_SpeedTest_SetParamBoolValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        BOOL                        bValue
+    )
+{
+    if (strcmp(ParamName, "TestUsable") == 0)
+    {
+        g_Tr143SpeedTestTestUsable = bValue;
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+BOOL
+RDK_SpeedTest_Validate
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       pReturnParamName,
+        ULONG*                      puLength
+    )
+{
+    UNREFERENCED_PARAMETER(hInsContext);
+    UNREFERENCED_PARAMETER(puLength);
+
+    if (pReturnParamName != NULL)
+        AnscCopyString(pReturnParamName, "TestUsable");
+
+    return TRUE;
+}
+
+ULONG
+RDK_SpeedTest_Commit
+    (
+        ANSC_HANDLE                 hInsContext
+    )
+{
+    return 0;
+}
+
+ULONG
+RDK_SpeedTest_Rollback
+    (
+        ANSC_HANDLE                 hInsContext
+    )
+{
+    return 0;
 }
 
 
@@ -7158,6 +7650,62 @@ eMMCFlashDiag_GetParamBoolValue
     return FALSE;
 }
 #endif
+
+ULONG Tel_getSpeedTestResult( DOUBLE achTime, ULONG achBytes )
+{
+    ULONG achBandwidth = 0;
+
+    if(achTime > 0.0){
+        achBandwidth = (ULONG)(achBytes/achTime);
+        return achBandwidth;
+    }
+    else{
+        AnscTraceWarning((" %s: TimeBasedTestDuration is NULL!!\n",__FUNCTION__));
+        return achBandwidth;
+    }
+}
+
+BOOL
+TelSpeedtest_GetParamUlongValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        ULONG*                      pUlong
+    )
+{
+    ULONG UlBandwidth = 0;
+    PDSLH_TR143_DOWNLOAD_DIAG_STATS pDownloadDiagStats = NULL;
+    PDSLH_TR143_UPLOAD_DIAG_STATS   pUploadDiagStats = NULL;
+
+    UNREFERENCED_PARAMETER(hInsContext);
+
+    if ( AnscEqualString(ParamName, "UploadBandwidth", TRUE))
+    {
+            pUploadDiagStats = (PDSLH_TR143_UPLOAD_DIAG_STATS)CosaDmlDiagGetResults( DSLH_DIAGNOSTIC_TYPE_Upload );
+            if ( !pUploadDiagStats ){
+                 AnscTraceWarning((" %s Failed to get pUploadDiagStats!\n",__FUNCTION__));
+                 return FALSE;
+            }else{
+                 UlBandwidth = Tel_getSpeedTestResult(pUploadDiagStats->TimeBasedTestDuration ,pUploadDiagStats->TotalBytesSent);
+                 *pUlong = UlBandwidth;
+                 return TRUE;
+            }
+
+    } else if ( AnscEqualString(ParamName, "DownloadBandwidth", TRUE))
+    {
+            pDownloadDiagStats = (PDSLH_TR143_DOWNLOAD_DIAG_STATS)CosaDmlDiagGetResults( DSLH_DIAGNOSTIC_TYPE_Download );
+            if ( !pDownloadDiagStats ){
+                 AnscTraceWarning((" %s Failed to get pDownloadDiagStats!\n",__FUNCTION__));
+                 return FALSE;
+            }
+            else{
+                 UlBandwidth  = Tel_getSpeedTestResult(pDownloadDiagStats->TimeBasedTestDuration ,pDownloadDiagStats->TotalBytesReceived);
+                 *pUlong = UlBandwidth;
+                 return TRUE;
+            }
+    }
+    return FALSE;
+}
 
 /**********************************************************************
 

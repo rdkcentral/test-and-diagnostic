@@ -85,6 +85,8 @@ extern PBBHM_UPLOAD_DIAG_OBJECT        g_DiagUploadObj;
 extern PBBHM_UDP_ECHOSRV_OBJECT        g_UdpechoObj;
 #endif
 
+void AutoTfl_TriggerOnWanStatus(void);
+
 void *                          g_MessageBusHandle = NULL;
 
 COSAGetParamValueStringProc        g_GetParamValueString;
@@ -188,6 +190,9 @@ COSA_Diag_Init
     {
         pUdpechoObj->Engage((ANSC_HANDLE)pUdpechoObj);
     }
+
+    /* Pre-train TFL after WAN up: wait wan-status=started → Requested/Commit. */
+    AutoTfl_TriggerOnWanStatus();
 #endif
 
     return ANSC_STATUS_SUCCESS;
