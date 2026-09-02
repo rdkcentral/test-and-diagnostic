@@ -517,6 +517,7 @@ fi
     # ---------------------------------------------------------------
 
     MULTI_PROC_DETECT_ENABLE=$(syscfg get MultiProcDetectEnable 2>/dev/null)
+    MULTI_PROC_COUNT_FILE="/tmp/.multi_proc_detect_count"
     # Default: enabled
     if [ -z "$MULTI_PROC_DETECT_ENABLE" ] || [ "$MULTI_PROC_DETECT_ENABLE" = "true" ]; then
 
@@ -530,7 +531,6 @@ fi
             *)  MULTI_PROC_CYCLE_THRESHOLD=1 ;;  # 15 min or unset: run every cycle
         esac
 
-        MULTI_PROC_COUNT_FILE="/tmp/.multi_proc_detect_count"
         MULTI_PROC_COUNT=$(cat "$MULTI_PROC_COUNT_FILE" 2>/dev/null)
         case "$MULTI_PROC_COUNT" in ''|*[!0-9]*) MULTI_PROC_COUNT=0 ;; esac
         MULTI_PROC_COUNT=$((MULTI_PROC_COUNT + 1))
@@ -616,6 +616,13 @@ fi
         fi
 
         echo "$MULTI_PROC_COUNT" > "$MULTI_PROC_COUNT_FILE"
+    else
+        # Feature disabled — reset the interval counter so that re-enabling
+        # always starts a fresh DetectionInterval window instead of resuming
+        # from a stale/frozen count.
+        if [ -f "$MULTI_PROC_COUNT_FILE" ]; then
+            rm -f "$MULTI_PROC_COUNT_FILE"
+        fi
     fi
 }
 
