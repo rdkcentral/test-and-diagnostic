@@ -2,7 +2,7 @@
 # If not stated otherwise in this file or this component's Licenses.txt
 # file the following copyright and licenses apply:
 #
-# Copyright 2015 RDK Management
+# Copyright 2026 RDK Management
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,16 +16,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
-if UNIT_TEST_DOCKER_SUPPORT
-SUBDIRS = test
-else
-if FEATURE_DEVICE_PRIORITIZATION
-SUBDIRS = DevicePrioritization LatencyMeasurement TandDSsp dmltad util xle_selfheal ImageHealthChecker
-else
-SUBDIRS = LatencyMeasurement TandDSsp dmltad util xle_selfheal ImageHealthChecker
-endif
-if FEATURE_DNS_FAILOVER
-SUBDIRS += DNSFailover
-endif
-endif
 
+bin_PROGRAMS = DNSFailover
+
+DNSFailover_CPPFLAGS = -I$(top_srcdir)/source/DNSFailover \
+                       -I${PKG_CONFIG_SYSROOT_DIR}$(includedir)/rbus
+
+DNSFailover_SOURCES = dnsfailover_util.c \
+                      dnsfailover_conntrack.c \
+                      dnsfailover_verify.c \
+                      dnsfailover_firewall.c \
+                      dnsfailover_wan.c \
+                      dnsfailover_servers.c \
+                      dnsfailover_rbus.c \
+                      dnsfailover_main.c
+
+DNSFailover_CFLAGS = $(DNS_FAILOVER_CFLAGS)
+
+DNSFailover_LDFLAGS = -lccsp_common -lrbus -lsecure_wrapper \
+                      -lnetfilter_conntrack -lnfnetlink -lpthread -lrt

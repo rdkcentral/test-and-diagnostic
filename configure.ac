@@ -123,6 +123,23 @@ AC_ARG_ENABLE([device_prioritization],
 AM_CONDITIONAL([FEATURE_DEVICE_PRIORITIZATION], [test $DEVICE_PRIORITIZATION = yes])
 AC_SUBST(DEVICE_PRIORITIZATION_CFLAGS)
 
+DNS_FAILOVER_CFLAGS=" "
+DNS_FAILOVER=no
+AC_ARG_ENABLE([dns_failover],
+        AS_HELP_STRING([--enable-dns_failover],[enable dns_failover]),
+        [
+          case "${enableval}" in
+           yes) DNS_FAILOVER_CFLAGS="-DDNS_FAILOVER_ENABLED"
+                DNS_FAILOVER=yes ;;
+           no) AC_MSG_ERROR([dns_failover is disabled]) ;;
+          *) AC_MSG_ERROR([bad value ${enableval} for --enable-dns_failover]) ;;
+           esac
+           ],
+         [echo "dns failover is disabled."])
+
+AM_CONDITIONAL([FEATURE_DNS_FAILOVER], [test $DNS_FAILOVER = yes])
+AC_SUBST(DNS_FAILOVER_CFLAGS)
+
 AC_ARG_ENABLE([resourceoptimization],
              AS_HELP_STRING([--enable-resourceoptimization],[enable resource optimization (default is no)]),
              [
@@ -163,6 +180,7 @@ AC_CONFIG_FILES(
   source/LatencyMeasurement/xNetDP/Makefile
   source/DevicePrioritization/Makefile
   source/DevicePrioritization/TR-181/Makefile
+  source/DNSFailover/Makefile
 	Makefile
 )
 
