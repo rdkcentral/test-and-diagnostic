@@ -382,5 +382,42 @@ CPUProcAnalyzer_SetParamStringValue
         char*                       ParamName,
         char*                       strValue
     );
+BOOL MemoryIncreaseDetection_GetParamBoolValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        BOOL*                       bValue
+    );
 
+BOOL MemoryIncreaseDetection_SetParamBoolValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        BOOL                        bValue
+    );
+
+BOOL
+MemoryIncreaseDetection_GetParamUlongValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        ULONG*                      puLong
+    );
+
+BOOL
+MemoryIncreaseDetection_SetParamUlongValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        ULONG                       uValue
+    );
+
+ULONG
+MemoryIncreaseDetection_GetParamStringValue
+    (
+        ANSC_HANDLE                 hInsContext,
+        char*                       ParamName,
+        char*                       pValue,
+        ULONG*                      pUlSize
+    );
 #endif
