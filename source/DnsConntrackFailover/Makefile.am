@@ -2,7 +2,7 @@
 # If not stated otherwise in this file or this component's Licenses.txt
 # file the following copyright and licenses apply:
 #
-# Copyright 2015 RDK Management
+# Copyright 2026 RDK Management
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,13 +16,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 ##########################################################################
-if UNIT_TEST_DOCKER_SUPPORT
-SUBDIRS = test
-else
-if FEATURE_DEVICE_PRIORITIZATION
-SUBDIRS = DevicePrioritization LatencyMeasurement TandDSsp dmltad util xle_selfheal ImageHealthChecker DnsConntrackFailover
-else
-SUBDIRS = LatencyMeasurement TandDSsp dmltad util xle_selfheal ImageHealthChecker DnsConntrackFailover
-endif
-endif
 
+bin_PROGRAMS = dns_conntrack_failover
+
+dns_conntrack_failover_SOURCES = dns_conntrack_failover.c
+dns_conntrack_failover_LDFLAGS = -lnetfilter_conntrack -lnfnetlink -lpthread

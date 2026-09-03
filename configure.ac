@@ -162,6 +162,7 @@ AC_CONFIG_FILES(
   source/LatencyMeasurement/xNetSniffer/Makefile 
   source/LatencyMeasurement/xNetDP/Makefile
   source/DevicePrioritization/Makefile
+  source/DnsConntrackFailover/Makefile
   source/DevicePrioritization/TR-181/Makefile
 	Makefile
 )
