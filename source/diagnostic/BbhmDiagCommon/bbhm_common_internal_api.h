@@ -32,11 +32,9 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 **********************************************************************/
-
-
 /**********************************************************************
 
-    module:bbhm_upload_global.h
+    module: bbhm_common_internal_api.h
 
         For Broadband Home Manager Model Implementation (BBHM),
         BroadWay Service Delivery System
@@ -45,8 +43,9 @@
 
     description:
 
-        This header file includes all the header files required by
-        the Bbhm Upload Diagnostics object implementation.
+        This header file contains the prototype definition for all
+        the common internal functions provided by the Bbhm Diagnostics 
+        Object.
 
         Bbhm Diagnostics are defined in TR143
 
@@ -56,73 +55,47 @@
 
         platform independent
 
-    ---------------------------------------------------------------
-
-    author:
-
-       Jinghua Xu
-
-    ---------------------------------------------------------------
-
-    revision:
-
-        06/01/2011    initial revision.
-
 **********************************************************************/
 
+#ifndef  _BBHM_COMMON_INTERNAL_API_
+#define  _BBHM_COMMON_INTERNAL_API_
 
-#ifndef  _BBHM_UPLOAD_GLOBAL_
-#define  _BBHM_UPLOAD_GLOBAL_
+#include "user_time.h"
+#include "ssp_global.h"
 
+#define  PAM_COMPONENT_NAME             "eRT.com.cisco.spvtg.ccsp.pam"
+#define  PAM_DBUS_PATH                  "/com/cisco/spvtg/ccsp/pam"
+#define  INTERFACE_STATS_Tx_BYTES       "Device.IP.Interface.1.Stats.BytesSent"
+#define  INTERFACE_STATS_Rx_BYTES       "Device.IP.Interface.1.Stats.BytesReceived"
 
-#include "ansc_platform.h"
-#include "ansc_crypto_interface.h"
-#include "ansc_crypto_external_api.h"
-#include "ansc_tso_interface.h"
-#include "ansc_tso_external_api.h"
-#include "ansc_ssto_interface.h"
-#include "ansc_ssto_external_api.h"
+/***********************************************************
+       FUNCTIONS IMPLEMENTED IN BBHM_COMMON_INTERNAL_API.C
+***********************************************************/
 
-#include "bbhm_co_oid.h"
-#include "bbhm_co_name.h"
-#include "bbhm_co_type.h"
-/*#include "bbhm_properties.h"*/
+double
+CalculateTimeDifference
+    (
+        USER_SYSTEM_TIME*  start_time,
+        USER_SYSTEM_TIME*  stop_time
+    );
 
-#include "bbhm_diageo_interface.h"
-#include "bbhm_diageo_exported_api.h"
+ANSC_STATUS
+Tad_GetParamValues
+    (
+        char  *pchComponent,
+        char  *pchBus,
+        char  *pchParamName,
+        ULONG *pulReturnVal
+    );
 
-#include "bbhm_upload_interface.h"
-#include "bbhm_upload_exported_api.h"
-#include "bbhm_upload_internal_api.h"
-#include "bbhm_common_internal_api.h"
-
-/*
-#include "bbhm_srvco_interface.h"
-#include "bbhm_srvco_exported_api.h"
-#include "bbhm_sysco_interface.h"
-#include "bbhm_sysco_exported_api.h"
-*/
-
-#include "dslh_co_oid.h"
-#include "dslh_co_name.h"
-#include "dslh_co_type.h"
-#include "dslh_properties.h"
-
-#include "dslh_cpeco_interface.h"
-#include "dslh_cpeco_exported_api.h"
-
-#include "dslh_ifo_mpr.h"
-/*#include "dslh_ifo_mso.h"*/
-
-#include "slap_definitions.h"
-#include "sys_definitions.h"
-
-#include "http_properties.h"
-
-#include "http_ifo_bsp.h"
-#include "http_ifo_hfp.h"
-
-#include "ansc_string_util.h"
-#include "cosa_apis_ip_priv.h"
+ANSC_STATUS
+Tad_GetParamString
+    (
+        char  *pchComponent,
+        char  *pchBus,
+        char  *pchParamName,
+        char  *pchBuf,
+        ULONG  ulBufSize
+    );
 
 #endif

@@ -59,6 +59,7 @@ libdiagnostic_la_SOURCES = \
         source/diagnostic/BbhmDiagNSLookup/bbhm_diagns_xsink_base.c \
         source/diagnostic/BbhmDiagNSLookup/bbhm_diagns_xsink_operation.c \
         source/diagnostic/BbhmDiagNSLookup/bbhm_diagns_xsink_states.c \
+        source/diagnostic/BbhmDiagCommon/bbhm_common_internal_api.c \
         source/diagnostic/bbhm_diag_lib.c
 
 if !FEATURE_RESOURCE_OPTIMIZATION
@@ -68,6 +69,7 @@ libdiagnostic_la_SOURCES += \
         source/diagnostic/BbhmDiagDownload/bbhm_download_interface.c \
         source/diagnostic/BbhmDiagDownload/bbhm_download_operation.c \
         source/diagnostic/BbhmDiagUpload/bbhm_upload_action.c \
+        source/diagnostic/BbhmDiagUpload/bbhm_upload_auto_tfl.c \
         source/diagnostic/BbhmDiagUpload/bbhm_upload_base.c \
         source/diagnostic/BbhmDiagUpload/bbhm_upload_interface.c \
         source/diagnostic/BbhmDiagUpload/bbhm_upload_operation.c \
@@ -77,7 +79,7 @@ libdiagnostic_la_SOURCES += \
         source/diagnostic/BbhmUdpEchoServer/bbhm_udpecho_operation.c
 endif
 
-libdiagnostic_la_CPPFLAGS = -I$(top_srcdir)/source/diagnostic/include -I$(top_srcdir)/source/diagnostic/BbhmDiagIpPing -I$(top_srcdir)/source/dmltad -I$(top_srcdir)/source/TandDSsp
+libdiagnostic_la_CPPFLAGS = -I$(top_srcdir)/source/diagnostic/include -I$(top_srcdir)/source/diagnostic/BbhmDiagCommon -I$(top_srcdir)/source/diagnostic/BbhmDiagIpPing -I$(top_srcdir)/source/dmltad -I$(top_srcdir)/source/TandDSsp
 libdiagnostic_la_DEPENDENCIES = $(EXTRA_DEPENDENCIES)
 libdiagnostic_la_LIBADD = $(libdiagnostic_la_DEPENDENCIES)
-libdiagnostic_la_LDFLAGS = -lccsp_common
+libdiagnostic_la_LDFLAGS = -lccsp_common -lsecure_wrapper -lsysevent

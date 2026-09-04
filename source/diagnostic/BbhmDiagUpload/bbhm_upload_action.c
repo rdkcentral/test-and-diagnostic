@@ -80,7 +80,11 @@
 **********************************************************************/
 
 #include <ctype.h>
+#include <errno.h>
+#include <stdio.h>
+#include <sys/time.h>
 #include "bbhm_upload_global.h"
+#include "bbhm_upload_auto_tfl.h"
 #include "ansc_xsocket_external_api.h"
 #include "safec_lib_common.h"
 
@@ -89,6 +93,24 @@
 #define  UPLOAD_PORT_TO_                              5808
 
 #define  UPLOAD_SINGLE_BUFFER_SIZE                 500000        /* 500 K */
+#define  HTTP_RESPONSE_OK_STRING                  "HTTP/1.1 200 OK"
+#define  HTTP_RESPONSE_REDIRECTION_STRING         "HTTP/1.1 301"
+
+/*
+ * Reuse one 500KB send buffer across Upload runs. Alloc/free every Requested
+ * (bUpDiagOn), so a process-lifetime buffer is safe.
+ */
+static char* s_uploadSendBuffer = NULL;
+
+/* RDKB SRU DM path for upload speed (Mbps). If empty/0, fallback to GPON NominalBitRateUpstream. */
+#define  PPPMgr_COMPONENT_NAME                    "eRT.com.cisco.spvtg.ccsp.pppmanager"
+#define  PPPMgr_DBUS_PATH                         "/com/cisco/spvtg/ccsp/pppmanager"
+#define  RDKB_SRU_UPLOAD_SPEED_DM                 "Device.PPP.Interface.1.X_T_ONLINE_DE_SRU"
+
+extern PBBHM_UPLOAD_DIAG_OBJECT g_DiagUploadObj;
+
+pthread_cond_t  UploadDiagCond             =       PTHREAD_COND_INITIALIZER;
+pthread_mutex_t UploadDiagMutex            =       PTHREAD_MUTEX_INITIALIZER;
 
 /**********************************************************************
 
@@ -315,7 +337,7 @@ static char http_put_request1[]=
 "Referer: http://%s\r\n"
 "Connection: keep-alive\r\n"
 "Content-Type: multipart/form-data; boundary=ZzAaBbCc1234567890\r\n"
-"Content-Length: %d\r\n\r\n";
+"Content-Length: %lu\r\n\r\n";
 
 static char http_put_body_begin[]=
 "--ZzAaBbCc1234567890\r\n"
@@ -334,9 +356,161 @@ static char http_put_request2[]=
 "Referer: http://%s:%s\r\n"
 "Connection: keep-alive\r\n"
 "Content-Type: multipart/form-data; boundary=ZzAaBbCc1234567890\r\n"
-"Content-Length: %d\r\n\r\n";
+"Content-Length: %lu\r\n\r\n";
 
 static char http_sample_upload_text[] = "Test Upload files. blah blah blah...\r\n";
+
+
+static char http_head_request[]=
+"HEAD %s HTTP/1.1\r\n"
+"Host: %s:%s\r\n\r\n";
+
+#define LOCATION "Location: "
+#define LOCATION_SCANF_FMT "%255[^\r\n]"  /* DSLH_TR143_MAX_STRING_LENGTH - 1 */
+
+static int checkIfTheURLIsValid(XSKT_SOCKET sock, char *header_data,int header_len, char **redirectionUrl)
+{
+    int s_result = 0;
+    char rUrl[DSLH_TR143_MAX_STRING_LENGTH] = {0};
+    char buffer[2048] = {0};
+    struct timeval timeout;
+    errno_t rc = -1;
+
+    timeout.tv_sec = 30;
+    timeout.tv_usec = 0;
+
+    if (_xskt_setsocketopt(sock, XSKT_SOCKET_SOL_SOCKET, ANSC_SOCKET_SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) < 0)
+    {
+        CcspTraceError(("Setsockopt for send timeout -- failed !!\n"));
+        return -1;
+    }
+
+    if (_xskt_setsocketopt(sock, XSKT_SOCKET_SOL_SOCKET, ANSC_SOCKET_SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) < 0)
+    {
+        CcspTraceError(("Setsockopt for receive timeout -- failed !!\n"));
+        return -1;
+    }
+
+#ifdef _DEBUG
+    AnscTraceWarning(("******** HEAD Upload Request **************\n"));
+    AnscTraceWarning((header_data));
+    AnscTraceWarning(("\n******************************************\n"));
+#endif
+
+    if(header_data != NULL)
+    {
+        s_result = _xskt_send(sock, header_data, header_len, 0);
+    }
+
+    if(s_result == XSKT_SOCKET_ERROR)
+    {
+            AnscTraceWarning(("Failed to send http head request\n"));
+            return -1;
+    }
+    else
+    {
+            *redirectionUrl = NULL;
+            AnscTraceWarning(("Successfully sent the request\n"));
+            s_result = _xskt_recv(sock, buffer, sizeof(buffer) - 1, 0);
+            if(( s_result != -1) && (s_result > 0))
+            {
+#ifdef _DEBUG
+                    AnscTraceWarning(("******** HEAD Upload Response **************\n"));
+                    AnscTraceWarning((buffer));
+                    AnscTraceWarning(("\n******************************************\n"));
+#endif
+                    if(_ansc_strstr(buffer, HTTP_RESPONSE_OK_STRING) != NULL )
+                    {
+                            AnscTraceWarning(("Received 200 Ok Response\n"));
+                            return 0;
+                    }
+                    else if(_ansc_strstr(buffer, HTTP_RESPONSE_REDIRECTION_STRING) != NULL)
+		    {
+			    AnscTraceWarning(("Received 301 Redirection response\n"));
+			    char *res_buffer = _ansc_strstr(buffer, LOCATION);
+			    if (res_buffer != NULL)
+			    {
+                                   res_buffer += _ansc_strlen(LOCATION);
+                                   while (*res_buffer == ' ' || *res_buffer == '\t')
+                                       res_buffer++;
+
+                                   if (sscanf(res_buffer, LOCATION_SCANF_FMT, rUrl) == 1 && rUrl[0] != '\0')
+				   {
+					*redirectionUrl = (char*)AnscAllocateMemory(DSLH_TR143_MAX_STRING_LENGTH);
+					if (*redirectionUrl !=  NULL)
+					{
+					    rc = strcpy_s(*redirectionUrl, DSLH_TR143_MAX_STRING_LENGTH, rUrl);
+					    if (rc < EOK)
+					    {
+					        AnscFreeMemory(*redirectionUrl);
+					        *redirectionUrl = NULL;
+					        return -1;
+					    }
+					    AnscTraceWarning(("Redirection URL is %s\n", *redirectionUrl));
+					    return 0;
+					}
+				   }
+			    }
+		    }
+	     }
+	     else
+	     {
+		AnscTraceWarning(("Failure in receiving the response\n"));
+		return -1;
+	     }
+            return -1;
+       }
+}
+
+/**********************************************************************
+
+  prototype:
+
+    static void
+    updateTestFileLength(PDSLH_TR143_UPLOAD_DIAG_INFO pUploadInfo)
+
+  description:
+
+    Priority: 1) SRU>0  2) WebPA/DM manual  3) auto TFL / reuse
+**********************************************************************/
+static void
+updateTestFileLength(PDSLH_TR143_UPLOAD_DIAG_INFO pUploadInfo)
+{
+    ULONG       uploadSpeedKbps = 0;
+    ULONG       uploadSpeedBps  = 0;
+    ULONG       testFileLength  = 0;
+    ANSC_STATUS sruStatus       = ANSC_STATUS_FAILURE;
+
+    if (pUploadInfo == NULL)
+        return;
+
+    /* 1) SRU */
+    sruStatus = Tad_GetParamValues(PPPMgr_COMPONENT_NAME, PPPMgr_DBUS_PATH,
+            RDKB_SRU_UPLOAD_SPEED_DM, &uploadSpeedKbps);
+
+    if (ANSC_STATUS_SUCCESS == sruStatus && uploadSpeedKbps > 0)
+    {
+        AutoTfl_Reset();
+
+        uploadSpeedBps = uploadSpeedKbps * 1000;
+        CcspTraceInfo(("updateTestFileLength: got UploadSpeed %lu bps based on SRU DM\n", uploadSpeedBps));
+
+        testFileLength = (ULONG)((((unsigned long long)uploadSpeedBps) * 3) / 4);
+        if (testFileLength < UPLOAD_TFL_DEFAULT_BYTES)
+            testFileLength = UPLOAD_TFL_DEFAULT_BYTES;
+
+        pUploadInfo->TestFileLength = testFileLength;
+        CcspTraceInfo(("updateTestFileLength: TestFileLength=%lu bytes\n", pUploadInfo->TestFileLength));
+        return;
+    }
+
+    /* 2) WebPA/DM */
+    if (AutoTfl_TryManual(pUploadInfo))
+        return;
+
+    /* 3) Auto TFL / reuse */
+    AutoTfl_Start(pUploadInfo);
+}
 
 ANSC_STATUS
 bbhmUploadStartDiagTask
@@ -352,7 +526,7 @@ bbhmUploadStartDiagTask
     ULONG                           uBytesSent         = 0;
     XSKT_SOCKET                     aSocket            = XSKT_SOCKET_INVALID_SOCKET;
     int                             s_result           = 0;
-    char                            buffer[1024]       = { 0 };
+    char                            buffer[2048]       = { 0 };
     char*                           send_buffer        = NULL;
     ULONG                           send_size          = 0;
     ULONG                           uTotalMsgSize      = 0;
@@ -365,6 +539,17 @@ bbhmUploadStartDiagTask
 	int								tos				   = 0;
 	char							ipv6ref[64]		   = {0};
 	errno_t							rc 				   = -1;
+    BOOL                            head_validated     = FALSE;
+    ULONG                           initialTxBytes     = 0;
+    ULONG                           finalTxBytes       = 0;
+    struct timeval                  startTime;
+    struct timeval                  currentTime;
+    unsigned long long              ullStartTimeInMs   = 0;
+    unsigned long long              ullCurrentTimeInMs = 0;
+    unsigned long long              ullDurationInMs    = 0;
+    char                            PrevDiagState[DEF_SIZE]     = {0};
+    char                            CurrDiagState[DEF_SIZE]     = {0};
+    char                            bufferState[DEF_SIZE_128]   = {0};
 
     if ( !pMyObject->bActive )
     {
@@ -389,13 +574,26 @@ bbhmUploadStartDiagTask
 	/* init socket warpper */
 	AnscStartupXsocketWrapper((ANSC_HANDLE)pMyObject);
 
-    /* turn on the diag */
-    pMyObject->bUpDiagOn           = TRUE;
+    /* turn on indicator to identify it test is started or not, if not already set */
+    if (!pMyObject->bUpDiagOn)
+    {
+        pMyObject->bUpDiagOn           = TRUE;
+    }
 
     /* reset the stats */
     DslhResetUploadDiagStats((pStats));
 	
+    pStats->TimeBasedTestDuration = (DOUBLE)pMyObject->UploadDiagInfo.TimeBasedTestDuration;
+    pStats->TimeBasedTestMeasurementOffset = pMyObject->UploadDiagInfo.TimeBasedTestMeasurementOffset;
+
+    getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, PrevDiagState);
     pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Requested;
+
+    getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, CurrDiagState);
+    snprintf(bufferState, sizeof(bufferState), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+
+    Notify_change("Device.IP.Diagnostics.UploadDiagnostics.DiagnosticsState", bufferState);
+    getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, PrevDiagState);
 
     if ( pMyObject->bStopUpDiag )
     {
@@ -403,12 +601,14 @@ bbhmUploadStartDiagTask
         goto done;
     }
 
+     retry :
+
+        pHost = pServ = pPath = NULL;
     /* parse the upload http url */
 	if (ParseHttpURL(pMyObject->UploadDiagInfo.UploadURL,
 			&pHost, &pServ, &pPath) != 0)
 	{
-		/* if the function fail, memory should not allcated,
-		 * but the Pointers' value is uncertain. */
+		/* if the function fail, memory should not allcated, but the Pointers' value is uncertain. */
 		pHost = pServ = pPath = NULL;
 
         pMyObject->bUpNotifyNeeded = TRUE;
@@ -444,6 +644,25 @@ bbhmUploadStartDiagTask
 
         returnStatus = ANSC_STATUS_FAILURE;
         goto done;
+    }
+
+    {
+        struct timeval timeout;
+
+        timeout.tv_sec = (long)pMyObject->UploadDiagInfo.TimeBasedTestDuration;
+        timeout.tv_usec = 0;
+
+        if (_xskt_setsocketopt(aSocket, XSKT_SOCKET_SOL_SOCKET, ANSC_SOCKET_SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) < 0)
+        {
+            CcspTraceError(("Setsockopt for send timeout -- failed !!\n"));
+            goto done;
+        }
+
+        if (_xskt_setsocketopt(aSocket, XSKT_SOCKET_SOL_SOCKET, ANSC_SOCKET_SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) < 0)
+        {
+            CcspTraceError(("Setsockopt for receive timeout -- failed !!\n"));
+            goto done;
+        }
     }
 
 	/* bind local address if need */
@@ -498,7 +717,7 @@ bbhmUploadStartDiagTask
 	/* TODO: need 802.1d support */
 
     AnscGetSystemTime(&pStats->TCPOpenRequestTime);
-	
+
 	/* connect HTTP server */
 	if ( _xskt_connect(aSocket, servInfo->ai_addr, servInfo->ai_addrlen) != 0)
 	{
@@ -516,11 +735,63 @@ bbhmUploadStartDiagTask
     
     AnscGetSystemTime(&pStats->TCPOpenResponseTime);
 
-    /* record HTTP request time */
-    AnscGetSystemTime(&pStats->ROMTime);
+
+    if (!head_validated)
+    {
+       int ret = -1;
+       char *redirectionUrl = NULL;
+
+
+	if (IsIPv6Address(pHost))
+        {
+                _ansc_snprintf(ipv6ref, sizeof(ipv6ref), "[%s]", pHost);
+                _ansc_snprintf(buffer, sizeof(buffer), http_head_request,
+                                pPath, ipv6ref, pServ);
+        }
+        else
+        {
+                _ansc_snprintf(buffer, sizeof(buffer), http_head_request,
+                                pPath, pHost, pServ);
+        }
+
+
+	ret = checkIfTheURLIsValid(aSocket, buffer ,sizeof(buffer), &redirectionUrl);
+
+        if (ret == 0)
+        {
+            head_validated = TRUE;
+
+            if (redirectionUrl)
+	    {
+                 _ansc_snprintf(pMyObject->UploadDiagInfo.UploadURL,sizeof(pMyObject->UploadDiagInfo.UploadURL),"%s",redirectionUrl);
+                AnscFreeMemory(redirectionUrl);
+	    }
+	    if (aSocket != XSKT_SOCKET_INVALID_SOCKET)
+		    _xskt_closesocket(aSocket);
+	    if (servInfo)
+		    _xskt_freeaddrinfo(servInfo);
+	    if (cliInfo)
+		    _xskt_freeaddrinfo(cliInfo);
+	    if (pHost)
+		    AnscFreeMemory(pHost);
+	    if (pServ)
+		    AnscFreeMemory(pServ);
+	    if (pPath)
+		    AnscFreeMemory(pPath);
+	    goto retry;
+        }
+
+        pMyObject->bUpNotifyNeeded = TRUE;
+        pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_InitConnectionFailed;
+
+        returnStatus = ANSC_STATUS_FAILURE;
+
+        goto done;
+    }
 
     /* calculate the total length */
-    uTotalMsgSize = pMyObject->UploadDiagInfo.TestFileLength; 
+    updateTestFileLength(&pMyObject->UploadDiagInfo);
+    uTotalMsgSize = pMyObject->UploadDiagInfo.TestFileLength;
 
 	/*
 	 * according to RFC2396, "host" field in HTTP header for IPv6 address
@@ -576,11 +847,41 @@ bbhmUploadStartDiagTask
         goto done;
     }
 
-    pStats->TotalBytesSent = s_result;
+    /* TR-143: ROMTime = time when client sends the PUT command */
+    AnscGetSystemTime(&pStats->ROMTime);
+
+    pStats->TestBytesSent = s_result;
+    /* TR-143: BOMTime = time when first data packet is sent. For HTTP, first packet is the PUT request (headers). */
     AnscGetSystemTime(&pStats->BOMTime);
 
-    /* allocate the sending message buffer */
-    send_buffer = (char*)AnscAllocateMemory(UPLOAD_SINGLE_BUFFER_SIZE + 1);
+    /*
+     * TR-143: TimeBasedTestDuration window uses wall time sampled immediately after BOMTime
+     * (same clock family as loop gettimeofday), so the send loop budget aligns to BOM.
+     * Same boundary behavior as bbhm_download_action.c (e.g. default 10s test window).
+     */
+    if (0 != gettimeofday(&startTime, NULL))
+    {
+        CcspTraceError(("Failed to get the time of a day \n"));
+        returnStatus = ANSC_STATUS_FAILURE;
+        goto done;
+    }
+    ullStartTimeInMs =
+        (unsigned long long)startTime.tv_sec * 1000ULL
+        + (unsigned long long)(startTime.tv_usec / 1000);
+
+    /* TR-143: Sample interface stats at BOMTime for TotalBytesSent calculation */
+    if (ANSC_STATUS_FAILURE == Tad_GetParamValues(PAM_COMPONENT_NAME, PAM_DBUS_PATH, INTERFACE_STATS_Tx_BYTES, &initialTxBytes))
+    {
+        CcspTraceError(("%s: Failed to get the initial Tx byte count\n", __FUNCTION__));
+    }
+    CcspTraceWarning(("initialTxBytes = %lu\n", initialTxBytes));
+
+    /* allocate once and reuse across Upload diagnostics */
+    if ( s_uploadSendBuffer == NULL )
+    {
+        s_uploadSendBuffer = (char*)AnscAllocateMemory(UPLOAD_SINGLE_BUFFER_SIZE + 1);
+    }
+    send_buffer = s_uploadSendBuffer;
 
     if ( send_buffer == NULL )
     {
@@ -601,65 +902,200 @@ bbhmUploadStartDiagTask
     /* continue to upload the file */
     uBytesSent = pMyObject->UploadDiagInfo.TestFileLength;
 
-    while( uBytesSent > 0)
+    /*
+     * Time-based window: ullStartTimeInMs was taken immediately after BOMTime (above).
+     * Do not start another send after TimeBasedTestDuration from that anchor.
+     * SO_SNDTIMEO in the loop is remaining_ms so a single send cannot block past the window.
+     * (Initial socket SO_SNDTIMEO remains full TimeBasedTestDuration for connect/send/PUT headers.)
+     */
     {
-        AnscGetSystemTime(&pStats->EOMTime);
+        unsigned long long const ullTestWindowMs =
+            (unsigned long long)pStats->TimeBasedTestDuration * 1000ULL;
+        unsigned long long prev_sndto_ms = (unsigned long long)-1;
 
-        if ( uBytesSent >= UPLOAD_SINGLE_BUFFER_SIZE )
+        while (uBytesSent > 0)
         {
-             send_size   = UPLOAD_SINGLE_BUFFER_SIZE;
-        }
-        else
-        {
-            send_size   = uBytesSent;
-        }
+            if (0 != gettimeofday(&currentTime, NULL))
+            {
+                CcspTraceError(("Failed to get the time of a day \n"));
+                returnStatus = ANSC_STATUS_FAILURE;
+                goto done;
+            }
 
-        pStats->TotalBytesSent += send_size;
+            ullCurrentTimeInMs =
+                (unsigned long long)currentTime.tv_sec * 1000ULL
+                + (unsigned long long)(currentTime.tv_usec / 1000);
+            ullDurationInMs = ullCurrentTimeInMs - ullStartTimeInMs;
 
-        s_result    = _xskt_send(aSocket, send_buffer, send_size, 0);
+            if (ullDurationInMs >= ullTestWindowMs)
+            {
+                break;
+            }
 
-        if ( s_result == XSKT_SOCKET_ERROR )
-        {
-            /* failed to send the request */
-            AnscTraceWarning(("Failed to send request to the http server. code: %d\n", _xskt_get_last_error()));
+            if ( pMyObject->bStopUpDiag )
+            {
+                returnStatus = ANSC_STATUS_FAILURE;
+                goto done;
+            }
 
-            pMyObject->bUpNotifyNeeded = TRUE;
-            pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_TransferFailed;
+            send_size = (uBytesSent >= UPLOAD_SINGLE_BUFFER_SIZE) ? UPLOAD_SINGLE_BUFFER_SIZE : uBytesSent;
 
-            returnStatus = ANSC_STATUS_FAILURE;
+            {
+                unsigned long long remaining_ms = ullTestWindowMs - ullDurationInMs;
 
-            goto done;
-        }
+                if (remaining_ms != prev_sndto_ms)
+                {
+                    struct timeval tv;
 
-        uBytesSent -= send_size;
+                    prev_sndto_ms = remaining_ms;
+                    tv.tv_sec = (long)(remaining_ms / 1000);
+                    tv.tv_usec = (long)((remaining_ms % 1000) * 1000);
+                    if (_xskt_setsocketopt(aSocket, XSKT_SOCKET_SOL_SOCKET, ANSC_SOCKET_SO_SNDTIMEO,
+                            (const char *)&tv, sizeof(tv)) < 0)
+                    {
+                        CcspTraceError(("Setsockopt for send loop timeout -- failed !!\n"));
+                        goto done;
+                    }
+                }
+            }
 
-        if ( pMyObject->bStopUpDiag )
-        {
-            returnStatus = ANSC_STATUS_FAILURE;
+            s_result = _xskt_send(aSocket, send_buffer, (int)send_size, 0);
 
-            goto done;
+            if ( s_result < 0 )
+            {
+                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                {
+                    if (0 != gettimeofday(&currentTime, NULL))
+                    {
+                        CcspTraceError(("Failed to get the time of a day \n"));
+                        returnStatus = ANSC_STATUS_FAILURE;
+                        goto done;
+                    }
+                    ullCurrentTimeInMs =
+                        (unsigned long long)currentTime.tv_sec * 1000ULL
+                        + (unsigned long long)(currentTime.tv_usec / 1000);
+                    ullDurationInMs = ullCurrentTimeInMs - ullStartTimeInMs;
+                    if (ullDurationInMs >= ullTestWindowMs)
+                    {
+                        break;
+                    }
+                }
+
+                AnscTraceWarning(("Failed to send request to the http server. code: %d\n", _xskt_get_last_error()));
+
+                pMyObject->bUpNotifyNeeded = TRUE;
+                pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_TransferFailed;
+
+                returnStatus = ANSC_STATUS_FAILURE;
+
+                goto done;
+            }
+
+            if (s_result == 0)
+            {
+                AnscTraceWarning(("send returned 0 unexpectedly.\n"));
+                pMyObject->bUpNotifyNeeded = TRUE;
+                pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_TransferFailed;
+                returnStatus = ANSC_STATUS_FAILURE;
+                goto done;
+            }
+
+            pStats->TestBytesSent += (ULONG)s_result;
+            uBytesSent -= (ULONG)s_result;
         }
     }
 
-#ifdef _DEBUG
-    AnscZeroMemory(buffer, sizeof(buffer));
+
+         AnscZeroMemory(buffer, sizeof(buffer));
 	if (_xskt_recv(aSocket, buffer, sizeof(buffer) - 1, 0) != -1)
 	{
 		AnscTraceWarning(("******** Upload Response **************\n"));
 		AnscTraceWarning((buffer));
 		AnscTraceWarning(("\n******************************************\n"));
 	}
-#endif
 
-    /* succeeded */
-    pMyObject->bUpNotifyNeeded                   = TRUE;
-    pStats->DiagStates                           = DSLH_TR143_DIAGNOSTIC_Completed;
+        if (_ansc_strstr(buffer, HTTP_RESPONSE_OK_STRING) == NULL)
+        {
+            // failed to receive the request
+            AnscTraceWarning(("Failed to receive 200 Ok Response after uploading the data\n"));
+
+            pMyObject->bUpNotifyNeeded = TRUE;
+            pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_TransferFailed;
+
+            goto done;
+        }
+
+    /* TR-143: EOMTime = time when HTTP successful response code is received */
+    AnscGetSystemTime(&pStats->EOMTime);
+
+    /* Capture final interface stats AFTER recv: kernel has flushed our data to the wire by now,
+     * so erouter0 BytesSent reflects all upload bytes. Reading before recv caused undercount
+     * (send() buffers in kernel, interface counter updates when packets actually leave). */
+    if (ANSC_STATUS_FAILURE == Tad_GetParamValues(PAM_COMPONENT_NAME, PAM_DBUS_PATH, INTERFACE_STATS_Tx_BYTES, &finalTxBytes))
+    {
+        CcspTraceError(("%s: Failed to get the final Tx byte count\n", __FUNCTION__));
+    }
+    CcspTraceInfo(("finalTxBytes = %lu\n", finalTxBytes));
+
+    pMyObject->bUpNotifyNeeded = TRUE;
+
+    if (finalTxBytes >= initialTxBytes)
+    {
+        /* succeeded */
+        pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Completed;
+    }
+    else if (pStats->TestBytesSent > 0)
+    {
+        /*
+         * Device.IP.Interface.*.Stats.BytesSent can wrap or reset; delta is unusable.
+         * Complete using TestBytesSent for TotalBytesSent.
+         */
+        CcspTraceWarning(("Interface BytesSent decreased (wrap/reset); using TestBytesSent for TotalBytesSent (initial %lu final %lu).\n",
+                initialTxBytes, finalTxBytes));
+        pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Completed;
+    }
+    else
+    {
+        CcspTraceError(("Interface stats invalid (finalTxBytes %lu < initialTxBytes %lu) \n", finalTxBytes, initialTxBytes));
+        pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_Internal;
+    }
 
 done:
+
+    if (pStats->DiagStates == DSLH_TR143_DIAGNOSTIC_Completed)
+    {
+        pStats->TimeBasedTestDuration = CalculateTimeDifference((USER_SYSTEM_TIME*)&pStats->EOMTime, (USER_SYSTEM_TIME*)&pStats->BOMTime);
+        pStats->TimeBasedTestMeasurementOffset = (ULONG)CalculateTimeDifference((USER_SYSTEM_TIME*)&pStats->BOMTime, (USER_SYSTEM_TIME*)&pStats->ROMTime);
+
+        if (finalTxBytes >= initialTxBytes)
+        {
+            pStats->TotalBytesSent = finalTxBytes - initialTxBytes;
+        }
+        else
+        {
+            pStats->TotalBytesSent = pStats->TestBytesSent;
+        }
+        CcspTraceWarning(("TotalTxBytes = %lu TestBytesSent = %lu\n", pStats->TotalBytesSent, pStats->TestBytesSent));
+        Notify_change("UploadDownloadSpeedStatus","UploadCompleted");
+
+        getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, CurrDiagState);
+        snprintf(bufferState, sizeof(bufferState), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+        Notify_change("Device.IP.Diagnostics.UploadDiagnostics.DiagnosticsState", bufferState);
+    }
+    else if((pStats->DiagStates != DSLH_TR143_DIAGNOSTIC_None) && (pStats->DiagStates != DSLH_TR143_DIAGNOSTIC_Requested) && (pStats->DiagStates != DSLH_TR143_DIAGNOSTIC_Canceled))
+    {
+        Notify_change("UploadDownloadSpeedStatus","Error_Occured");
+
+        getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, CurrDiagState);
+        snprintf(bufferState, sizeof(bufferState), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+        Notify_change("Device.IP.Diagnostics.UploadDiagnostics.DiagnosticsState", bufferState);
+    }
+
 	if (aSocket != XSKT_SOCKET_INVALID_SOCKET)
 		_xskt_closesocket(aSocket);
 	if (send_buffer != NULL)
-		AnscFreeMemory(send_buffer);
+		send_buffer = NULL;
+    /* keep s_uploadSendBuffer for reuse; do not free here */
 	if (servInfo)
 		_xskt_freeaddrinfo(servInfo);
 	if (cliInfo)
@@ -679,15 +1115,20 @@ done:
     /* if the task is stopped, reset the stats */
     if ( pMyObject->bStopUpDiag)
     {
-        DslhResetUploadDiagStats((pStats));        
+        DslhResetUploadDiagStats((pStats));
+        pthread_mutex_lock(&UploadDiagMutex);
+        pMyObject->bStopUpDiag       = FALSE;
+        pthread_cond_signal(&UploadDiagCond);
+        pthread_mutex_unlock(&UploadDiagMutex);
     }
 
     pMyObject->UploadDiagInfo.DiagnosticsState = pStats->DiagStates;
 
 	/* clear flags */
     pMyObject->bUpNotifyNeeded   = FALSE;
-    pMyObject->bUpDiagOn         = FALSE; 
-    pMyObject->bStopUpDiag       = FALSE;
+    pMyObject->bUpDiagOn         = FALSE;
+
+    AutoTfl_Finish(pMyObject, pStats);
 
     return returnStatus;
 }
@@ -897,6 +1338,8 @@ BbhmUploadGetConfig
         pHandle->DSCP             = pUploadInfo->DSCP;
         pHandle->EthernetPriority = pUploadInfo->EthernetPriority;
         pHandle->TestFileLength   = pUploadInfo->TestFileLength;
+        pHandle->TimeBasedTestDuration = pUploadInfo->TimeBasedTestDuration;
+        pHandle->TimeBasedTestMeasurementOffset = pUploadInfo->TimeBasedTestMeasurementOffset;
         pHandle->DiagnosticsState = pUploadInfo->DiagnosticsState;
     }
 
@@ -911,7 +1354,7 @@ BbhmUploadGetConfig
     prototype:
 
         ANSC_STATUS
-        BbhmUploadSetInfo
+        BbhmUploadSetConfig
             (
                 ANSC_HANDLE                 hThisObject,
                 ANSC_HANDLE                 hUploadInfo
@@ -955,12 +1398,42 @@ BbhmUploadSetConfig
     pUploadInfo->DSCP             = pHandle->DSCP;
     pUploadInfo->EthernetPriority = pHandle->EthernetPriority;
     pUploadInfo->TestFileLength   = pHandle->TestFileLength;
+    pUploadInfo->TimeBasedTestDuration = pHandle->TimeBasedTestDuration;
+    pUploadInfo->TimeBasedTestMeasurementOffset = pHandle->TimeBasedTestMeasurementOffset;
     pUploadInfo->DiagnosticsState = pHandle->DiagnosticsState;
     rc = strcpy_s(pUploadInfo->IfAddrName, sizeof(pUploadInfo->IfAddrName) , pHandle->IfAddrName);
     ERR_CHK(rc);
 
     return returnStatus;
 }
+
+/**********************************************************************
+
+    caller:     owner of this object
+
+    prototype:
+
+       ANSC_STATUS
+       BbhmUploadSetDiagState
+           (
+               ANSC_HANDLE                 hThisObject,
+               ULONG                       ulDiagState
+            );
+
+    description:
+
+        This function is called to set the Upload Diagnostics State
+
+    argument:   ANSC_HANDLE                 hThisObject
+                This handle is actually the pointer of this object
+                itself.
+
+                ANSC_HANDLE                 ulDiagState
+               The Disgnostic State being set.
+
+    return:     The status of the operation;
+
+**********************************************************************/
 
 ANSC_STATUS
 BbhmUploadSetDiagState

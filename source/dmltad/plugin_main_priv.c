@@ -175,8 +175,13 @@ COSA_RegisterAdditionalDmApis
 
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "SpeedTest_GetParamBoolValue",  SpeedTest_GetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "SpeedTest_SetParamBoolValue",  SpeedTest_SetParamBoolValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_GetParamBoolValue",  RDK_SpeedTest_GetParamBoolValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_SetParamBoolValue",  RDK_SpeedTest_SetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_GetParamUlongValue",  RDK_SpeedTest_GetParamUlongValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_SetParamUlongValue",  RDK_SpeedTest_SetParamUlongValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_Validate",  RDK_SpeedTest_Validate);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_Commit",  RDK_SpeedTest_Commit);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_Rollback",  RDK_SpeedTest_Rollback);
 
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DeviceInfo_GetParamBoolValue",  DeviceInfo_GetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DeviceInfo_GetParamIntValue",  DeviceInfo_GetParamIntValue);
