@@ -610,7 +610,7 @@ fi
             ' | {
                 read splitline
                 if [ -n "$splitline" ]; then
-                    echo_t "RDKB_DUAL_PROCESS_DETECTED_split:$splitline"
+                    echo_t "RDKB_MULTI_PROCESS_DETECTED_split:$splitline"
                 fi
             }
         fi
