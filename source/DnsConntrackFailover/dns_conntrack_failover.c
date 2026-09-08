@@ -520,8 +520,16 @@ int main(void)
         sleep_ms(MONITOR_TICK_MS);
     }
 
-    nfct_callback_unregister(ctx.nfct);
+    /* nfct_catch() may be blocked in netlink receive. recv is a pthread
+     * cancellation point on normal Linux/glibc systems, so stop the event
+     * thread first, then release the handle after join. Production RDK-B may
+     * instead integrate nfct_fd() into its native event loop. */
+    (void)pthread_cancel(tid);
+    (void)pthread_join(tid, NULL);
     nfct_close(ctx.nfct);
+    ctx.nfct = NULL;
     pthread_mutex_destroy(&ctx.lock);
+
+    fprintf(stderr, "DNS conntrack monitor stopped\n");
     return EXIT_SUCCESS;
 }
