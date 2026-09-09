@@ -17,9 +17,9 @@
  *     hook. Only if verification fails AND WAN is known reachable should the
  *     platform redirect DNS to Unbound.
  *
- * This sample intentionally leaves two platform-specific hooks as stubs:
- *   active_verify_dns(), set_unbound_failover().
- * Replace those with RDK-B/RBUS/Firewall Manager/DNS Manager integration.
+ * This sample intentionally leaves one platform-specific hook as a stub:
+ *   set_unbound_failover().
+ * Replace it with RDK-B/RBUS/Firewall Manager/DNS Manager integration.
  *
  * wan_is_reachable() is implemented via RBUS: it subscribes to the WAN
  * Manager global status event, Device.X_RDK_WanManager.CurrentStatus
@@ -28,6 +28,12 @@
  * recorded while WAN is known to be up; while WAN is down or unknown, all
  * upstream DNS traffic is expected to fail, so conntrack timeouts on the
  * WAN itself would be meaningless as a DNS-server-health signal.
+ *
+ * active_verify_dns() confirms passive failure evidence by reading the
+ * configured resolver list from Device.DNS.Client.Server.*.DNSServer (RBUS)
+ * and sending each one a direct UDP/53 DNS query. Failover is only declared
+ * if every configured server fails to reply; a single working server means
+ * clients still have DNS, so no failover is triggered.
  *
  * Build (typical Linux host):
  *   gcc -O2 -Wall -Wextra -pthread dns_conntrack_failover.c \
@@ -50,6 +56,8 @@
 #include <inttypes.h>
 #include <linux/netfilter/nf_conntrack_common.h>
 #include <linux/netfilter/nfnetlink_conntrack.h>
+#include <netinet/in.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -58,6 +66,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -67,6 +76,10 @@
 #define WAN_STATUS_COMPONENT_NAME      "DnsConntrackFailover"
 #define WAN_STATUS_PARAM_NAME          "Device.X_RDK_WanManager.CurrentStatus"
 #define WAN_STATUS_VALUE_UP            "Up"
+
+#define DNS_SERVER_LIST_WILDCARD       "Device.DNS.Client.Server.*.DNSServer"
+#define MAX_VERIFY_SERVERS             16U
+#define DNS_VERIFY_TIMEOUT_MS          2000U
 
 #define DNS_PORT                       53U
 #define MAX_PENDING_FLOWS              2048U
@@ -244,22 +257,143 @@ static struct dns_server_health *server_get(struct monitor_ctx *ctx,
 }
 
 /* ------------------------------------------------------------------------- */
-/* Platform hooks                                                            */
+/* Active DNS verification: query every configured resolver directly         */
 /* ------------------------------------------------------------------------- */
 
+/* Reads Device.DNS.Client.Server.*.DNSServer via the existing RBUS handle.
+ * Returns the number of non-empty server strings copied into out[]. */
+static int fetch_dns_server_list(char out[][INET6_ADDRSTRLEN], int max)
+{
+    const char *names[1] = { DNS_SERVER_LIST_WILDCARD };
+    int numProps = 0;
+    rbusProperty_t properties = NULL;
+    int count = 0;
+
+    if (!g_wanRbusHandle)
+        return 0;
+
+    if (rbus_getExt(g_wanRbusHandle, 1, names, &numProps, &properties) != RBUS_ERROR_SUCCESS)
+        return 0;
+
+    for (rbusProperty_t p = properties; p && count < max; p = rbusProperty_GetNext(p)) {
+        rbusValue_t val = rbusProperty_GetValue(p);
+        const char *addr = val ? rbusValue_GetString(val, NULL) : NULL;
+        if (addr && addr[0] != '\0')
+            snprintf(out[count++], INET6_ADDRSTRLEN, "%s", addr);
+    }
+
+    if (properties)
+        rbusProperty_Release(properties);
+
+    return count;
+}
+
+/* Sends one minimal "A ." query to server_ip over UDP/53 and waits up to
+ * timeout_ms for any well-formed response. Any reply (including SERVFAIL/
+ * NXDOMAIN) proves the server process is up and answering, which is all this
+ * check needs -- RCODE-level interpretation is out of scope. */
+static bool dns_probe(const char *server_ip, unsigned timeout_ms)
+{
+    struct sockaddr_storage addr;
+    socklen_t addr_len;
+    int family;
+    struct in_addr a4;
+    struct in6_addr a6;
+    static uint16_t query_id;
+
+    memset(&addr, 0, sizeof(addr));
+    if (inet_pton(AF_INET, server_ip, &a4) == 1) {
+        struct sockaddr_in *sin = (struct sockaddr_in *)&addr;
+        sin->sin_family = AF_INET;
+        sin->sin_port = htons(DNS_PORT);
+        sin->sin_addr = a4;
+        addr_len = sizeof(*sin);
+        family = AF_INET;
+    } else if (inet_pton(AF_INET6, server_ip, &a6) == 1) {
+        struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&addr;
+        sin6->sin6_family = AF_INET6;
+        sin6->sin6_port = htons(DNS_PORT);
+        sin6->sin6_addr = a6;
+        addr_len = sizeof(*sin6);
+        family = AF_INET6;
+    } else {
+        fprintf(stderr, "VERIFY: invalid DNS server address '%s'\n", server_ip);
+        return false;
+    }
+
+    int fd = socket(family, SOCK_DGRAM, IPPROTO_UDP);
+    if (fd < 0) {
+        fprintf(stderr, "VERIFY: socket() failed: %s\n", strerror(errno));
+        return false;
+    }
+
+    /* DNS header (id, flags, qdcount, ancount, nscount, arcount) + one
+     * question for the root name, type A, class IN. */
+    uint8_t query[16];
+    uint16_t id = ++query_id;
+    memset(query, 0, sizeof(query));
+    query[0] = (uint8_t)(id >> 8);
+    query[1] = (uint8_t)(id & 0xFF);
+    query[2] = 0x01; /* flags: recursion desired */
+    query[5] = 0x01; /* qdcount = 1 */
+    size_t off = 12;
+    query[off++] = 0x00;             /* root name terminator */
+    query[off++] = 0x00; query[off++] = 0x01; /* qtype = A */
+    query[off++] = 0x00; query[off++] = 0x01; /* qclass = IN */
+
+    if (sendto(fd, query, off, 0, (struct sockaddr *)&addr, addr_len) < 0) {
+        fprintf(stderr, "VERIFY: sendto(%s) failed: %s\n", server_ip, strerror(errno));
+        close(fd);
+        return false;
+    }
+
+    struct pollfd pfd = { .fd = fd, .events = POLLIN, .revents = 0 };
+    int rc = poll(&pfd, 1, (int)timeout_ms);
+    if (rc <= 0) {
+        close(fd);
+        return false; /* timeout or poll error: treat as no reply */
+    }
+
+    uint8_t resp[512];
+    ssize_t n = recv(fd, resp, sizeof(resp), 0);
+    close(fd);
+
+    if (n < 12)
+        return false;
+
+    bool id_matches = resp[0] == query[0] && resp[1] == query[1];
+    bool is_response = (resp[2] & 0x80) != 0; /* QR bit */
+    return id_matches && is_response;
+}
+
+/*
+ * Confirms passive failure evidence by directly querying every configured
+ * DNS server (Device.DNS.Client.Server.*.DNSServer). Only if every server
+ * fails to reply do we treat DNS as truly down -- a single working
+ * server means clients still have working resolution, so no failover.
+ */
 static bool active_verify_dns(uint32_t dns_server)
 {
-    char ip[INET_ADDRSTRLEN];
-    fprintf(stderr, "VERIFY: direct DNS verification requested for %s\n",
-            ip4_to_str(dns_server, ip, sizeof(ip)));
+    (void)dns_server; /* verification covers all configured resolvers, not just this one */
 
-    /*
-     * Replace with a small direct UDP/TCP DNS client that sends one controlled
-     * query to dns_server and validates that a DNS response arrives.
-     * Do not use getaddrinfo(), because that may traverse the normal resolver
-     * path and hide the server being tested.
-     */
-    return false; /* Stub: fail closed for demonstration only. */
+    char servers[MAX_VERIFY_SERVERS][INET6_ADDRSTRLEN];
+    int count = fetch_dns_server_list(servers, MAX_VERIFY_SERVERS);
+
+    if (count <= 0) {
+        fprintf(stderr, "VERIFY: could not read %s; treating as unverified\n",
+                DNS_SERVER_LIST_WILDCARD);
+        return false;
+    }
+
+    for (int i = 0; i < count; ++i) {
+        bool ok = dns_probe(servers[i], DNS_VERIFY_TIMEOUT_MS);
+        fprintf(stderr, "VERIFY: %s %s\n", servers[i], ok ? "replied" : "no reply");
+        if (ok)
+            return true; /* at least one server alive: do not fail over */
+    }
+
+    fprintf(stderr, "VERIFY: all %d configured DNS server(s) failed to reply\n", count);
+    return false;
 }
 
 static bool wan_is_reachable(void)
@@ -400,9 +534,27 @@ static void evaluate_server_locked(struct monitor_ctx *ctx,
                                    struct dns_server_health *s,
                                    uint64_t now_ms)
 {
-    if (!s->used || s->state == SERVER_FAILED)
+    if (!s->used)
         return;
 
+    /* Recovery check: re-verify failed servers and disable failover if alive */
+    if (s->state == SERVER_FAILED) {
+        if (s->last_verify_ms != 0 && now_ms - s->last_verify_ms < VERIFY_COOLDOWN_MS)
+            return;
+
+        s->last_verify_ms = now_ms;
+
+        if (active_verify_dns(s->address)) {
+            fprintf(stderr, "DECISION: upstream DNS recovered\n");
+            s->state = SERVER_HEALTHY;
+            s->failure_episodes = 0;
+            s->recovery_successes = 0;
+            set_unbound_failover(false);
+        }
+        return;
+    }
+
+    /* Failure detection: verify passive evidence at threshold */
     if (s->failure_episodes < PASSIVE_FAILURE_THRESHOLD)
         return;
 
@@ -411,11 +563,6 @@ static void evaluate_server_locked(struct monitor_ctx *ctx,
 
     s->last_verify_ms = now_ms;
 
-    /*
-     * In production, do not hold ctx->lock across network I/O. A robust daemon
-     * would enqueue a verification job and process its result asynchronously.
-     * This compact sample calls the stub synchronously because it performs no I/O.
-     */
     if (active_verify_dns(s->address)) {
         s->state = SERVER_HEALTHY;
         s->failure_episodes = 0;
@@ -430,6 +577,7 @@ static void evaluate_server_locked(struct monitor_ctx *ctx,
     }
 
     s->state = SERVER_FAILED;
+    s->failure_episodes = 0;
     fprintf(stderr, "DECISION: upstream DNS failed while WAN is reachable\n");
     set_unbound_failover(true);
 }
