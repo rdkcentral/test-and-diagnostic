@@ -17,13 +17,21 @@
  *     hook. Only if verification fails AND WAN is known reachable should the
  *     platform redirect DNS to Unbound.
  *
- * This sample intentionally leaves three platform-specific hooks as stubs:
- *   active_verify_dns(), wan_is_reachable(), set_unbound_failover().
+ * This sample intentionally leaves two platform-specific hooks as stubs:
+ *   active_verify_dns(), set_unbound_failover().
  * Replace those with RDK-B/RBUS/Firewall Manager/DNS Manager integration.
+ *
+ * wan_is_reachable() is implemented via RBUS: it subscribes to the WAN
+ * Manager global status event, Device.X_RDK_WanManager.CurrentStatus
+ * ("Up"/"Down", published by rdk-wanmanager's Update_Interface_Status()),
+ * and caches the last known value. Passive DNS-timeout evidence is only
+ * recorded while WAN is known to be up; while WAN is down or unknown, all
+ * upstream DNS traffic is expected to fail, so conntrack timeouts on the
+ * WAN itself would be meaningless as a DNS-server-health signal.
  *
  * Build (typical Linux host):
  *   gcc -O2 -Wall -Wextra -pthread dns_conntrack_failover.c \
- *       -lnetfilter_conntrack -o dns_conntrack_failover
+ *       -lnetfilter_conntrack -lrbus -o dns_conntrack_failover
  *
  * Run:
  *   sudo ./dns_conntrack_failover
@@ -44,6 +52,7 @@
 #include <linux/netfilter/nfnetlink_conntrack.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -53,6 +62,11 @@
 #include <unistd.h>
 
 #include <libnetfilter_conntrack/libnetfilter_conntrack.h>
+#include <rbus/rbus.h>
+
+#define WAN_STATUS_COMPONENT_NAME      "DnsConntrackFailover"
+#define WAN_STATUS_PARAM_NAME          "Device.X_RDK_WanManager.CurrentStatus"
+#define WAN_STATUS_VALUE_UP            "Up"
 
 #define DNS_PORT                       53U
 #define MAX_PENDING_FLOWS              2048U
@@ -104,6 +118,10 @@ struct monitor_ctx {
 };
 
 static volatile sig_atomic_t g_running = 1;
+
+/* Cached WAN status, updated only by the RBUS event handler / initial get. */
+static rbusHandle_t g_wanRbusHandle;
+static atomic_bool g_wan_up = false;
 
 static uint64_t monotonic_ms(void)
 {
@@ -246,8 +264,71 @@ static bool active_verify_dns(uint32_t dns_server)
 
 static bool wan_is_reachable(void)
 {
-    /* Replace with WAN Manager/RBUS connectivity state. */
+    return atomic_load(&g_wan_up);
+}
+
+/* ------------------------------------------------------------------------- */
+/* WAN status via RBUS                                                       */
+/* ------------------------------------------------------------------------- */
+
+static void wan_status_event_handler(rbusHandle_t handle,
+                                     rbusEvent_t const *event,
+                                     rbusEventSubscription_t *subscription)
+{
+    (void)handle;
+    (void)subscription;
+
+    rbusValue_t value = rbusObject_GetValue(event->data, NULL);
+    if (!value)
+        return;
+
+    const char *status = rbusValue_GetString(value, NULL);
+    bool up = status != NULL && strcmp(status, WAN_STATUS_VALUE_UP) == 0;
+
+    atomic_store(&g_wan_up, up);
+    fprintf(stderr, "WAN: %s -> %s\n", WAN_STATUS_PARAM_NAME, up ? "UP" : "DOWN");
+}
+
+/* Opens RBUS, seeds the cached state with a one-time get, then subscribes
+ * for change events. Returns false if RBUS/WanManager is unavailable; the
+ * daemon still runs, but treats WAN as down until a subscription succeeds. */
+static bool wan_status_rbus_init(void)
+{
+    int rc = rbus_open(&g_wanRbusHandle, WAN_STATUS_COMPONENT_NAME);
+    if (rc != RBUS_ERROR_SUCCESS) {
+        fprintf(stderr, "WAN: rbus_open failed: %d\n", rc);
+        return false;
+    }
+
+    rbusValue_t value = NULL;
+    if (rbus_get(g_wanRbusHandle, WAN_STATUS_PARAM_NAME, &value) == RBUS_ERROR_SUCCESS && value) {
+        const char *status = rbusValue_GetString(value, NULL);
+        atomic_store(&g_wan_up, status != NULL && strcmp(status, WAN_STATUS_VALUE_UP) == 0);
+        rbusValue_Release(value);
+    }
+
+    rc = rbusEvent_Subscribe(g_wanRbusHandle, WAN_STATUS_PARAM_NAME,
+                             wan_status_event_handler, NULL, 0);
+    if (rc != RBUS_ERROR_SUCCESS) {
+        fprintf(stderr, "WAN: rbusEvent_Subscribe failed for %s: %d\n",
+                WAN_STATUS_PARAM_NAME, rc);
+        rbus_close(g_wanRbusHandle);
+        g_wanRbusHandle = NULL;
+        return false;
+    }
+
+    fprintf(stderr, "WAN: subscribed to %s, initial state=%s\n",
+            WAN_STATUS_PARAM_NAME, atomic_load(&g_wan_up) ? "UP" : "DOWN");
     return true;
+}
+
+static void wan_status_rbus_exit(void)
+{
+    if (g_wanRbusHandle) {
+        rbusEvent_Unsubscribe(g_wanRbusHandle, WAN_STATUS_PARAM_NAME);
+        rbus_close(g_wanRbusHandle);
+        g_wanRbusHandle = NULL;
+    }
 }
 
 static void set_unbound_failover(bool enable)
@@ -409,10 +490,11 @@ static int conntrack_event_cb(enum nf_conntrack_msg_type type,
         break;
 
     case NFCT_T_DESTROY:
-        /* If destroyed before our timer classified it, count it as evidence. */
+        /* If destroyed before our timer classified it, count it as evidence,
+         * unless WAN is down/unknown (all DNS would time out regardless). */
         {
             struct pending_flow *p = pending_lookup(ctx, &key);
-            if (p && !p->expired_reported)
+            if (p && !p->expired_reported && wan_is_reachable())
                 record_failure_episode_locked(ctx, key.dst_ip, monotonic_ms());
             pending_remove(ctx, &key);
         }
@@ -448,6 +530,7 @@ static void *conntrack_thread(void *arg)
 static void monitor_tick(struct monitor_ctx *ctx)
 {
     const uint64_t now = monotonic_ms();
+    const bool wan_up = wan_is_reachable();
 
     pthread_mutex_lock(&ctx->lock);
 
@@ -458,7 +541,10 @@ static void monitor_tick(struct monitor_ctx *ctx)
 
         if (now - p->created_ms >= DNS_REPLY_DEADLINE_MS) {
             p->expired_reported = true;
-            record_failure_episode_locked(ctx, p->key.dst_ip, now);
+            /* A WAN outage makes every DNS flow time out; that is not
+             * evidence of DNS server failure, so skip recording it. */
+            if (wan_up)
+                record_failure_episode_locked(ctx, p->key.dst_ip, now);
         }
     }
 
@@ -487,6 +573,11 @@ int main(void)
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
+
+    /* Non-fatal: if WanManager/RBUS is not up yet, WAN is treated as down
+     * until a subscription later succeeds, so no false failures are recorded. */
+    if (!wan_status_rbus_init())
+        fprintf(stderr, "WAN: status unknown, treating WAN as down until subscribed\n");
 
     ctx.nfct = nfct_open(CONNTRACK, NFCT_ALL_CT_GROUPS);
     if (!ctx.nfct) {
@@ -529,6 +620,7 @@ int main(void)
     nfct_close(ctx.nfct);
     ctx.nfct = NULL;
     pthread_mutex_destroy(&ctx.lock);
+    wan_status_rbus_exit();
 
     fprintf(stderr, "DNS conntrack monitor stopped\n");
     return EXIT_SUCCESS;
