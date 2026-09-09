@@ -329,7 +329,7 @@ static bool dns_probe(const char *server_ip, unsigned timeout_ms)
 
     /* DNS header (id, flags, qdcount, ancount, nscount, arcount) + one
      * question for the root name, type A, class IN. */
-    uint8_t query[16];
+    uint8_t query[32];
     uint16_t id = ++query_id;
     memset(query, 0, sizeof(query));
     query[0] = (uint8_t)(id >> 8);
