@@ -375,9 +375,9 @@
                     <parameters>
                         <parameter>
                             <name>DiagnosticsState</name>
-                            <type>string: None(1),Requested(2),Completed(3),Error_InitConnectionFailed(4),Error_NoResponse(5),Error_TransferFailed(6),Error_PasswordRequestFailed(7),Error_LoginFailed(8),Error_NoTransferMode(9),Error_NoPASV(10),Error_IncorrectSize(11),Error_Timeout(12)</type>
+                            <type>string: None(1),Requested(2),Completed(3),Error_InitConnectionFailed(4),Error_NoResponse(5),Error_TransferFailed(6),Error_PasswordRequestFailed(7),Error_LoginFailed(8),Error_NoTransferMode(9),Error_NoPASV(10),Error_IncorrectSize(11),Error_Timeout(12),Canceled(13),Error_Internal(14)</type>
                             <syntax>uint32/mapped</syntax>
-                            <notify>off</notify>
+                            <notify>on</notify>
                             <writable>true</writable>
                         </parameter>
                         <parameter>
@@ -410,6 +410,18 @@
                             <writable>true</writable>
                         </parameter>
                         <parameter>
+                            <name>TimeBasedTestDuration</name>
+                            <type>string</type>
+                            <syntax>string</syntax>
+                            <writable>true</writable>
+                        </parameter>
+                        <parameter>
+                            <name>TimeBasedTestMeasurementOffset</name>
+                            <type>unsignedInt[0:255]</type>
+                            <syntax>uint32</syntax>
+                            <writable>true</writable>
+                        </parameter>
+                        <parameter>
                             <name>ROMTime</name>
                             <type>dateTime</type>
                             <syntax>string</syntax>
@@ -429,13 +441,13 @@
                         </parameter>
                         <parameter>
                             <name>TestBytesReceived</name>
-                            <type>unsignedInt</type>
+                            <type>unsignedLong</type>
                             <syntax>uint32</syntax>
                             <notify>off</notify>
                         </parameter>
                         <parameter>
                             <name>TotalBytesReceived</name>
-                            <type>unsignedInt</type>
+                            <type>unsignedLong</type>
                             <syntax>uint32</syntax>
                             <notify>off</notify>
                         </parameter>
@@ -472,9 +484,9 @@
                     <parameters>
                         <parameter>
                             <name>DiagnosticsState</name>
-                            <type>string: None(1),Requested(2),Completed(3),Error_InitConnectionFailed(4),Error_NoResponse(5),Error_PasswordRequestFailed(6),Error_LoginFailed(7),Error_NoTransferMode(8),Error_NoPASV(9),Error_NoCWD(10),Error_NoSTOR(11),Error_NoTransferComplete(12)</type>
+                            <type>string: None(1),Requested(2),Completed(3),Error_InitConnectionFailed(4),Error_NoResponse(5),Error_PasswordRequestFailed(6),Error_LoginFailed(7),Error_NoTransferMode(8),Error_NoPASV(9),Error_NoCWD(10),Error_NoSTOR(11),Error_NoTransferComplete(12),Canceled(13),Error_Internal(14)</type>
                             <syntax>uint32/mapped</syntax>
-                            <notify>off</notify>
+                            <notify>on</notify>
                             <writable>true</writable>
                         </parameter>
                         <parameter>
@@ -508,7 +520,19 @@
                         </parameter>
                         <parameter>
                             <name>TestFileLength</name>
-                            <type>unsignedInt</type>
+                            <type>unsignedLong</type>
+                            <syntax>uint32</syntax>
+                            <writable>true</writable>
+                        </parameter>
+                        <parameter>
+                            <name>TimeBasedTestDuration</name>
+                            <type>string</type>
+                            <syntax>string</syntax>
+                            <writable>true</writable>
+                        </parameter>
+                        <parameter>
+                            <name>TimeBasedTestMeasurementOffset</name>
+                            <type>unsignedInt[0:255]</type>
                             <syntax>uint32</syntax>
                             <writable>true</writable>
                         </parameter>
@@ -531,8 +555,14 @@
                             <notify>off</notify>
                         </parameter>
                         <parameter>
+                            <name>TestBytesSent</name>
+                            <type>unsignedLong</type>
+                            <syntax>uint32</syntax>
+                            <notify>off</notify>
+                        </parameter>
+                        <parameter>
                             <name>TotalBytesSent</name>
-                            <type>unsignedInt</type>
+                            <type>unsignedLong</type>
                             <syntax>uint32</syntax>
                             <notify>off</notify>
                         </parameter>
@@ -645,10 +675,22 @@
                     <name>X_RDK_SpeedTest</name>
                     <objectType>object</objectType>
                     <functions>
+                        <func_GetParamBoolValue>RDK_SpeedTest_GetParamBoolValue</func_GetParamBoolValue>
+                        <func_SetParamBoolValue>RDK_SpeedTest_SetParamBoolValue</func_SetParamBoolValue>
                         <func_GetParamUlongValue>RDK_SpeedTest_GetParamUlongValue</func_GetParamUlongValue>
                         <func_SetParamUlongValue>RDK_SpeedTest_SetParamUlongValue</func_SetParamUlongValue>
+                        <func_Validate>RDK_SpeedTest_Validate</func_Validate>
+                        <func_Commit>RDK_SpeedTest_Commit</func_Commit>
+                        <func_Rollback>RDK_SpeedTest_Rollback</func_Rollback>
                      </functions>
                      <parameters>
+                        <parameter>
+                            <name>TestUsable</name>
+                            <type>boolean</type>
+                            <syntax>bool</syntax>
+                            <writable>true</writable>
+                            <notify>on</notify>
+                        </parameter>
                         <parameter>
                             <name>SubscriberUnPauseTimeOut</name>
                             <type>unsignedInt</type>
@@ -1534,6 +1576,27 @@
                     <syntax>string</syntax>
                 </parameter>
             </parameters>
+        </object>
+        <object>
+                <name>X_TELEKOM-COM_Speedtest</name>
+                <objectType>object</objectType>
+                <functions>
+                        <func_GetParamUlongValue>TelSpeedtest_GetParamUlongValue</func_GetParamUlongValue>
+                </functions>
+                <parameters>
+                        <parameter>
+                                <name>DownloadBandwidth</name>
+                                <type>unsignedInt</type>
+                                <syntax>uint32</syntax>
+                                <writable>false</writable>
+                        </parameter>
+                        <parameter>
+                                <name>UploadBandwidth</name>
+                                <type>unsignedInt</type>
+                                <syntax>uint32</syntax>
+                                <writable>false</writable>
+                        </parameter>
+                </parameters>
         </object>
     </objects>
 </dataModelInfo>

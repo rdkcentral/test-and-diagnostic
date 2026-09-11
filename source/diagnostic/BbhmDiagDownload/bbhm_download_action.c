@@ -80,6 +80,8 @@
 **********************************************************************/
 
 #include <ctype.h>
+#include <errno.h>
+#include <sys/time.h>
 #include "bbhm_download_global.h"
 #include "ansc_xsocket_external_api.h"
 #include "safec_lib_common.h"
@@ -89,6 +91,15 @@
 #define  DOWNLOAD_PORT_TO_                              5708
 
 #define  DOWNLOAD_SINGLE_BUFFER_SIZE                 500000        /* 500 K */
+
+/*
+ * Reuse one 500KB recv buffer across Download runs. Repeated alloc/free of
+ * this buffer on every diagnostics run contributes to RSS churn.
+ */
+static char* s_downloadRecvBuffer = NULL;
+
+pthread_cond_t  DownloadDiagCond             =       PTHREAD_COND_INITIALIZER;
+pthread_mutex_t DownloadDiagMutex            =       PTHREAD_MUTEX_INITIALIZER;
 
 /**********************************************************************
 
@@ -354,6 +365,16 @@ bbhmDownloadStartDiagTask
     xskt_addrinfo                   *servInfo   	   = NULL;
     xskt_addrinfo                   *cliInfo    	   = NULL;
     errno_t                         rc                 = -1;
+    ULONG                           initialRxBytes     = 0;
+    ULONG                           finalRxBytes       = 0;
+    struct timeval                  startTime;
+    struct timeval                  currentTime;
+    unsigned long long              ullStartTimeInMs   = 0;
+    unsigned long long              ullCurrentTimeInMs = 0;
+    unsigned long long              ullDurationInMs    = 0;
+    char                            PrevDiagState[DEF_SIZE]     = {0};
+    char                            CurrDiagState[DEF_SIZE]     = {0};
+    char                            bufferState[DEF_SIZE_128]   = {0};
 
     if ( !pMyObject->bActive )
     {
@@ -378,13 +399,26 @@ bbhmDownloadStartDiagTask
     /* init socket wrapper */
     AnscStartupXsocketWrapper((ANSC_HANDLE)pMyObject);
 
-    /* turn on the diag */
-    pMyObject->bDownDiagOn         = TRUE;
+    /* turn on indicator to identify it test is started or not, if not already set */
+    if (!pMyObject->bDownDiagOn)
+    {
+        pMyObject->bDownDiagOn         = TRUE;
+    }
     
     /* reset the stats */
     DslhResetDownloadDiagStats((pStats));
 
+    pStats->TimeBasedTestDuration = (DOUBLE)pMyObject->DownloadDiagInfo.TimeBasedTestDuration;
+    pStats->TimeBasedTestMeasurementOffset = pMyObject->DownloadDiagInfo.TimeBasedTestMeasurementOffset;
+
+    getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, PrevDiagState);
     pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Requested;
+
+    getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, CurrDiagState);
+    snprintf(bufferState, sizeof(bufferState), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+
+    Notify_change("Device.IP.Diagnostics.DownloadDiagnostics.DiagnosticsState", bufferState);
+    getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, PrevDiagState);
 
     if ( pMyObject->bStopDownDiag )
     {
@@ -396,8 +430,7 @@ bbhmDownloadStartDiagTask
     if (ParseHttpURL(pMyObject->DownloadDiagInfo.DownloadURL,
                 &pHost, &pServ, &pPath) != 0)
     {
-		/* if the function fail, memory should not allcated, 
-		 * but the the Pointer's value is uncertain */
+		/* if the function fail, memory should not allcated, but the the Pointer's value is uncertain */
 		pHost = pServ = pPath = NULL;
 		
         pMyObject->bDownNotifyNeeded = TRUE;
@@ -432,6 +465,25 @@ bbhmDownloadStartDiagTask
 
         returnStatus = ANSC_STATUS_FAILURE;
         goto done;
+    }
+
+    {
+        struct timeval timeout;
+
+        timeout.tv_sec = (long)pMyObject->DownloadDiagInfo.TimeBasedTestDuration;
+        timeout.tv_usec = 0;
+
+        if (_xskt_setsocketopt(aSocket, XSKT_SOCKET_SOL_SOCKET, ANSC_SOCKET_SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) < 0)
+        {
+            CcspTraceError(("Setsockopt for receive timeout -- failed !!\n"));
+            goto done;
+        }
+
+        if (_xskt_setsocketopt(aSocket, XSKT_SOCKET_SOL_SOCKET, ANSC_SOCKET_SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout)) < 0)
+        {
+            CcspTraceError(("Setsockopt for send timeout -- failed !!\n"));
+            goto done;
+        }
     }
 
 	/* bind local address if need */
@@ -505,9 +557,6 @@ bbhmDownloadStartDiagTask
     
     AnscGetSystemTime(&pStats->TCPOpenResponseTime);
 
-    /* record HTTP request time */
-    AnscGetSystemTime(&pStats->ROMTime);
-
 	/*
 	 * according to RFC2396, "host" field in HTTP header for IPv6 addresss 
 	 * should be a IPv6 Reference. 
@@ -561,8 +610,16 @@ bbhmDownloadStartDiagTask
         goto done;
     }
 
+    /* TR-143: ROMTime = time when client sends the GET command */
+    AnscGetSystemTime(&pStats->ROMTime);
+
+    /* allocate once and reuse across Download diagnostics */
+    if ( s_downloadRecvBuffer == NULL )
+    {
+        s_downloadRecvBuffer = (char*)AnscAllocateMemory(DOWNLOAD_SINGLE_BUFFER_SIZE + 1);
+    }
     /* receive the response */
-    recv_buffer = (char*)AnscAllocateMemory(DOWNLOAD_SINGLE_BUFFER_SIZE + 1);
+    recv_buffer = s_downloadRecvBuffer;
 
     if ( recv_buffer == NULL )
     {
@@ -580,7 +637,32 @@ bbhmDownloadStartDiagTask
     s_result    = _xskt_recv(aSocket, recv_buffer, recv_size, 0);
 
     AnscGetSystemTime(&pStats->BOMTime);
-    recv_buffer[recv_size] = '\0'; //CID -135416: String not null terminated
+
+    if (s_result > 0 && s_result <= (int)DOWNLOAD_SINGLE_BUFFER_SIZE)
+    {
+        recv_buffer[s_result] = '\0'; /* allocated one more byte, so no problem */
+    }
+
+    /*
+     * TR-143: TimeBasedTestDuration window uses wall time sampled immediately after BOMTime
+     * (same clock family as loop gettimeofday), so the receive loop budget aligns to BOM.
+     */
+    if (0 != gettimeofday(&startTime, NULL))
+    {
+        CcspTraceError(("Failed to get the time of a day \n"));
+        returnStatus = ANSC_STATUS_FAILURE;
+        goto done;
+    }
+    ullStartTimeInMs =
+        (unsigned long long)startTime.tv_sec * 1000ULL
+        + (unsigned long long)(startTime.tv_usec / 1000);
+
+    /* TR-143: Sample interface stats at BOMTime for TotalBytesReceived calculation */
+    if (ANSC_STATUS_FAILURE == Tad_GetParamValues(PAM_COMPONENT_NAME, PAM_DBUS_PATH, INTERFACE_STATS_Rx_BYTES, &initialRxBytes))
+    {
+        CcspTraceError(("%s: Failed to get the initial Rx byte count\n", __FUNCTION__));
+    }
+    CcspTraceInfo(("initialRxBytes = %lu\n", initialRxBytes));
 
     /* check whether it succededd or not */
     if ( s_result <= 0 || _ansc_strstr(recv_buffer, "HTTP/1.1 2") != recv_buffer )
@@ -595,47 +677,180 @@ bbhmDownloadStartDiagTask
         goto done;
     }
 
-    while(s_result > 0)
+    /* TR-143: EOMTime = time of last successful data recv; first recv is first measured data. */
+    AnscGetSystemTime(&pStats->EOMTime);
+
+    /*
+     * Time-based window: ullStartTimeInMs was taken immediately after BOMTime (above).
+     * Do not start another recv after TimeBasedTestDuration from that anchor.
+     * SO_RCVTIMEO in the loop is remaining_ms so a single recv cannot block past the window.
+     * (Initial socket SO_RCVTIMEO remains full TimeBasedTestDuration for connect/send/first recv.)
+     */
     {
-#if 0 // _DEBUG --This piece of code breaks for binary files and work for text files.
-		recv_buffer[s_result] = '\0'; /* allocated one more byte, so no problem */
-		AnscTraceWarning(("%s", recv_buffer));
-#endif
+        unsigned long long const ullTestWindowMs =
+            (unsigned long long)pStats->TimeBasedTestDuration * 1000ULL;
+        unsigned long long prev_rcvto_ms = (unsigned long long)-1;
 
-        AnscGetSystemTime(&pStats->EOMTime);
-        pStats->TestBytesReceived += s_result;
-        if ( pMyObject->bStopDownDiag )
+        while (s_result > 0)
         {
-            returnStatus = ANSC_STATUS_FAILURE;
-            goto done;
-        }
+            if (0 != gettimeofday(&currentTime, NULL))
+            {
+                CcspTraceError(("Failed to get the time of a day \n"));
+                returnStatus = ANSC_STATUS_FAILURE;
+                goto done;
+            }
 
-        recv_size   = DOWNLOAD_SINGLE_BUFFER_SIZE;
-        s_result    = _xskt_recv(aSocket, recv_buffer, recv_size, 0);
+            ullCurrentTimeInMs =
+                (unsigned long long)currentTime.tv_sec * 1000ULL
+                + (unsigned long long)(currentTime.tv_usec / 1000);
+            ullDurationInMs = ullCurrentTimeInMs - ullStartTimeInMs;
 
-        if ( s_result < 0 )
-        {
-            /* failed to receive the request */
-            AnscTraceWarning(("Failed to recv packet.\n"));
+            if (ullDurationInMs >= ullTestWindowMs)
+            {
+                break;
+            }
 
-            pMyObject->bDownNotifyNeeded = TRUE;
-            pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_TransferFailed;
+            pStats->TestBytesReceived += (ULONG)s_result;
+            if ( pMyObject->bStopDownDiag )
+            {
+                returnStatus = ANSC_STATUS_FAILURE;
+                goto done;
+            }
 
-            returnStatus = ANSC_STATUS_FAILURE;
-            goto done;
+            {
+                unsigned long long remaining_ms = ullTestWindowMs - ullDurationInMs;
+
+                if (remaining_ms != prev_rcvto_ms)
+                {
+                    struct timeval tv;
+
+                    prev_rcvto_ms = remaining_ms;
+                    tv.tv_sec = (long)(remaining_ms / 1000);
+                    tv.tv_usec = (long)((remaining_ms % 1000) * 1000);
+                    if (_xskt_setsocketopt(aSocket, XSKT_SOCKET_SOL_SOCKET, ANSC_SOCKET_SO_RCVTIMEO,
+                            (const char *)&tv, sizeof(tv)) < 0)
+                    {
+                        CcspTraceError(("Setsockopt for receive loop timeout -- failed !!\n"));
+                        goto done;
+                    }
+                }
+            }
+
+            recv_size   = DOWNLOAD_SINGLE_BUFFER_SIZE;
+            s_result    = _xskt_recv(aSocket, recv_buffer, recv_size, 0);
+
+            if ( s_result < 0 )
+            {
+                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                {
+                    if (0 != gettimeofday(&currentTime, NULL))
+                    {
+                        CcspTraceError(("Failed to get the time of a day \n"));
+                        returnStatus = ANSC_STATUS_FAILURE;
+                        goto done;
+                    }
+                    ullCurrentTimeInMs =
+                        (unsigned long long)currentTime.tv_sec * 1000ULL
+                        + (unsigned long long)(currentTime.tv_usec / 1000);
+                    ullDurationInMs = ullCurrentTimeInMs - ullStartTimeInMs;
+                    if (ullDurationInMs >= ullTestWindowMs)
+                    {
+                        s_result = 0;
+                        break;
+                    }
+                }
+
+                AnscTraceWarning(("Failed to recv packet.\n"));
+
+                pMyObject->bDownNotifyNeeded = TRUE;
+                pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_TransferFailed;
+
+                returnStatus = ANSC_STATUS_FAILURE;
+                goto done;
+            }
+
+            if (s_result > 0)
+            {
+                AnscGetSystemTime(&pStats->EOMTime);
+            }
         }
     }
 
-    /* succeeded */
+    /*
+     * If we exit because TimeBasedTestDuration elapsed before consuming s_result in the loop body,
+     * the last recv() bytes were never added in the loop.
+     */
+    if (s_result > 0)
+    {
+        pStats->TestBytesReceived += (ULONG)s_result;
+    }
+
+    if (ANSC_STATUS_FAILURE == Tad_GetParamValues(PAM_COMPONENT_NAME, PAM_DBUS_PATH, INTERFACE_STATS_Rx_BYTES, &finalRxBytes))
+    {
+        CcspTraceError(( "%s: Failed to get the final Rx byte count\n ", __FUNCTION__));
+    }
+    CcspTraceInfo(("finalRxBytes = %lu\n", finalRxBytes));
+
     pMyObject->bDownNotifyNeeded = TRUE;
-    pStats->DiagStates           = DSLH_TR143_DIAGNOSTIC_Completed;
+
+    if (finalRxBytes >= initialRxBytes)
+    {
+        /* succeeded */
+        pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Completed;
+    }
+    else if (pStats->TestBytesReceived > 0)
+    {
+        /*
+         * Device.IP.Interface.*.Stats.BytesReceived can wrap or reset; delta is unusable.
+         * Complete using TestBytesReceived for TotalBytesReceived.
+         */
+        CcspTraceWarning(("Interface BytesReceived decreased (wrap/reset); using TestBytesReceived for TotalBytesReceived (initial %lu final %lu).\n",
+                initialRxBytes, finalRxBytes));
+        pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Completed;
+    }
+    else
+    {
+        CcspTraceError(("Interface stats invalid (finalRxBytes %lu < initialRxBytes %lu) \n", finalRxBytes, initialRxBytes));
+        pStats->DiagStates = DSLH_TR143_DIAGNOSTIC_Error_Internal;
+    }
 
 done:
+
+    if (pStats->DiagStates == DSLH_TR143_DIAGNOSTIC_Completed)
+    {
+        pStats->TimeBasedTestDuration = CalculateTimeDifference((USER_SYSTEM_TIME*)&pStats->EOMTime, (USER_SYSTEM_TIME*)&pStats->BOMTime);
+        pStats->TimeBasedTestMeasurementOffset = (ULONG)CalculateTimeDifference((USER_SYSTEM_TIME*)&pStats->BOMTime, (USER_SYSTEM_TIME*)&pStats->ROMTime);
+
+        if (finalRxBytes >= initialRxBytes)
+        {
+            pStats->TotalBytesReceived = finalRxBytes - initialRxBytes;
+        }
+        else
+        {
+            pStats->TotalBytesReceived = pStats->TestBytesReceived;
+        }
+        CcspTraceWarning(("TotalRxBytes = %lu TestBytesReceived = %lu\n", pStats->TotalBytesReceived, pStats->TestBytesReceived));
+        Notify_change("UploadDownloadSpeedStatus","DownloadCompleted");
+
+        getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, CurrDiagState);
+        snprintf(bufferState, sizeof(bufferState), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+        Notify_change("Device.IP.Diagnostics.DownloadDiagnostics.DiagnosticsState", bufferState);
+    }
+    else if((pStats->DiagStates != DSLH_TR143_DIAGNOSTIC_None) && (pStats->DiagStates != DSLH_TR143_DIAGNOSTIC_Requested) && (pStats->DiagStates != DSLH_TR143_DIAGNOSTIC_Canceled))
+    {
+        Notify_change("UploadDownloadSpeedStatus","Error_Occured");
+
+        getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, CurrDiagState);
+        snprintf(bufferState, sizeof(bufferState), "%d,%s,%s,ccsp_string", CCSP_COMPONENT_ID_NOTIFY_COMP, CurrDiagState, PrevDiagState);
+        Notify_change("Device.IP.Diagnostics.DownloadDiagnostics.DiagnosticsState", bufferState);
+    }
+
     /* clear resources if need */
     if (aSocket != XSKT_SOCKET_INVALID_SOCKET)
         _xskt_closesocket(aSocket);
     if (recv_buffer != NULL)
-        AnscFreeMemory(recv_buffer);
+        recv_buffer = NULL;
+    /* keep s_downloadRecvBuffer for reuse; do not free here */
     if (servInfo)
         _xskt_freeaddrinfo(servInfo);
     if (cliInfo)
@@ -655,15 +870,18 @@ done:
     /* if the task is stopped, reset the stats */
     if ( pMyObject->bStopDownDiag )
     {
-        DslhResetDownloadDiagStats((&pMyObject->DownloadDiagStats));        
+        DslhResetDownloadDiagStats((&pMyObject->DownloadDiagStats));
+        pthread_mutex_lock(&DownloadDiagMutex);
+        pMyObject->bStopDownDiag       = FALSE;
+        pthread_cond_signal(&DownloadDiagCond);
+        pthread_mutex_unlock(&DownloadDiagMutex);
     }
 
     pMyObject->DownloadDiagInfo.DiagnosticsState = pStats->DiagStates;
         
     /* clear flags */
     pMyObject->bDownNotifyNeeded   = FALSE;
-    pMyObject->bDownDiagOn         = FALSE; 
-    pMyObject->bStopDownDiag       = FALSE;
+    pMyObject->bDownDiagOn         = FALSE;
 
     return returnStatus;
 }
@@ -875,6 +1093,8 @@ BbhmDownloadGetConfig
         ERR_CHK(rc);
         pHandle->DSCP                 = pDownloadInfo->DSCP;
         pHandle->EthernetPriority     = pDownloadInfo->EthernetPriority;
+        pHandle->TimeBasedTestDuration = pDownloadInfo->TimeBasedTestDuration;
+        pHandle->TimeBasedTestMeasurementOffset = pDownloadInfo->TimeBasedTestMeasurementOffset;
         pHandle->DiagnosticsState     = pDownloadInfo->DiagnosticsState;
     }
 
@@ -943,12 +1163,42 @@ BbhmDownloadSetConfig
     ERR_CHK(rc);
     pDownloadInfo->DSCP             = pHandle->DSCP;
     pDownloadInfo->EthernetPriority = pHandle->EthernetPriority;
+    pDownloadInfo->TimeBasedTestDuration = pHandle->TimeBasedTestDuration;
+    pDownloadInfo->TimeBasedTestMeasurementOffset = pHandle->TimeBasedTestMeasurementOffset;
     pDownloadInfo->DiagnosticsState = pHandle->DiagnosticsState;
     rc = strcpy_s(pDownloadInfo->IfAddrName, sizeof(pDownloadInfo->IfAddrName) , pHandle->IfAddrName);
     ERR_CHK(rc);
 
     return returnStatus;
 }
+
+/**********************************************************************
+
+    caller:     owner of this object
+
+    prototype:
+
+       ANSC_STATUS
+       BbhmDownloadSetDiagState
+          (
+               ANSC_HANDLE                 hThisObject,
+               ULONG                       ulDiagState
+            );
+
+    description:
+
+        This function is called to set the Download Diagnostics State
+
+    argument:   ANSC_HANDLE                 hThisObject
+                This handle is actually the pointer of this object
+                itself.
+
+                ANSC_HANDLE                 ulDiagState
+               The Disgnostic State being set.
+
+    return:     The status of the operation;
+
+**********************************************************************/
 
 ANSC_STATUS
 BbhmDownloadSetDiagState
