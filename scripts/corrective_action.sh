@@ -918,8 +918,8 @@ resetNeeded()
                 fi
 
             elif [ "$ProcessName" = "cujo-qosd" ]; then
-                echo_t "RDKB_SELFHEAL : Resetting process $ProcessName"
-                systemctl start cujo-ni
+                echo_t "RDKB_SELFHEAL : Resetting process CcspAdvSecuritySsp $ProcessName"
+                advsec_restart_agent
                 t2CountNotify "SYS_SH_CUJO_NI_restart"
 
             elif [ "$ProcessName" = "PING" ]; then
