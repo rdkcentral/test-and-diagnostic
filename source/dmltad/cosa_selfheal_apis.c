@@ -178,17 +178,10 @@ void manage_self_heal_cron_state(BOOL isEnabled) {
         {"selfheal_aggressive.sh", "AggressiveInterval", 5}
     };
 
-    const CronJob recovery_scripts[] = {
-        {"resource_monitor_recover.sh", NULL, 5}
-    };
-
 	size_t selfheal_script_count = sizeof(self_heal_scripts) / sizeof(self_heal_scripts[0]);
-	size_t recovery_script_count = sizeof(recovery_scripts) / sizeof(recovery_scripts[0]);
 
     if (isEnabled) {
 		CcspTraceInfo(("Selfheal is enabled and cron is enabled \n"));
-		// Stop Cron Job of Recovery Scripts
-        for (size_t i = 0; i < recovery_script_count; i++) update_cron_entry(recovery_scripts[i].name, 0, false);
 
 		// Start Cron Jobs of Self-Heal Scripts
 		for (size_t i = 0; i < selfheal_script_count; i++) {
@@ -198,7 +191,6 @@ void manage_self_heal_cron_state(BOOL isEnabled) {
     else {
         // Stop Cron Job of Self-Heal and Recovery Scripts
         for (size_t i = 0; i < selfheal_script_count; i++) update_cron_entry(self_heal_scripts[i].name, 0, false);
-        for (size_t i = 0; i < recovery_script_count; i++) update_cron_entry(recovery_scripts[i].name, 0, false);
     }
 }
 
