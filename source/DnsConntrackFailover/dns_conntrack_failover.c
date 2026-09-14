@@ -29,11 +29,15 @@
  * upstream DNS traffic is expected to fail, so conntrack timeouts on the
  * WAN itself would be meaningless as a DNS-server-health signal.
  *
- * active_verify_dns() confirms passive failure evidence by reading the
- * configured resolver list from Device.DNS.Client.Server.*.DNSServer (RBUS)
- * and sending each one a direct UDP/53 DNS query. Failover is only declared
- * if every configured server fails to reply; a single working server means
- * clients still have DNS, so no failover is triggered.
+ * active_verify_dns() confirms passive failure evidence against a fixed list
+ * of upstream DNS servers cached once at startup from /etc/resolv.conf (see
+ * load_dns_servers_from_resolv_conf()), and sends each one a direct UDP/53
+ * DNS query. The cache is read before any DNS redirection can rewrite
+ * resolv.conf to point at the local resolver, so it always reflects the
+ * real upstream servers. Failover is only declared if every cached server
+ * fails to reply; a single working server means clients still have DNS, so
+ * no failover is triggered. Recovery uses the same cached list: as soon as
+ * one cached server replies again, the failed state is cleared.
  *
  * Build (typical Linux host):
  *   gcc -O2 -Wall -Wextra -pthread dns_conntrack_failover.c \
@@ -77,7 +81,7 @@
 #define WAN_STATUS_PARAM_NAME          "Device.X_RDK_WanManager.CurrentStatus"
 #define WAN_STATUS_VALUE_UP            "Up"
 
-#define DNS_SERVER_LIST_WILDCARD       "Device.DNS.Client.Server.*.DNSServer"
+#define RESOLV_CONF_PATH               "/etc/resolv.conf"
 #define MAX_VERIFY_SERVERS             16U
 #define DNS_VERIFY_TIMEOUT_MS          2000U
 
@@ -260,30 +264,53 @@ static struct dns_server_health *server_get(struct monitor_ctx *ctx,
 /* Active DNS verification: query every configured resolver directly         */
 /* ------------------------------------------------------------------------- */
 
-/* Reads Device.DNS.Client.Server.*.DNSServer via the existing RBUS handle.
- * Returns the number of non-empty server strings copied into out[]. */
-static int fetch_dns_server_list(char out[][INET6_ADDRSTRLEN], int max)
+/* Upstream DNS servers cached once at startup from /etc/resolv.conf, before
+ * any failover logic can redirect it to the local resolver. */
+static char g_cached_dns_servers[MAX_VERIFY_SERVERS][INET6_ADDRSTRLEN];
+static int g_cached_dns_server_count;
+
+/* Parses "nameserver <ip>" lines out of /etc/resolv.conf and caches every
+ * valid IPv4/IPv6 address. Must be called once at startup, before Unbound
+ * (or anything else) rewrites resolv.conf to point at a local resolver. */
+static void load_dns_servers_from_resolv_conf(void)
 {
-    const char *names[1] = { DNS_SERVER_LIST_WILDCARD };
-    int numProps = 0;
-    rbusProperty_t properties = NULL;
-    int count = 0;
-
-    if (!g_wanRbusHandle)
-        return 0;
-
-    if (rbus_getExt(g_wanRbusHandle, 1, names, &numProps, &properties) != RBUS_ERROR_SUCCESS)
-        return 0;
-
-    for (rbusProperty_t p = properties; p && count < max; p = rbusProperty_GetNext(p)) {
-        rbusValue_t val = rbusProperty_GetValue(p);
-        const char *addr = val ? rbusValue_GetString(val, NULL) : NULL;
-        if (addr && addr[0] != '\0')
-            snprintf(out[count++], INET6_ADDRSTRLEN, "%s", addr);
+    FILE *fp = fopen(RESOLV_CONF_PATH, "r");
+    if (!fp) {
+        fprintf(stderr, "VERIFY: failed to open %s: %s\n", RESOLV_CONF_PATH, strerror(errno));
+        return;
     }
 
-    if (properties)
-        rbusProperty_Release(properties);
+    char line[256];
+    while (g_cached_dns_server_count < MAX_VERIFY_SERVERS && fgets(line, sizeof(line), fp)) {
+        char addr[INET6_ADDRSTRLEN];
+        struct in_addr a4;
+        struct in6_addr a6;
+
+        if (sscanf(line, "nameserver %45s", addr) != 1)
+            continue;
+
+        if (inet_pton(AF_INET, addr, &a4) != 1 && inet_pton(AF_INET6, addr, &a6) != 1) {
+            fprintf(stderr, "VERIFY: skipping invalid nameserver '%s'\n", addr);
+            continue;
+        }
+
+        snprintf(g_cached_dns_servers[g_cached_dns_server_count++], INET6_ADDRSTRLEN, "%s", addr);
+    }
+
+    fclose(fp);
+
+    fprintf(stderr, "VERIFY: cached %d nameserver(s) from %s\n",
+            g_cached_dns_server_count, RESOLV_CONF_PATH);
+}
+
+/* Copies the cached nameserver list into out[]. Returns the number of
+ * entries copied. */
+static int fetch_dns_server_list(char out[][INET6_ADDRSTRLEN], int max)
+{
+    int count = 0;
+
+    for (int i = 0; i < g_cached_dns_server_count && count < max; ++i)
+        snprintf(out[count++], INET6_ADDRSTRLEN, "%s", g_cached_dns_servers[i]);
 
     return count;
 }
@@ -380,8 +407,8 @@ static bool active_verify_dns(uint32_t dns_server)
     int count = fetch_dns_server_list(servers, MAX_VERIFY_SERVERS);
 
     if (count <= 0) {
-        fprintf(stderr, "VERIFY: could not read %s; treating as unverified\n",
-                DNS_SERVER_LIST_WILDCARD);
+        fprintf(stderr, "VERIFY: no cached nameservers from %s; treating as unverified\n",
+                RESOLV_CONF_PATH);
         return false;
     }
 
@@ -721,6 +748,9 @@ int main(void)
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
+
+    /* Must happen before anything can redirect resolv.conf to a local resolver. */
+    load_dns_servers_from_resolv_conf();
 
     /* Non-fatal: if WanManager/RBUS is not up yet, WAN is treated as down
      * until a subscription later succeeds, so no false failures are recorded. */
