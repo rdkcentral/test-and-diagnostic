@@ -94,6 +94,10 @@
 #define PASSIVE_FAILURE_THRESHOLD      3U
 #define RECOVERY_SUCCESS_THRESHOLD     2U
 #define VERIFY_COOLDOWN_MS             10000U
+/* Upper bound of random delay before the first active verification after a
+ * passive failure, so that a mass DNS outage doesn't send every device's
+ * verification probe to the same server in the same instant. */
+#define VERIFY_JITTER_MAX_MS           60000U
 
 struct flow_key {
     uint32_t src_ip;       /* network byte order */
@@ -125,6 +129,7 @@ struct dns_server_health {
     uint64_t last_failure_episode_ms;
     uint64_t last_reply_ms;
     uint64_t last_verify_ms;
+    uint64_t verify_at_ms;  /* 0 = no verification pending; jittered time to run one */
 };
 
 struct monitor_ctx {
@@ -515,6 +520,7 @@ static void record_reply_locked(struct monitor_ctx *ctx, uint32_t server_ip)
 
     s->last_reply_ms = monotonic_ms();
     s->failure_episodes = 0;
+    s->verify_at_ms = 0;
 
     if (s->state == SERVER_SUSPECT) {
         s->state = SERVER_HEALTHY;
@@ -588,6 +594,20 @@ static void evaluate_server_locked(struct monitor_ctx *ctx,
     if (s->last_verify_ms != 0 && now_ms - s->last_verify_ms < VERIFY_COOLDOWN_MS)
         return;
 
+    /* Stagger the first verification across VERIFY_JITTER_MAX_MS instead of
+     * firing the instant the threshold is reached, so a mass outage doesn't
+     * make every device probe the DNS servers at the same moment. */
+    if (s->verify_at_ms == 0) {
+        s->verify_at_ms = now_ms + ((uint64_t)rand() % VERIFY_JITTER_MAX_MS);
+        fprintf(stderr, "VERIFY: scheduling verification in %" PRIu64 " ms\n",
+                s->verify_at_ms - now_ms);
+        return;
+    }
+
+    if (now_ms < s->verify_at_ms)
+        return;
+
+    s->verify_at_ms = 0;
     s->last_verify_ms = now_ms;
 
     if (active_verify_dns(s->address)) {
@@ -748,6 +768,9 @@ int main(void)
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
+
+    /* Seeds per-process verification jitter (see VERIFY_JITTER_MAX_MS). */
+    srand((unsigned)(monotonic_ms() ^ (uint64_t)getpid()));
 
     /* Must happen before anything can redirect resolv.conf to a local resolver. */
     load_dns_servers_from_resolv_conf();
