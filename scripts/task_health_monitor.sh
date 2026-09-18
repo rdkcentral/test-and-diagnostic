@@ -646,7 +646,7 @@ case $SELFHEAL_TYPE in
                 WIFI_QUERY_ERROR=1
             fi
 
-            SSH_ATOM_TEST=$(GetConfigFile /tmp/elxrretyt.swr stdout | ssh -I $IDLE_TIMEOUT -i /dev/stdin root@$ATOM_IP exit 2>&1)
+            SSH_ATOM_TEST=$(GetConfigFile /tmp/interchip stdout | ssh -I $IDLE_TIMEOUT -i /dev/stdin root@$ATOM_IP exit 2>&1)
             echo_t "SSH_ATOM_TEST : $SSH_ATOM_TEST"
             SSH_ERROR=`echo $SSH_ATOM_TEST | grep "Remote closed the connection"`
             SSH_TIMEOUT=`echo $SSH_ATOM_TEST | grep "Idle timeout"`
