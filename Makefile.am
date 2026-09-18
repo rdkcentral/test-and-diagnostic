@@ -80,4 +80,4 @@ endif
 libdiagnostic_la_CPPFLAGS = -I$(top_srcdir)/source/diagnostic/include -I$(top_srcdir)/source/diagnostic/BbhmDiagIpPing -I$(top_srcdir)/source/dmltad -I$(top_srcdir)/source/TandDSsp
 libdiagnostic_la_DEPENDENCIES = $(EXTRA_DEPENDENCIES)
 libdiagnostic_la_LIBADD = $(libdiagnostic_la_DEPENDENCIES)
-libdiagnostic_la_LDFLAGS = -lccsp_common
+libdiagnostic_la_LDFLAGS = -lccsp_common -lmosquitto

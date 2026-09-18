@@ -21,4 +21,4 @@ bin_PROGRAMS = xNetDP
 
 xNetDP_CPPFLAGS = -I${PKG_CONFIG_SYSROOT_DIR}$(includedir)/rbus
 xNetDP_SOURCES = xNetDP.c
-xNetDP_LDFLAGS = -lpcap -lrbus -lsyscfg -lm -lpthread
+xNetDP_LDFLAGS = -lpcap -lrbus -lsyscfg -lm -lpthread -lmosquitto
