@@ -224,8 +224,13 @@ COSA_Init
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "SpeedTest_SetParamStringValue",  SpeedTest_SetParamStringValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "SpeedTest_GetParamUlongValue",  SpeedTest_GetParamUlongValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "SpeedTest_SetParamUlongValue",  SpeedTest_SetParamUlongValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_GetParamBoolValue",  RDK_SpeedTest_GetParamBoolValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_SetParamBoolValue",  RDK_SpeedTest_SetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_GetParamUlongValue",  RDK_SpeedTest_GetParamUlongValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_SetParamUlongValue",  RDK_SpeedTest_SetParamUlongValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_Validate",  RDK_SpeedTest_Validate);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_Commit",  RDK_SpeedTest_Commit);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_Rollback",  RDK_SpeedTest_Rollback);
 
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "SpeedTestServer_GetParamBoolValue",  SpeedTestServer_GetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "SpeedTestServer_GetParamStringValue",  SpeedTestServer_GetParamStringValue);
@@ -287,6 +292,8 @@ COSA_Init
                                 X_RDKCENTRAL_COM_RxTxStats_Commit);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "X_RDKCENTRAL_COM_RxTxStats_Rollback", 
                                 X_RDKCENTRAL_COM_RxTxStats_Rollback);
+
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "TelSpeedtest_GetParamUlongValue", TelSpeedtest_GetParamUlongValue);
 
     pGetCHProc = (COSAGetCommonHandleProc)pPlugInfo->AcquireFunction("COSAGetDiagPluginInfo");
 
