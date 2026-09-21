@@ -83,7 +83,7 @@
 #define WAN_STATUS_PARAM_NAME          "Device.X_RDK_WanManager.CurrentStatus"
 #define WAN_STATUS_VALUE_UP            "Up"
 
-#ifdef PLATFORM_RDK
+#ifdef PLATFORM_RDKV
 #  define RESOLV_CONF_PATH  "/etc/resolv.dnsmasq"
 #else
 #  define RESOLV_CONF_PATH  "/etc/resolv.conf"
