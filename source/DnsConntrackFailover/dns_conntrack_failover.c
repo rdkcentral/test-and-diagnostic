@@ -474,9 +474,12 @@ static bool get_default_gateway(char *gw_ip, size_t len)
             }
 
             fclose(fp);
+            fprintf(stderr, "get_default_gateway: default route found via %s\n", gw_ip);
             return true;
         }
     }
+
+    fprintf(stderr, "get_default_gateway: no default route found\n");
 
     fclose(fp);
     return false;
@@ -531,15 +534,18 @@ bool router_arp_reachable(void)
         sscanf(flags, "0x%x", &arp_flags);
 
         fclose(fp);
+        fprintf(stderr, "gateway %s ARP flags = 0x%x\n", gateway_ip, arp_flags);
         return (arp_flags & 0x2);
     }
 
     fclose(fp);
+    fprintf(stderr, "gateway %s not found in ARP table\n", gateway_ip);
     return false;
 }
 
 static bool wan_is_reachable(void)
 { 
+    fprintf(stderr, "checking WAN reachability\n");
     return router_arp_reachable();
 }
 #else
@@ -649,7 +655,7 @@ void build_servers_arg(char *buf, size_t buf_len)
 static void set_unbound_failover(bool enable)
 {
     int ret = 0;
-    fprintf(stderr, "ACTION: Unbound failover %s\n", enable ? "ENABLE" : "DISABLE");
+    fprintf(stderr, "Unbound failover %s\n", enable ? "ENABLE" : "DISABLE");
 
     /*
      * Replace with platform control, e.g. Firewall Manager/DNS Manager/RBUS.
@@ -661,13 +667,13 @@ static void set_unbound_failover(bool enable)
 #ifdef PLATFORM_RDKV
     if (enable) {
     ret = system("systemctl start unbound.service");
-        fprintf(stdout, "ACTION: Unbound failover start unbound.service returned %d\n", ret);
+        fprintf(stderr, "Unbound failover start unbound.service returned %d\n", ret);
       ret = system("dbus-send --system --print-reply "
                "--dest=org.freedesktop.NetworkManager.dnsmasq "
                "/uk/org/thekelleys/dnsmasq "
                "org.freedesktop.NetworkManager.dnsmasq.SetDomainServers "
                "array:string:\"127.0.0.1#5300@lo\"");
-        fprintf(stdout, "ACTION: Unbound failover send dbus ENABLE returned %d\n", ret);
+        fprintf(stderr, "Unbound failover send dbus ENABLE returned %d\n", ret);
     } else {
         char servers[256] = {0};   // build "srv1","srv2" from g_cached_dns_servers[]
         char cmd[512];
@@ -680,7 +686,7 @@ static void set_unbound_failover(bool enable)
                  "org.freedesktop.NetworkManager.dnsmasq.SetDomainServers "
                  "array:string:%s", servers);
         ret = system(cmd);
-        fprintf(stdout, "ACTION: Unbound failover send dbus DISABLE returned %d\n", ret);
+        fprintf(stderr, "Unbound failover send dbus DISABLE returned %d\n", ret);
     }
 #endif
 }
@@ -820,6 +826,8 @@ static bool extract_dns_key(const struct nf_conntrack *ct, struct flow_key *key)
 
     if (proto != IPPROTO_UDP || dport != DNS_PORT)
         return false;
+    else
+        fprintf(stderr, "dns packet detected\n");
 
     key->src_ip = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_SRC);
     key->dst_ip = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_DST);
