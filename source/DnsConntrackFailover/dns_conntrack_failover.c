@@ -19,7 +19,7 @@
  *
  * This sample intentionally leaves one platform-specific hook as a stub:
  *   set_unbound_failover().
- * Replace it with RDK-B/RBUS/Firewall Manager/DNS Manager integration.
+ * Replace it with RDK-B/RBUSol/Firewall Manager/DNS Manager integration.
  *
  * wan_is_reachable() is implemented via RBUS: it subscribes to the WAN
  * Manager global status event, Device.X_RDK_WanManager.CurrentStatus
@@ -75,13 +75,20 @@
 #include <unistd.h>
 
 #include <libnetfilter_conntrack/libnetfilter_conntrack.h>
+#ifndef PLATFORM_RDKV
 #include <rbus/rbus.h>
+#endif
 
 #define WAN_STATUS_COMPONENT_NAME      "DnsConntrackFailover"
 #define WAN_STATUS_PARAM_NAME          "Device.X_RDK_WanManager.CurrentStatus"
 #define WAN_STATUS_VALUE_UP            "Up"
 
-#define RESOLV_CONF_PATH               "/etc/resolv.conf"
+#ifdef PLATFORM_RDK
+#  define RESOLV_CONF_PATH  "/etc/resolv.dnsmasq"
+#else
+#  define RESOLV_CONF_PATH  "/etc/resolv.conf"
+#endif
+
 #define MAX_VERIFY_SERVERS             16U
 #define DNS_VERIFY_TIMEOUT_MS          2000U
 
@@ -141,9 +148,11 @@ struct monitor_ctx {
 
 static volatile sig_atomic_t g_running = 1;
 
+#ifndef PLATFORM_RDKV
 /* Cached WAN status, updated only by the RBUS event handler / initial get. */
 static rbusHandle_t g_wanRbusHandle;
 static atomic_bool g_wan_up = false;
+#endif
 
 static uint64_t monotonic_ms(void)
 {
@@ -272,7 +281,7 @@ static struct dns_server_health *server_get(struct monitor_ctx *ctx,
 /* Upstream DNS servers cached once at startup from /etc/resolv.conf, before
  * any failover logic can redirect it to the local resolver. */
 static char g_cached_dns_servers[MAX_VERIFY_SERVERS][INET6_ADDRSTRLEN];
-static int g_cached_dns_server_count;
+static unsigned int g_cached_dns_server_count;
 
 /* Parses "nameserver <ip>" lines out of /etc/resolv.conf and caches every
  * valid IPv4/IPv6 address. Must be called once at startup, before Unbound
@@ -314,7 +323,7 @@ static int fetch_dns_server_list(char out[][INET6_ADDRSTRLEN], int max)
 {
     int count = 0;
 
-    for (int i = 0; i < g_cached_dns_server_count && count < max; ++i)
+    for (unsigned int i = 0; i < g_cached_dns_server_count && count < max; ++i)
         snprintf(out[count++], INET6_ADDRSTRLEN, "%s", g_cached_dns_servers[i]);
 
     return count;
@@ -428,15 +437,122 @@ static bool active_verify_dns(uint32_t dns_server)
     return false;
 }
 
+#ifdef PLATFORM_RDKV
+
+static bool get_default_gateway(char *gw_ip, size_t len)
+{
+    FILE *fp = fopen("/proc/net/route", "r");
+    if (!fp)
+    {
+        fprintf(stderr, "/proc/net/route open failed\n");
+        return false;
+    }
+
+    char line[256];
+
+    /* Skip header */
+    if (!fgets(line, sizeof(line), fp)) {
+        fclose(fp);
+        return false;
+    }
+
+    while (fgets(line, sizeof(line), fp)) {
+        char iface[32];
+        unsigned long dest, gateway;
+
+        if (sscanf(line, "%31s %lx %lx", iface, &dest, &gateway) != 3)
+            continue;
+
+        /* Default route => Destination = 0 */
+        if (dest == 0) {
+            struct in_addr addr;
+            addr.s_addr = gateway;
+
+            if (!inet_ntop(AF_INET, &addr, gw_ip, len)) {
+                fclose(fp);
+                return false;
+            }
+
+            fclose(fp);
+            return true;
+        }
+    }
+
+    fclose(fp);
+    return false;
+}
+
+bool router_arp_reachable(void)
+{
+    char gateway_ip[INET_ADDRSTRLEN];
+
+    if (!get_default_gateway(gateway_ip, sizeof(gateway_ip)))
+        return false;
+
+    FILE *fp = fopen("/proc/net/arp", "r");
+    if (!fp)
+    {
+        fprintf(stderr, "/proc/net/arp open failed\n");
+        return false;
+    }
+
+    char line[256];
+
+    /* Skip header */
+    if (!fgets(line, sizeof(line), fp)) {
+        fclose(fp);
+        return false;
+    }
+
+    while (fgets(line, sizeof(line), fp)) {
+        char ip[64];
+        char hw_type[32];
+        char flags[32];
+        char mac[64];
+        char mask[32];
+        char dev[32];
+
+        if (sscanf(line,
+                   "%63s %31s %31s %63s %31s %31s",
+                   ip, hw_type, flags, mac, mask, dev) != 6)
+            continue;
+
+        if (strcmp(ip, gateway_ip) != 0)
+            continue;
+
+        /* Incomplete entry has MAC 00:00:00:00:00:00 */
+        if (strcmp(mac, "00:00:00:00:00:00") == 0) {
+            fclose(fp);
+            return false;
+        }
+
+        /* ARP flags 0x2 => complete */
+        unsigned int arp_flags = 0;
+        sscanf(flags, "0x%x", &arp_flags);
+
+        fclose(fp);
+        return (arp_flags & 0x2);
+    }
+
+    fclose(fp);
+    return false;
+}
+
+static bool wan_is_reachable(void)
+{ 
+    return router_arp_reachable();
+}
+#else
 static bool wan_is_reachable(void)
 {
     return atomic_load(&g_wan_up);
 }
+#endif
 
 /* ------------------------------------------------------------------------- */
 /* WAN status via RBUS                                                       */
 /* ------------------------------------------------------------------------- */
-
+#ifndef PLATFORM_RDKV
 static void wan_status_event_handler(rbusHandle_t handle,
                                      rbusEvent_t const *event,
                                      rbusEventSubscription_t *subscription)
@@ -496,9 +612,43 @@ static void wan_status_rbus_exit(void)
         g_wanRbusHandle = NULL;
     }
 }
+#endif
+
+#ifdef PLATFORM_RDKV
+void build_servers_arg(char *buf, size_t buf_len)
+{
+    size_t used = 0;
+    int first = 1;
+
+    if (!buf || buf_len == 0)
+        return;
+
+    buf[0] = '\0';
+
+    for (unsigned int i = 0; i < g_cached_dns_server_count; i++) {
+        const char *server = g_cached_dns_servers[i];
+
+        if (server[0] == '\0')
+            continue;
+
+        int written = snprintf(buf + used,
+                               buf_len - used,
+                               "%s\"%s\"",
+                               first ? "" : ",",
+                               server);
+
+        if (written < 0 || (size_t)written >= (buf_len - used))
+            break;
+
+        used += written;
+        first = 0;
+    }
+}
+#endif
 
 static void set_unbound_failover(bool enable)
 {
+    int ret = 0;
     fprintf(stderr, "ACTION: Unbound failover %s\n", enable ? "ENABLE" : "DISABLE");
 
     /*
@@ -508,6 +658,31 @@ static void set_unbound_failover(bool enable)
      *   - preserve normal routing when disabled
      * Avoid system()/shelling out in production.
      */
+#ifdef PLATFORM_RDKV
+    if (enable) {
+    ret = system("systemctl start unbound.service");
+        fprintf(stdout, "ACTION: Unbound failover start unbound.service returned %d\n", ret);
+      ret = system("dbus-send --system --print-reply "
+               "--dest=org.freedesktop.NetworkManager.dnsmasq "
+               "/uk/org/thekelleys/dnsmasq "
+               "org.freedesktop.NetworkManager.dnsmasq.SetDomainServers "
+               "array:string:\"127.0.0.1#5300@lo\"");
+        fprintf(stdout, "ACTION: Unbound failover send dbus ENABLE returned %d\n", ret);
+    } else {
+        char servers[256] = {0};   // build "srv1","srv2" from g_cached_dns_servers[]
+        char cmd[512];
+        load_dns_servers_from_resolv_conf();
+        build_servers_arg(servers, sizeof(servers));
+        snprintf(cmd, sizeof(cmd),
+                 "dbus-send --system --print-reply "
+                 "--dest=org.freedesktop.NetworkManager.dnsmasq "
+                 "/uk/org/thekelleys/dnsmasq "
+                 "org.freedesktop.NetworkManager.dnsmasq.SetDomainServers "
+                 "array:string:%s", servers);
+        ret = system(cmd);
+        fprintf(stdout, "ACTION: Unbound failover send dbus DISABLE returned %d\n", ret);
+    }
+#endif
 }
 
 /* ------------------------------------------------------------------------- */
@@ -567,6 +742,7 @@ static void evaluate_server_locked(struct monitor_ctx *ctx,
                                    struct dns_server_health *s,
                                    uint64_t now_ms)
 {
+    (void)ctx;
     if (!s->used)
         return;
 
@@ -774,12 +950,12 @@ int main(void)
 
     /* Must happen before anything can redirect resolv.conf to a local resolver. */
     load_dns_servers_from_resolv_conf();
-
+#ifndef PLATFORM_RDKV
     /* Non-fatal: if WanManager/RBUS is not up yet, WAN is treated as down
      * until a subscription later succeeds, so no false failures are recorded. */
     if (!wan_status_rbus_init())
         fprintf(stderr, "WAN: status unknown, treating WAN as down until subscribed\n");
-
+#endif
     ctx.nfct = nfct_open(CONNTRACK, NFCT_ALL_CT_GROUPS);
     if (!ctx.nfct) {
         fprintf(stderr, "nfct_open failed: %s\n", strerror(errno));
@@ -821,8 +997,9 @@ int main(void)
     nfct_close(ctx.nfct);
     ctx.nfct = NULL;
     pthread_mutex_destroy(&ctx.lock);
+#ifndef PLATFORM_RDKV
     wan_status_rbus_exit();
-
+#endif
     fprintf(stderr, "DNS conntrack monitor stopped\n");
     return EXIT_SUCCESS;
 }

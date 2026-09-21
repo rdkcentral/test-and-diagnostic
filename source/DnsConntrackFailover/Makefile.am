@@ -21,3 +21,4 @@ bin_PROGRAMS = dns_conntrack_failover
 
 dns_conntrack_failover_SOURCES = dns_conntrack_failover.c
 dns_conntrack_failover_LDFLAGS = -lnetfilter_conntrack -lnfnetlink -lpthread -lrbus -lrbuscore
+dns_conntrack_failover_CPPFLAGS = -DPLATFORM_RDKV=1
