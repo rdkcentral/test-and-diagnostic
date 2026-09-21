@@ -973,27 +973,39 @@ rbusError_t WANCNCTVTYCHK_StartConnectivityCheck(rbusHandle_t handle, char const
     ANSC_STATUS returnStatus = ANSC_STATUS_SUCCESS;
 
     value = rbusObject_GetValue(inParams, "linux_interface_name");
+    if (value == NULL) {
+        WANCHK_LOG_ERROR("%s: Missing required param: linux_interface_name\n", __FUNCTION__);
+        return RBUS_ERROR_INVALID_INPUT;
+    }
     interface = (char*)rbusValue_GetString(value, &len);
 
     len = 0;
     value = rbusObject_GetValue(inParams, "alias");
+    if (value == NULL) {
+        WANCHK_LOG_ERROR("%s: Missing required param: alias\n", __FUNCTION__);
+        return RBUS_ERROR_INVALID_INPUT;
+    }
     alias = (char*)rbusValue_GetString(value, &len);
 
     len = 0;
     value = rbusObject_GetValue(inParams, "IPv4_DNS_Servers");
-    IPv4_nameserver_list = (char*)rbusValue_GetString(value, &len);
+    if (value != NULL)
+        IPv4_nameserver_list = (char*)rbusValue_GetString(value, &len);
 
     len = 0;
     value = rbusObject_GetValue(inParams, "IPv6_DNS_Servers");
-    IPv6_nameserver_list = (char*)rbusValue_GetString(value, &len);
+    if (value != NULL)
+        IPv6_nameserver_list = (char*)rbusValue_GetString(value, &len);
 
     len = 0;
     value = rbusObject_GetValue(inParams, "IPv4_Gateway");
-    IPv4_Gateway = (char*)rbusValue_GetString(value, &len);
+    if (value != NULL)
+        IPv4_Gateway = (char*)rbusValue_GetString(value, &len);
 
     len = 0;
     value = rbusObject_GetValue(inParams, "IPv6_Gateway");
-    IPv6_Gateway = (char*)rbusValue_GetString(value, &len);
+    if (value != NULL)
+        IPv6_Gateway = (char*)rbusValue_GetString(value, &len);
 
     WANCHK_LOG_INFO("%s: InterfaceName: %s, Alias: %s, v4_list: %s, v6_list: %s, v4_gateway: %s, v6_gateway: %s\n",
                     __FUNCTION__, interface, alias, IPv4_nameserver_list, IPv6_nameserver_list, IPv4_Gateway, IPv6_Gateway);

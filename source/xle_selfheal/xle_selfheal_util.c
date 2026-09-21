@@ -468,10 +468,6 @@ int Get_Device_Mode()
 
 int xle_reliability_monitoring()
 {
-    char MeshBackHaulIfname[128] = {0};
-    char RDKConnectionInterface[128] = {0};
-    int rc = 0;
-
     xle_log("[xle_self_heal] %s Entry \n", __FUNCTION__);
 
     if (access(NTP_SYNC_FILE, F_OK) != 0) {
@@ -488,18 +484,6 @@ int xle_reliability_monitoring()
     } else {
         xle_log("[xle_self_heal] NTP sync file found. No action needed.\n");
     }
-
-    //checking & correcting the interface only when Device is in Extender mode
-    xle_log("[xle_self_heal] RBUS Get for Device.X_RDK_Connection.Interface and Device.X_RDK_MeshAgent.MeshBackHaul.Ifname values\n");
-    rc = rbus_getStringValue(MeshBackHaulIfname, "Device.X_RDK_MeshAgent.MeshBackHaul.Ifname");
-    rc |= rbus_getStringValue(RDKConnectionInterface, "Device.X_RDK_Connection.Interface");
-    if (rc != 0) {
-        xle_log("[xle_self_heal] RBUS ERROR on getting Device.X_RDK_Connection.Interface or Device.X_RDK_MeshAgent.MeshBackHaul.Ifname values\n");
-        return 0;
-    }
-    if (strncmp(MeshBackHaulIfname, RDKConnectionInterface, sizeof(MeshBackHaulIfname)-1) != 0) {
-        xle_log("[xle_self_heal] Device.X_RDK_Connection.Interfacee=%s not same with Device.X_RDK_MeshAgent.MeshBackHaul.Ifname=%s in Ext mode \n", RDKConnectionInterface, MeshBackHaulIfname);
-     }
 
      return 0;
 }
