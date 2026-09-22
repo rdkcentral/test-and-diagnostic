@@ -53,6 +53,7 @@ bool IsPthreadisBusy=false;
 bool IsTR181_triger_at_PthreadisBusy=false;
 bool gLowLatency_Enable=false;
 bool monitor_wakeup_pending=false;
+static bool bIsMonitorThreadRunning=false;
 
 /*adding _SCER11BEL_PRODUCT_REQ_ , because both lan_prefix and ipv6_prefix has same value in XER10 US Device*/
 /*For Example:
@@ -626,8 +627,8 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 {
 	//UNREFERENCED_PARAMETER(data);
 	async_id_t interface_asyncid;
-	static int sysevent_fd = -1;
-    static token_t sysevent_token = 0;
+	int sysevent_fd = -1;
+    token_t sysevent_token = 0;
 	int err,BridgeMode_value=0;
 	char name[64] = {0}, value[64] = {0};
 	//char lan_ipaddr[ARRAY_LEN]={0};
@@ -635,6 +636,11 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 	char IPv4_addr_pre[ARRAY_LEN]={0};
 	CcspTraceInfo(("Entering %s :\n",__func__));
 	sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "latency_measurement", &sysevent_token);
+	if (sysevent_fd < 0)
+	{
+		CcspTraceInfo(("Failed to open sysevent in %s.\n", __func__));
+		return NULL;
+	}
 	sysevent_set_options(sysevent_fd, sysevent_token, "bridge_mode", TUPLE_FLAG_EVENT);
 	sysevent_setnotification(sysevent_fd, sysevent_token,"bridge_mode",  &interface_asyncid);
 	sysevent_set_options(sysevent_fd, sysevent_token, "lan_ip_config_modified", TUPLE_FLAG_EVENT);
@@ -683,7 +689,9 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 				}
 				else // bridge mode 
 				{
+					pthread_mutex_lock(&lock);
 					Stop_all_LatencyMeasurement_Services();
+					pthread_mutex_unlock(&lock);
 				}
 			}
 			else if(strcmp(name,"lan_ip_config_modified")==0)
@@ -693,13 +701,15 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 				CcspTraceInfo(("Current IPv4_addr is %s Previous IPv4_addr is %s\n",IPv4_addr,IPv4_addr_pre));
 				if(strcmp(IPv4_addr_pre,IPv4_addr) != 0)
 				{
+					pthread_mutex_lock(&lock);
 					Stop_LatencyMeasurement_Services(LM_IPV4_SNIFFER_SERVICE);
+					pthread_mutex_unlock(&lock);
 					/*******************start the xnet services *****/
 					if(Get_Status_of_bridge_mode()==ROUTER_MODE)// router mode 
 					{
 						SendConditional_pthread_cond_signal();
 					}
-					strncpy(IPv4_addr_pre,IPv4_addr,strlen(IPv4_addr_pre));
+					snprintf(IPv4_addr_pre, sizeof(IPv4_addr_pre), "%s", IPv4_addr);
 				}
 			}
 			else if(strcmp(name,LAN_PREFIX_SYSEVENT)==0)
@@ -707,7 +717,9 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 				if(strcmp(value,IPv6_addr)!=0)
 				{
 					CcspTraceInfo(("lan_prefix updated, old value is %s , new value is %s\n",IPv6_addr,value));
+					pthread_mutex_lock(&lock);
 					Stop_LatencyMeasurement_Services(LM_IPV6_SNIFFER_SERVICE);
+					pthread_mutex_unlock(&lock);
 					/*******************start the xnet services *****/
 					if(Get_Status_of_bridge_mode()==ROUTER_MODE)// router mode 
 					{
@@ -721,7 +733,9 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 				CcspTraceInfo(("%s current_wan_ifname %s value:%s\n",__func__,current_wan_ifname,value));
 				if((strcmp(value,current_wan_ifname)!=0)||(atoi(value)!=Percentile_Enable))
 				{
+					pthread_mutex_lock(&lock);
 					Stop_all_LatencyMeasurement_Services();
+					pthread_mutex_unlock(&lock);
 					/*******************start the xnet services *****/
 					if(Get_Status_of_bridge_mode()==ROUTER_MODE)// router mode 
 					{
@@ -736,7 +750,9 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 				CcspTraceInfo(("%s curr_wan_mode %d value:%s\n",__func__,curr_wan_mode,value));
 				if(curr_wan_mode!=atoi(value))
 				{
+					pthread_mutex_lock(&lock);
 					Stop_all_LatencyMeasurement_Services();
+					pthread_mutex_unlock(&lock);
 					/*******************start the xnet services *****/
 					if(Get_Status_of_bridge_mode()==ROUTER_MODE)// router mode 
 					{
@@ -847,7 +863,10 @@ void* LatencyMeasurement_MonitorService(void *arg)
             break;
         }
     }
-    pthread_detach(tid[MONITOR_PTHREAD_ID]);
+	pthread_mutex_lock(&lock);
+	bIsMonitorThreadRunning = false;
+	pthread_mutex_unlock(&lock);
+	pthread_detach(pthread_self());
     CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
     return NULL;
 }
@@ -858,12 +877,22 @@ int LatencyMeasurement_Config_Init()
 {
 	int Error=0;
 	CcspTraceInfo(("Enter into %s\n",__func__));
+	pthread_mutex_lock(&lock);
+	if (bIsMonitorThreadRunning)
+	{
+		pthread_mutex_unlock(&lock);
+		CcspTraceInfo(("LatencyMeasurement_MonitorService is already running.\n"));
+		return 0;
+	}
 	Error=pthread_create(&tid[MONITOR_PTHREAD_ID],NULL,LatencyMeasurement_MonitorService,NULL);
 	if (Error)
 	{
+		pthread_mutex_unlock(&lock);
 		CcspTraceInfo(("%s LatencyMeasurement_MonitorService error : %d\n",__func__,Error));
 	}
 	else{
+		bIsMonitorThreadRunning = true;
+		pthread_mutex_unlock(&lock);
 		CcspTraceInfo(("%s LatencyMeasurement_MonitorService thread is created\n",__func__));
 	}
 	return 0;
