@@ -283,6 +283,16 @@ static struct dns_server_health *server_get(struct monitor_ctx *ctx,
 static char g_cached_dns_servers[MAX_VERIFY_SERVERS][INET6_ADDRSTRLEN];
 static unsigned int g_cached_dns_server_count;
 
+/* Returns true if addr is already present in the cached nameserver list. */
+static bool dns_server_already_cached(const char *addr)
+{
+    for (unsigned int i = 0; i < g_cached_dns_server_count; ++i) {
+        if (strcmp(g_cached_dns_servers[i], addr) == 0)
+            return true;
+    }
+    return false;
+}
+
 /* Parses "nameserver <ip>" lines out of /etc/resolv.conf and caches every
  * valid IPv4/IPv6 address. Must be called once at startup, before Unbound
  * (or anything else) rewrites resolv.conf to point at a local resolver. */
@@ -294,7 +304,7 @@ static void load_dns_servers_from_resolv_conf(void)
         return;
     }
 
-    char line[256];
+    char line[256] = {0};
     while (g_cached_dns_server_count < MAX_VERIFY_SERVERS && fgets(line, sizeof(line), fp)) {
         char addr[INET6_ADDRSTRLEN];
         struct in_addr a4;
@@ -305,6 +315,11 @@ static void load_dns_servers_from_resolv_conf(void)
 
         if (inet_pton(AF_INET, addr, &a4) != 1 && inet_pton(AF_INET6, addr, &a6) != 1) {
             fprintf(stderr, "VERIFY: skipping invalid nameserver '%s'\n", addr);
+            continue;
+        }
+
+        if (dns_server_already_cached(addr)) {
+            fprintf(stderr, "VERIFY: nameserver '%s' already cached, skipping\n", addr);
             continue;
         }
 
@@ -822,6 +837,19 @@ static bool extract_dns_key(const struct nf_conntrack *ct, struct flow_key *key)
     uint16_t dport = ntohs(nfct_get_attr_u16(ct, ATTR_ORIG_PORT_DST));
 
     if (proto != IPPROTO_UDP || dport != DNS_PORT)
+        return false;
+
+    uint32_t dst_ip = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_DST); /* network byte order */
+
+    /* Ignore DNS flows destined to loopback (127.0.0.0/8), dobby, for example, the local
+     * NetworkManager/dnsmasq stub resolver (app -> 127.0.0.1:53). Such flows
+     * are not a signal of upstream DNS-server health; only the forwarded
+     * WAN-side hop toward the real gateway matters. 
+     * 127.0.0.1 = 0x7F000001
+     * 127.0.0.53 = 0x7F000035
+     * 127.1.2.3 = 0x7F010203
+     * */
+    if ((ntohl(dst_ip) & 0xFF000000u) == 0x7F000000u)
         return false;
 
     key->src_ip = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_SRC);
