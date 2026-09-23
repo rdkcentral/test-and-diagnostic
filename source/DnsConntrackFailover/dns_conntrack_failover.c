@@ -699,6 +699,8 @@ static void set_unbound_failover(bool enable)
                  "array:string:%s", servers);
         ret = system(cmd);
         fprintf(stderr, "Unbound failover send with (%s) returned %d\n", servers, ret);
+        ret = system("systemctl stop unbound.service");
+        fprintf(stderr, "Unbound failover stop unbound.service returned %d\n", ret);
     }
 #endif
 }
