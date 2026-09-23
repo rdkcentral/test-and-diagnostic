@@ -852,6 +852,10 @@ static bool extract_dns_key(const struct nf_conntrack *ct, struct flow_key *key)
     if ((ntohl(dst_ip) & 0xFF000000u) == 0x7F000000u)
         return false;
 
+    /* Also ignore DNS flows to 100.64.11.1 dobby0 (excepted address). */
+    if (ntohl(dst_ip) == 0x64400B01u)
+        return false;
+
     key->src_ip = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_SRC);
     key->dst_ip = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_DST);
     key->src_port = ntohs(nfct_get_attr_u16(ct, ATTR_ORIG_PORT_SRC));
