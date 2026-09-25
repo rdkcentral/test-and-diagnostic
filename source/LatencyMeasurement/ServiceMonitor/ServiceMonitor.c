@@ -55,6 +55,7 @@ bool gLowLatency_Enable=false;
 bool monitor_wakeup_pending=false;
 static bool bIsMonitorThreadRunning=false;
 static bool bIsSysEventThreadRunning=false;
+static bool bIsSysEventThreadJoinable=false;
 
 /*adding _SCER11BEL_PRODUCT_REQ_ , because both lan_prefix and ipv6_prefix has same value in XER10 US Device*/
 /*For Example:
@@ -106,7 +107,7 @@ void* isMonitorService_thread_free(void *arg)
     pthread_mutex_unlock(&lock);
     sleep(1);
     UpdateLatencyMeasurement_EnableCount(gLowLatency_Enable);
-    pthread_detach(tid[WAIT_FOR_MONITOR_FREE_PTHREAD_ID]);
+	pthread_detach(pthread_self());
     CcspTraceInfo(("pthread_detach WAIT_FOR_MONITOR_FREE_PTHREAD_ID %s\n", __func__));
     return NULL;
 }
@@ -186,33 +187,6 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 		pthread_mutex_unlock(&lock);
 		SendConditional_pthread_cond_signal();
 		CcspTraceInfo(("%s: latencyMeasurementCount:%d\n", __FUNCTION__,count_snapshot));
-		if(count_snapshot==0)
-		{
-			if(0 > sysevent_fd_g)
-			{
-				CcspTraceInfo(("Failed to execute sysevent_set. sysevent_fd_g have no value:'%d'\n", sysevent_fd_g));
-				return FALSE;
-			}
-			else
-			{
-				/* Retry: the sys-event child only exits on this notification (or on
-				 * detecting syseventd is down); a single silent failure here would
-				 * otherwise leave the child waiting forever and hang the monitor's
-				 * later pthread_join(). */
-				int set_ret = sysevent_set(sysevent_fd_g, sysevent_token_g, LATENCY_MEASUREMENT_DISABLE, " ", 0);
-				for (int retry = 0; set_ret != 0 && retry < 3; retry++)
-				{
-					CcspTraceInfo(("Failed to execute sysevent_set from %s:%d, retry %d/3\n", __FUNCTION__, __LINE__, retry + 1));
-					sleep(1);
-					set_ret = sysevent_set(sysevent_fd_g, sysevent_token_g, LATENCY_MEASUREMENT_DISABLE, " ", 0);
-				}
-				if (set_ret != 0)
-				{
-					CcspTraceInfo(("Failed to execute sysevent_set from %s:%d after retries\n", __FUNCTION__, __LINE__));
-					return FALSE;
-				}
-			}
-		}
 		//set updated value in db
 		sprintf(new_val_buf, "%d", count_snapshot);
 		if (!LowLatency_SetValueToDb(LATENCY_MEASUREMENT_ENABLE_COUNT, new_val_buf, SYSCFG_DB)) {
@@ -695,27 +669,10 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 	sysevent_setnotification(sysevent_fd, sysevent_token,"current_wan_ifname",  &interface_asyncid);
 	sysevent_set_options(sysevent_fd, sysevent_token, "current_wan_mode_update", TUPLE_FLAG_EVENT);
 	sysevent_setnotification(sysevent_fd, sysevent_token,"current_wan_mode_update",  &interface_asyncid);
-	sysevent_set_options(sysevent_fd, sysevent_token, LATENCY_MEASUREMENT_DISABLE, TUPLE_FLAG_EVENT);
-	sysevent_setnotification(sysevent_fd, sysevent_token,LATENCY_MEASUREMENT_DISABLE,  &interface_asyncid);
 	sysevent_set_options(sysevent_fd, sysevent_token,"LatencyMeasure_PercentileCalc_Enable",TUPLE_FLAG_EVENT);
 	sysevent_setnotification(sysevent_fd, sysevent_token,"LatencyMeasure_PercentileCalc_Enable",  &interface_asyncid);
-	/*Get_IPv4_addr();LATENCY_MEASUREMENT_DISABLE
+	/*Get_IPv4_addr();
 	sysevent_get(sysevent_fd, sysevent_token, "lan_prefix", IPv6_addr, sizeof(IPv6_addr));*/
-	/* A disable published while sysevent_open() was still retrying (before
-	 * these subscriptions existed) would never reach us -- recheck now that
-	 * we are subscribed, before blocking on notifications that may never come. */
-	pthread_mutex_lock(&lock);
-	bool count_is_zero = (latencyMeasurementCount == 0);
-	pthread_mutex_unlock(&lock);
-	if (count_is_zero)
-	{
-		sysevent_close(sysevent_fd, sysevent_token);
-		pthread_mutex_lock(&lock);
-		bIsSysEventThreadRunning = false;
-		pthread_mutex_unlock(&lock);
-		CcspTraceInfo(("%s latencyMeasurementCount is 0 after subscribing, exiting without waiting for notifications.\n", __func__));
-		return NULL;
-	}
 	while(1)
 	{
 		async_id_t getnotification_asyncid;
@@ -727,6 +684,10 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 		if (err)
 		{
 			CcspTraceInfo(("sysevent_getnotification failed with error: %d %s\n", err,__FUNCTION__));
+			if (err == ERR_NOT_CONNECTED)
+			{
+				break;
+			}
 			if ( 0 != v_secure_system("pidof syseventd")) 
 			{
 				CcspTraceInfo(("%s syseventd not running ,breaking the receive notification loop \n",__FUNCTION__));
@@ -824,11 +785,6 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 					curr_wan_mode=atoi(value);
 				}
 			}
-			else if(strcmp(name,LATENCY_MEASUREMENT_DISABLE)==0)
-			{
-				CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n",__func__));
-				break;
-			}
 		}
 	}
 	if(sysevent_fd >= 0)
@@ -836,14 +792,11 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 		sysevent_close(sysevent_fd, sysevent_token);
 		sysevent_fd = -1;
 	}
-	/* Tell the parent this child is gone (disable, syseventd down, or lost
-	 * notification) so it can join and recreate a replacement if still enabled. */
+	/* Tell the parent this child is gone so it can join and recreate it. */
 	pthread_mutex_lock(&lock);
 	bIsSysEventThreadRunning = false;
 	pthread_mutex_unlock(&lock);
-	/* Joinable (not detached): the parent monitor joins this thread before
-	 * allowing a restart, so it must stay joinable until then. */
-	CcspTraceInfo(("pthread_detach SYSEVENT_PTHREAD_ID %s\n",__func__));
+	CcspTraceInfo(("Exiting SYSEVENT_PTHREAD_ID %s\n",__func__));
 	return NULL;
 }
 /*****************************************************************************
@@ -860,6 +813,7 @@ static int StartSysEventHandlerThread(void)
 	else
 	{
 		bIsSysEventThreadRunning = true;
+		bIsSysEventThreadJoinable = true;
 		CcspTraceInfo(("%s Successfully created SysEventHandlerThrd_for_Monitorservice thread \n", __func__));
 	}
 	return Error;
@@ -939,12 +893,14 @@ void* LatencyMeasurement_MonitorService(void *arg)
         {
             MonitorLatencyMeasurementServices();
         }
-        /* The child may have exited on its own (disable, syseventd down, or a
-         * lost notification) while we're still enabled. Join it (fast/no-op if
-         * already exited) and start a replacement so exactly one child runs. */
+		/* Replace a failed child only after joining it, so exactly one runs. */
         if(!bIsSysEventThreadRunning && latencyMeasurementCount > 0)
         {
-            pthread_join(tid[SYSEVENT_PTHREAD_ID], NULL);
+			if(bIsSysEventThreadJoinable)
+			{
+				pthread_join(tid[SYSEVENT_PTHREAD_ID], NULL);
+				bIsSysEventThreadJoinable = false;
+			}
             CcspTraceInfo(("%s sys-event handler thread is not running, recreating it.\n", __func__));
             StartSysEventHandlerThread();
         }
@@ -955,23 +911,6 @@ void* LatencyMeasurement_MonitorService(void *arg)
             pthread_cond_signal(&cond);
         }
         IsTR181_triger_at_PthreadisBusy = false;
-        pthread_mutex_lock(&lock);
-        if(latencyMeasurementCount == 0)
-        {
-            /* Release the lock before joining: the child may currently be
-             * blocked acquiring the same lock inside an event handler, and
-             * only releases it after looping back to receive the disable
-             * notification. Holding the lock across the join would deadlock. */
-            pthread_mutex_unlock(&lock);
-            if (bIsSysEventThreadRunning)
-			    pthread_join(tid[SYSEVENT_PTHREAD_ID], NULL);
-            pthread_mutex_lock(&lock);
-            bIsMonitorThreadRunning = false;
-            pthread_mutex_unlock(&lock);
-            CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n", __func__));
-            break;
-        }
-        pthread_mutex_unlock(&lock);
     }
 	pthread_detach(pthread_self());
     CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
