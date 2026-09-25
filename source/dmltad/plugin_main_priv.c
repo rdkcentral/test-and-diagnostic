@@ -120,6 +120,7 @@ COSA_RegisterAdditionalDmApis
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DownloadDiagnostics_GetParamBoolValue",  DownloadDiagnostics_GetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DownloadDiagnostics_GetParamIntValue",  DownloadDiagnostics_GetParamIntValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DownloadDiagnostics_GetParamUlongValue",  DownloadDiagnostics_GetParamUlongValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DownloadDiagnostics_GetParamUint64Value",  DownloadDiagnostics_GetParamUint64Value);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DownloadDiagnostics_GetParamStringValue",  DownloadDiagnostics_GetParamStringValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DownloadDiagnostics_SetParamBoolValue",  DownloadDiagnostics_SetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DownloadDiagnostics_SetParamIntValue",  DownloadDiagnostics_SetParamIntValue);
@@ -131,10 +132,12 @@ COSA_RegisterAdditionalDmApis
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_GetParamBoolValue",  UploadDiagnostics_GetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_GetParamIntValue",  UploadDiagnostics_GetParamIntValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_GetParamUlongValue",  UploadDiagnostics_GetParamUlongValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_GetParamUint64Value",  UploadDiagnostics_GetParamUint64Value);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_GetParamStringValue",  UploadDiagnostics_GetParamStringValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_SetParamBoolValue",  UploadDiagnostics_SetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_SetParamIntValue",  UploadDiagnostics_SetParamIntValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_SetParamUlongValue",  UploadDiagnostics_SetParamUlongValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_SetParamUint64Value",  UploadDiagnostics_SetParamUint64Value);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_SetParamStringValue",  UploadDiagnostics_SetParamStringValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_Validate",  UploadDiagnostics_Validate);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "UploadDiagnostics_Commit",  UploadDiagnostics_Commit);
@@ -175,8 +178,13 @@ COSA_RegisterAdditionalDmApis
 
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "SpeedTest_GetParamBoolValue",  SpeedTest_GetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "SpeedTest_SetParamBoolValue",  SpeedTest_SetParamBoolValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_GetParamBoolValue",  RDK_SpeedTest_GetParamBoolValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_SetParamBoolValue",  RDK_SpeedTest_SetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_GetParamUlongValue",  RDK_SpeedTest_GetParamUlongValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_SetParamUlongValue",  RDK_SpeedTest_SetParamUlongValue);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_Validate",  RDK_SpeedTest_Validate);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_Commit",  RDK_SpeedTest_Commit);
+    pPlugInfo->RegisterFunction(pPlugInfo->hContext, "RDK_SpeedTest_Rollback",  RDK_SpeedTest_Rollback);
 
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DeviceInfo_GetParamBoolValue",  DeviceInfo_GetParamBoolValue);
     pPlugInfo->RegisterFunction(pPlugInfo->hContext, "DeviceInfo_GetParamIntValue",  DeviceInfo_GetParamIntValue);
