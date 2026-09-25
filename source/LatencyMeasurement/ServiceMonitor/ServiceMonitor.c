@@ -866,9 +866,13 @@ void* LatencyMeasurement_MonitorService(void *arg)
         pthread_mutex_lock(&lock);
         if(latencyMeasurementCount == 0)
         {
-            /* Join the sys-event child so a restart is only allowed once it has
-             * actually exited, not just when this monitor loop decides to stop. */
+            /* Release the lock before joining: the child may currently be
+             * blocked acquiring the same lock inside an event handler, and
+             * only releases it after looping back to receive the disable
+             * notification. Holding the lock across the join would deadlock. */
+            pthread_mutex_unlock(&lock);
             pthread_join(tid[SYSEVENT_PTHREAD_ID], NULL);
+            pthread_mutex_lock(&lock);
             bIsMonitorThreadRunning = false;
             pthread_mutex_unlock(&lock);
             CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n", __func__));
