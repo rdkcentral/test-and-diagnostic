@@ -148,10 +148,15 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 		{
 			if (0 != LatencyMeasurement_Config_Init())
 			{
-				/* Monitor thread was not created: roll back the increment so we
-				 * don't persist/report "enabled" with nothing actually running. */
+				/* Roll back only our own increment, and only if the count still
+				 * reflects it: a concurrent disable/enable could have already
+				 * moved it, and an unconditional decrement could underflow past
+				 * 0 or cancel a different toggle's update. */
 				pthread_mutex_lock(&lock);
-				latencyMeasurementCount--;
+				if (latencyMeasurementCount > 0)
+				{
+					latencyMeasurementCount--;
+				}
 				pthread_mutex_unlock(&lock);
 				CcspTraceError(("%s: failed to start LatencyMeasurement_MonitorService\n", __FUNCTION__));
 				return 1;
@@ -684,7 +689,10 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 	/* A disable published while sysevent_open() was still retrying (before
 	 * these subscriptions existed) would never reach us -- recheck now that
 	 * we are subscribed, before blocking on notifications that may never come. */
-	if (latencyMeasurementCount == 0)
+	pthread_mutex_lock(&lock);
+	bool count_is_zero = (latencyMeasurementCount == 0);
+	pthread_mutex_unlock(&lock);
+	if (count_is_zero)
 	{
 		sysevent_close(sysevent_fd, sysevent_token);
 		CcspTraceInfo(("%s latencyMeasurementCount is 0 after subscribing, exiting without waiting for notifications.\n", __func__));
