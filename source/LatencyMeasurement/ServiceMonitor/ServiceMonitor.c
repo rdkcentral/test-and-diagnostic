@@ -871,7 +871,8 @@ void* LatencyMeasurement_MonitorService(void *arg)
              * only releases it after looping back to receive the disable
              * notification. Holding the lock across the join would deadlock. */
             pthread_mutex_unlock(&lock);
-            pthread_join(tid[SYSEVENT_PTHREAD_ID], NULL);
+            if (0 == Error)
+			    pthread_join(tid[SYSEVENT_PTHREAD_ID], NULL);
             pthread_mutex_lock(&lock);
             bIsMonitorThreadRunning = false;
             pthread_mutex_unlock(&lock);
