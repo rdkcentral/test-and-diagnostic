@@ -638,6 +638,7 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 	sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "latency_measurement", &sysevent_token);
 	if (sysevent_fd < 0)
 	{
+		pthread_detach(pthread_self());
 		CcspTraceInfo(("Failed to open sysevent in %s.\n", __func__));
 		return NULL;
 	}
@@ -773,7 +774,9 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 		sysevent_close(sysevent_fd, sysevent_token);
 		sysevent_fd = -1;
 	}
-	pthread_detach(tid[SYSEVENT_PTHREAD_ID]);
+	/* Detach self, not tid[SYSEVENT_PTHREAD_ID]: a newer monitor cycle may have
+	 * already overwritten that slot with a different thread's id. */
+	pthread_detach(pthread_self());
 	CcspTraceInfo(("pthread_detach SYSEVENT_PTHREAD_ID %s\n",__func__));
 	return NULL;
 }
@@ -859,13 +862,22 @@ void* LatencyMeasurement_MonitorService(void *arg)
         IsTR181_triger_at_PthreadisBusy = false;
         if(latencyMeasurementCount == 0)
         {
-            CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n", __func__));
-            break;
+            /* Re-validate under lock: a re-enable racing with this exit may have
+             * already been rejected by LatencyMeasurement_Config_Init() because
+             * bIsMonitorThreadRunning was still true. Only clear the flag and
+             * exit if the count is still 0 once we hold the lock, otherwise
+             * keep this thread alive to serve the re-enable. */
+            pthread_mutex_lock(&lock);
+            if(latencyMeasurementCount == 0)
+            {
+                bIsMonitorThreadRunning = false;
+                pthread_mutex_unlock(&lock);
+                CcspTraceInfo(("LATENCY_MEASUREMENT_DISABLE %s\n", __func__));
+                break;
+            }
+            pthread_mutex_unlock(&lock);
         }
     }
-	pthread_mutex_lock(&lock);
-	bIsMonitorThreadRunning = false;
-	pthread_mutex_unlock(&lock);
 	pthread_detach(pthread_self());
     CcspTraceInfo(("pthread_detach MONITOR_PTHREAD_ID %s\n", __func__));
     return NULL;
