@@ -636,6 +636,11 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 	char IPv4_addr_pre[ARRAY_LEN]={0};
 	CcspTraceInfo(("Entering %s :\n",__func__));
 	sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "latency_measurement", &sysevent_token);
+	for (int retry = 0; sysevent_fd < 0 && retry < 3; retry++)
+    {
+        sleep(5);
+        sysevent_fd = sysevent_open("127.0.0.1", SE_SERVER_WELL_KNOWN_PORT, SE_VERSION, "latency_measurement", &sysevent_token);
+    }
 	if (sysevent_fd < 0)
 	{
 		pthread_detach(pthread_self());
