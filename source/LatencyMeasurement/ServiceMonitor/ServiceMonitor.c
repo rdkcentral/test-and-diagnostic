@@ -142,6 +142,7 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 		pthread_mutex_lock(&lock);
 		bool need_start = (latencyMeasurementCount == 0);
 		latencyMeasurementCount++;
+		int count_snapshot = latencyMeasurementCount;
 		pthread_mutex_unlock(&lock);
 		if(need_start)
 		{
@@ -161,22 +162,25 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 			SendConditional_pthread_cond_signal();
 		}
 		//set updated value in db
-		sprintf(new_val_buf, "%d", latencyMeasurementCount);
+		sprintf(new_val_buf, "%d", count_snapshot);
 		if (!LowLatency_SetValueToDb(LATENCY_MEASUREMENT_ENABLE_COUNT, new_val_buf, SYSCFG_DB)) {
 			CcspTraceError(("%s: db set failed for value '%s'\n", __FUNCTION__, new_val_buf));
 			return 1;
 		}
-		CcspTraceInfo(("%s: latencyMeasurementCount:%d,new_val_buf:%s\n", __FUNCTION__,latencyMeasurementCount,new_val_buf));
+		CcspTraceInfo(("%s: latencyMeasurementCount:%d,new_val_buf:%s\n", __FUNCTION__,count_snapshot,new_val_buf));
 	}
 	else if(LowLatency_Enable==false)
 	{
+		pthread_mutex_lock(&lock);
 		if(latencyMeasurementCount>0)
 		{
 			latencyMeasurementCount--;
 		}
+		int count_snapshot = latencyMeasurementCount;
+		pthread_mutex_unlock(&lock);
 		SendConditional_pthread_cond_signal();
-		CcspTraceInfo(("%s: latencyMeasurementCount:%d\n", __FUNCTION__,latencyMeasurementCount));
-		if(latencyMeasurementCount==0)
+		CcspTraceInfo(("%s: latencyMeasurementCount:%d\n", __FUNCTION__,count_snapshot));
+		if(count_snapshot==0)
 		{
 			if(0 > sysevent_fd_g)
 			{
@@ -193,12 +197,12 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 			}
 		}
 		//set updated value in db
-		sprintf(new_val_buf, "%d", latencyMeasurementCount);
+		sprintf(new_val_buf, "%d", count_snapshot);
 		if (!LowLatency_SetValueToDb(LATENCY_MEASUREMENT_ENABLE_COUNT, new_val_buf, SYSCFG_DB)) {
 			CcspTraceError(("%s: db set failed for value '%s'\n", __FUNCTION__, new_val_buf));
 			return 1;
 		}
-		CcspTraceInfo(("%s: latencyMeasurementCount:%d,new_val_buf:%s\n", __FUNCTION__,latencyMeasurementCount,new_val_buf));
+		CcspTraceInfo(("%s: latencyMeasurementCount:%d,new_val_buf:%s\n", __FUNCTION__,count_snapshot,new_val_buf));
 	}
 	return 0;
 }	
