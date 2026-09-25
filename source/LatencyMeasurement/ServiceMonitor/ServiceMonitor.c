@@ -837,7 +837,10 @@ void* LatencyMeasurement_MonitorService(void *arg)
     }
     CcspTraceInfo(("%s : Device uptime is more than 15 mins \n", __func__));
     pthread_mutex_lock(&lock);
-    StartSysEventHandlerThread();
+	if(latencyMeasurementCount > 0)
+	{
+		StartSysEventHandlerThread();
+	}
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&Monitor_cond, &SyncAttr);
