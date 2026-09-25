@@ -803,6 +803,17 @@ void* LatencyMeasurement_MonitorService(void *arg)
     }
     CcspTraceInfo(("%s : Device uptime is more than 15 mins \n", __func__));
     pthread_mutex_lock(&lock);
+    if (latencyMeasurementCount == 0)
+    {
+        /* Disabled during the boot-time wait, before sysevent_fd_g existed to
+         * notify anyone. Nothing to monitor -- exit without creating the child,
+         * which would otherwise wait forever for a notification that was never sent. */
+        bIsMonitorThreadRunning = false;
+        pthread_mutex_unlock(&lock);
+        pthread_detach(pthread_self());
+        CcspTraceInfo(("%s : latencyMeasurementCount is 0 after boot-time wait, exiting without starting sys-event thread\n", __func__));
+        return NULL;
+    }
     Error = pthread_create(&tid[SYSEVENT_PTHREAD_ID], NULL, SysEventHandlerThrd_for_Monitorservice, NULL);
     if (Error)
     {
