@@ -837,17 +837,6 @@ void* LatencyMeasurement_MonitorService(void *arg)
     }
     CcspTraceInfo(("%s : Device uptime is more than 15 mins \n", __func__));
     pthread_mutex_lock(&lock);
-    if (latencyMeasurementCount == 0)
-    {
-        /* Disabled during the boot-time wait, before sysevent_fd_g existed to
-         * notify anyone. Nothing to monitor -- exit without creating the child,
-         * which would otherwise wait forever for a notification that was never sent. */
-        bIsMonitorThreadRunning = false;
-        pthread_mutex_unlock(&lock);
-        pthread_detach(pthread_self());
-        CcspTraceInfo(("%s : latencyMeasurementCount is 0 after boot-time wait, exiting without starting sys-event thread\n", __func__));
-        return NULL;
-    }
     StartSysEventHandlerThread();
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
@@ -893,16 +882,18 @@ void* LatencyMeasurement_MonitorService(void *arg)
         {
             MonitorLatencyMeasurementServices();
         }
-		/* Replace a failed child only after joining it, so exactly one runs. */
-        if(!bIsSysEventThreadRunning && latencyMeasurementCount > 0)
+		if(!bIsSysEventThreadRunning)
         {
 			if(bIsSysEventThreadJoinable)
 			{
 				pthread_join(tid[SYSEVENT_PTHREAD_ID], NULL);
 				bIsSysEventThreadJoinable = false;
 			}
-            CcspTraceInfo(("%s sys-event handler thread is not running, recreating it.\n", __func__));
-            StartSysEventHandlerThread();
+			if(latencyMeasurementCount > 0)
+			{
+				CcspTraceInfo(("%s sys-event handler thread is not running, recreating it.\n", __func__));
+				StartSysEventHandlerThread();
+			}
         }
 	    pthread_mutex_unlock(&lock);
         if(IsTR181_triger_at_PthreadisBusy == true)
