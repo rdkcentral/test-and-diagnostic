@@ -54,6 +54,7 @@ bool IsTR181_triger_at_PthreadisBusy=false;
 bool gLowLatency_Enable=false;
 bool monitor_wakeup_pending=false;
 static bool bIsMonitorThreadRunning=false;
+static bool bIsSysEventThreadRunning=false;
 
 /*adding _SCER11BEL_PRODUCT_REQ_ , because both lan_prefix and ipv6_prefix has same value in XER10 US Device*/
 /*For Example:
@@ -194,9 +195,20 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 			}
 			else
 			{
-				if(sysevent_set(sysevent_fd_g, sysevent_token_g, LATENCY_MEASUREMENT_DISABLE, " ", 0) != 0)
+				/* Retry: the sys-event child only exits on this notification (or on
+				 * detecting syseventd is down); a single silent failure here would
+				 * otherwise leave the child waiting forever and hang the monitor's
+				 * later pthread_join(). */
+				int set_ret = sysevent_set(sysevent_fd_g, sysevent_token_g, LATENCY_MEASUREMENT_DISABLE, " ", 0);
+				for (int retry = 0; set_ret != 0 && retry < 3; retry++)
 				{
-					CcspTraceInfo(("Failed to execute sysevent_set from %s:%d\n", __FUNCTION__, __LINE__));
+					CcspTraceInfo(("Failed to execute sysevent_set from %s:%d, retry %d/3\n", __FUNCTION__, __LINE__, retry + 1));
+					sleep(1);
+					set_ret = sysevent_set(sysevent_fd_g, sysevent_token_g, LATENCY_MEASUREMENT_DISABLE, " ", 0);
+				}
+				if (set_ret != 0)
+				{
+					CcspTraceInfo(("Failed to execute sysevent_set from %s:%d after retries\n", __FUNCTION__, __LINE__));
 					return FALSE;
 				}
 			}
@@ -667,6 +679,9 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
     }
 	if (sysevent_fd < 0)
 	{
+		pthread_mutex_lock(&lock);
+		bIsSysEventThreadRunning = false;
+		pthread_mutex_unlock(&lock);
 		CcspTraceInfo(("Failed to open sysevent in %s.\n", __func__));
 		return NULL;
 	}
@@ -695,6 +710,9 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 	if (count_is_zero)
 	{
 		sysevent_close(sysevent_fd, sysevent_token);
+		pthread_mutex_lock(&lock);
+		bIsSysEventThreadRunning = false;
+		pthread_mutex_unlock(&lock);
 		CcspTraceInfo(("%s latencyMeasurementCount is 0 after subscribing, exiting without waiting for notifications.\n", __func__));
 		return NULL;
 	}
@@ -818,10 +836,33 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 		sysevent_close(sysevent_fd, sysevent_token);
 		sysevent_fd = -1;
 	}
+	/* Tell the parent this child is gone (disable, syseventd down, or lost
+	 * notification) so it can join and recreate a replacement if still enabled. */
+	pthread_mutex_lock(&lock);
+	bIsSysEventThreadRunning = false;
+	pthread_mutex_unlock(&lock);
 	/* Joinable (not detached): the parent monitor joins this thread before
 	 * allowing a restart, so it must stay joinable until then. */
 	CcspTraceInfo(("pthread_detach SYSEVENT_PTHREAD_ID %s\n",__func__));
 	return NULL;
+}
+/*****************************************************************************
+	StartSysEventHandlerThread() creates the sysevent child thread. Caller must
+	already hold `lock`; sets bIsSysEventThreadRunning on success.
+******************************************************************************/
+static int StartSysEventHandlerThread(void)
+{
+	int Error = pthread_create(&tid[SYSEVENT_PTHREAD_ID], NULL, SysEventHandlerThrd_for_Monitorservice, NULL);
+	if (Error)
+	{
+		CcspTraceInfo(("%s Failed create SysEventHandlerThrd_for_Monitorservice thread. Error num:%d\n", __func__, Error));
+	}
+	else
+	{
+		bIsSysEventThreadRunning = true;
+		CcspTraceInfo(("%s Successfully created SysEventHandlerThrd_for_Monitorservice thread \n", __func__));
+	}
+	return Error;
 }
 /*********************************************************************************************
  @brief This function monitors the services  xNetSniffer,xNetDP
@@ -833,7 +874,6 @@ void* LatencyMeasurement_MonitorService(void *arg)
     int Status = 0;
     struct timespec ts;
     pthread_condattr_t SyncAttr;
-    int Error = 0;
     struct sysinfo s_info;
     sysinfo(&s_info);
     while(s_info.uptime < 900) // 900 this wait for device boot up then only monitor services will run
@@ -854,15 +894,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
         CcspTraceInfo(("%s : latencyMeasurementCount is 0 after boot-time wait, exiting without starting sys-event thread\n", __func__));
         return NULL;
     }
-    Error = pthread_create(&tid[SYSEVENT_PTHREAD_ID], NULL, SysEventHandlerThrd_for_Monitorservice, NULL);
-    if (Error)
-    {
-        CcspTraceInfo(("%s Failed create SysEventHandlerThrd_for_Monitorservice thread. Error num:%d\n", __func__, Error));
-    }
-    else
-    {
-        CcspTraceInfo(("%s Successfully created SysEventHandlerThrd_for_Monitorservice thread \n", __func__));
-    }
+    StartSysEventHandlerThread();
     pthread_condattr_init(&SyncAttr);
     pthread_condattr_setclock(&SyncAttr, CLOCK_MONOTONIC);
     pthread_cond_init(&Monitor_cond, &SyncAttr);
@@ -907,6 +939,15 @@ void* LatencyMeasurement_MonitorService(void *arg)
         {
             MonitorLatencyMeasurementServices();
         }
+        /* The child may have exited on its own (disable, syseventd down, or a
+         * lost notification) while we're still enabled. Join it (fast/no-op if
+         * already exited) and start a replacement so exactly one child runs. */
+        if(!bIsSysEventThreadRunning && latencyMeasurementCount > 0)
+        {
+            pthread_join(tid[SYSEVENT_PTHREAD_ID], NULL);
+            CcspTraceInfo(("%s sys-event handler thread is not running, recreating it.\n", __func__));
+            StartSysEventHandlerThread();
+        }
 	    pthread_mutex_unlock(&lock);
         if(IsTR181_triger_at_PthreadisBusy == true)
         {
@@ -922,7 +963,7 @@ void* LatencyMeasurement_MonitorService(void *arg)
              * only releases it after looping back to receive the disable
              * notification. Holding the lock across the join would deadlock. */
             pthread_mutex_unlock(&lock);
-            if (0 == Error)
+            if (bIsSysEventThreadRunning)
 			    pthread_join(tid[SYSEVENT_PTHREAD_ID], NULL);
             pthread_mutex_lock(&lock);
             bIsMonitorThreadRunning = false;
