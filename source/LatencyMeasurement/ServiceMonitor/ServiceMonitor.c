@@ -677,6 +677,15 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 	sysevent_setnotification(sysevent_fd, sysevent_token,"LatencyMeasure_PercentileCalc_Enable",  &interface_asyncid);
 	/*Get_IPv4_addr();LATENCY_MEASUREMENT_DISABLE
 	sysevent_get(sysevent_fd, sysevent_token, "lan_prefix", IPv6_addr, sizeof(IPv6_addr));*/
+	/* A disable published while sysevent_open() was still retrying (before
+	 * these subscriptions existed) would never reach us -- recheck now that
+	 * we are subscribed, before blocking on notifications that may never come. */
+	if (latencyMeasurementCount == 0)
+	{
+		sysevent_close(sysevent_fd, sysevent_token);
+		CcspTraceInfo(("%s latencyMeasurementCount is 0 after subscribing, exiting without waiting for notifications.\n", __func__));
+		return NULL;
+	}
 	while(1)
 	{
 		async_id_t getnotification_asyncid;
