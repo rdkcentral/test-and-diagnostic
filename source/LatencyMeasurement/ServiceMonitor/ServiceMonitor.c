@@ -136,15 +136,30 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 	IsTR181_triger_at_PthreadisBusy = true;
 	if(LowLatency_Enable==true)
 	{
-		if(latencyMeasurementCount==0)
+		/* Increment before starting the monitor so a freshly created thread
+		 * (which re-checks latencyMeasurementCount under this same lock) can
+		 * never observe a stale 0 and exit immediately after being created. */
+		pthread_mutex_lock(&lock);
+		bool need_start = (latencyMeasurementCount == 0);
+		latencyMeasurementCount++;
+		pthread_mutex_unlock(&lock);
+		if(need_start)
 		{
-			LatencyMeasurement_Config_Init();
+			if (0 != LatencyMeasurement_Config_Init())
+			{
+				/* Monitor thread was not created: roll back the increment so we
+				 * don't persist/report "enabled" with nothing actually running. */
+				pthread_mutex_lock(&lock);
+				latencyMeasurementCount--;
+				pthread_mutex_unlock(&lock);
+				CcspTraceError(("%s: failed to start LatencyMeasurement_MonitorService\n", __FUNCTION__));
+				return 1;
+			}
 		}
 		else
 		{
 			SendConditional_pthread_cond_signal();
 		}
-		latencyMeasurementCount++;
 		//set updated value in db
 		sprintf(new_val_buf, "%d", latencyMeasurementCount);
 		if (!LowLatency_SetValueToDb(LATENCY_MEASUREMENT_ENABLE_COUNT, new_val_buf, SYSCFG_DB)) {
@@ -678,6 +693,10 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 				CcspTraceInfo(("%s syseventd not running ,breaking the receive notification loop \n",__FUNCTION__));
 				break;
 			}
+			/* syseventd is alive but this connection is bad (e.g. stale fd) --
+			 * back off instead of spinning sysevent_getnotification/pidof in a
+			 * tight loop, which previously caused the CPU/load-average issue. */
+			sleep(1);
 		}
 		else
 		{
@@ -921,5 +940,5 @@ int LatencyMeasurement_Config_Init()
 		pthread_mutex_unlock(&lock);
 		CcspTraceInfo(("%s LatencyMeasurement_MonitorService thread is created\n",__func__));
 	}
-	return 0;
+	return Error;
 }
