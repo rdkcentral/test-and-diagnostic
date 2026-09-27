@@ -20,4 +20,13 @@
 bin_PROGRAMS = dns_conntrack_failover
 
 dns_conntrack_failover_SOURCES = dns_conntrack_failover.c
+
+if RDKB_DNS_FAILOVER_RBUS
+dns_conntrack_failover_SOURCES += platform_rdkb.c
 dns_conntrack_failover_LDFLAGS = -lnetfilter_conntrack -lnfnetlink -lpthread -lrbus -lrbuscore
+else
+dns_conntrack_failover_SOURCES += platform_generic.c
+dns_conntrack_failover_LDFLAGS = -lnetfilter_conntrack -lnfnetlink -lpthread
+endif
+
+EXTRA_DIST = platform.h platform_rdkb.c platform_generic.c

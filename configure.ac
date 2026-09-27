@@ -79,6 +79,20 @@ AC_ARG_ENABLE([mta],
 esac],[ENABLE_MTA=false])
 AM_CONDITIONAL([ENABLE_MTA], [test x$ENABLE_MTA = xtrue])
 
+# DnsConntrackFailover platform selection: RDK-B (RBUS-based WAN status)
+# vs. generic Linux (default-route probe). Defaults to RDK-B since this
+# repo builds for RDK-B; pass --disable-rdkb-dns-failover-rbus to build
+# dns_conntrack_failover against generic Linux instead.
+AC_ARG_ENABLE([rdkb_dns_failover_rbus],
+[  --disable-rdkb-dns-failover-rbus  build dns_conntrack_failover against
+                                     generic Linux instead of RDK-B/RBUS],
+[case "${enableval}" in
+  yes) RDKB_DNS_FAILOVER_RBUS=true ;;
+  no)  RDKB_DNS_FAILOVER_RBUS=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-rdkb_dns_failover_rbus]) ;;
+esac],[RDKB_DNS_FAILOVER_RBUS=true])
+AM_CONDITIONAL([RDKB_DNS_FAILOVER_RBUS], [test x$RDKB_DNS_FAILOVER_RBUS = xtrue])
+
 # Checks for Core net lib Feature Support
 AC_ARG_ENABLE([core_net_lib_feature_support],
 [  --enable-core_net_lib_feature_support=val Turn on core_net_lib Feature, val=true or false],
