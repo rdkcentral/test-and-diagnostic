@@ -98,6 +98,13 @@
  * verification probe to the same server in the same instant. */
 #define VERIFY_JITTER_MAX_MS           60000U
 
+/* Firewall mark stamped on verification probe sockets (SO_MARK). While failover
+ * is active, the platform redirects all DNS to the local resolver; the redirect
+ * rules exempt this mark so recovery probes still reach the real upstream
+ * servers and can detect when they come back. Must match the value the platform
+ * failover rules exempt (see redirect scripts). */
+#define DNS_PROBE_FWMARK               0x4453U
+
 struct flow_key {
     uint32_t src_ip;       /* network byte order */
     uint32_t dst_ip;       /* network byte order */
@@ -353,6 +360,12 @@ static bool dns_probe(const char *server_ip, unsigned timeout_ms)
         fprintf(stderr, "VERIFY: socket() failed: %s\n", strerror(errno));
         return false;
     }
+
+    /* Tag the probe so the failover redirect rules let it reach the real
+     * upstream server instead of bouncing it back to the local resolver. */
+    unsigned mark = DNS_PROBE_FWMARK;
+    if (setsockopt(fd, SOL_SOCKET, SO_MARK, &mark, sizeof(mark)) != 0)
+        fprintf(stderr, "VERIFY: SO_MARK failed: %s\n", strerror(errno));
 
     /* DNS header (id, flags, qdcount, ancount, nscount, arcount) + one
      * question for the root name, type A, class IN. */

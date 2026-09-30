@@ -90,57 +90,15 @@ bool platform_wan_is_reachable(void)
     return atomic_load(&g_wan_up);
 }
 
-/* Inserts rule if not already present (enable) or removes it if present
- * (disable); avoids duplicate inserts across repeated failover cycles. */
-static void apply_iptables_rule(const char *rule_args, bool enable)
-{
-    char cmd[256];
-
-    snprintf(cmd, sizeof(cmd), "iptables -t nat -C %s >/dev/null 2>&1", rule_args);
-    bool exists = (system(cmd) == 0);
-
-    if (enable && !exists) {
-        snprintf(cmd, sizeof(cmd), "iptables -t nat -I %s", rule_args);
-        system(cmd);
-    } else if (!enable && exists) {
-        snprintf(cmd, sizeof(cmd), "iptables -t nat -D %s", rule_args);
-        system(cmd);
-    }
-}
-
+/* unbound.service's own ExecStartPost/ExecStop hooks (redirect-to-unbound.sh /
+ * restore-system-dns.sh) apply and undo the DNS redirect; systemctl blocks
+ * until those hooks complete, so no iptables rules are needed here. */
 void platform_set_unbound_failover(bool enable)
 {
     const char *svc_cmd = enable ? "systemctl start unbound" : "systemctl stop unbound";
-    static const char *const rules[] = {
-        "OUTPUT -p udp --dport 53 -m owner --uid-owner unbound -j ACCEPT",
-        "OUTPUT -p tcp --dport 53 -m owner --uid-owner unbound -j ACCEPT",
-        "OUTPUT -p udp ! -d 127.0.0.0/8 --dport 53 -j REDIRECT --to-ports 5353",
-        "OUTPUT -p tcp ! -d 127.0.0.0/8 --dport 53 -j REDIRECT --to-ports 5353",
-    };
-
-    const size_t rule_count = sizeof(rules) / sizeof(rules[0]);
 
     fprintf(stderr, "ACTION: Unbound failover %s (RDK-B)\n", enable ? "ENABLE" : "DISABLE");
 
-    /* Enable: start Unbound before redirecting so 5353 is already serving.
-     * Disable: remove the redirect before stopping Unbound so DNS is never
-     * pointed at a resolver that's no longer running. */
-    if (enable && system(svc_cmd) != 0)
-        fprintf(stderr, "ACTION: '%s' failed\n", svc_cmd);
-
-    if (enable) {
-        /* Insert in reverse: each -I prepends to the chain, so applying the
-         * array back-to-front leaves it in listed order -- the uid-owner
-         * ACCEPT exemptions must sit ABOVE the REDIRECT rules, otherwise
-         * Unbound's own upstream queries get redirected back to 5353 and
-         * loop onto itself. */
-        for (size_t i = rule_count; i-- > 0; )
-            apply_iptables_rule(rules[i], true);
-    } else {
-        for (size_t i = 0; i < rule_count; ++i)
-            apply_iptables_rule(rules[i], false);
-    }
-
-    if (!enable && system(svc_cmd) != 0)
+    if (system(svc_cmd) != 0)
         fprintf(stderr, "ACTION: '%s' failed\n", svc_cmd);
 }
