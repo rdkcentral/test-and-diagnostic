@@ -12,6 +12,7 @@
 
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "platform.h"
@@ -80,14 +81,18 @@ bool platform_wan_is_reachable(void)
 
 void platform_set_unbound_failover(bool enable)
 {
+    const char *cmd = enable ? "systemctl start unbound" : "systemctl stop unbound";
+
     fprintf(stderr, "ACTION: Unbound failover %s (generic Linux)\n",
             enable ? "ENABLE" : "DISABLE");
 
+    int rc = system(cmd);
+    if (rc != 0)
+        fprintf(stderr, "ACTION: '%s' failed (rc=%d)\n", cmd, rc);
+
     /*
-     * Replace with real control for your system, e.g.:
+     * Also add DNS redirection to fully take over resolution, e.g.:
      *   iptables -t nat -A/-D PREROUTING -i <lan-if> -p udp --dport 53 \
      *       -j DNAT --to-destination 127.0.0.1:5353
-     * Avoid system()/shelling out in production; use a netlink/nftables
-     * library or a small privileged helper instead.
      */
 }

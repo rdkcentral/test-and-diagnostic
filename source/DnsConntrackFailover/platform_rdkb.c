@@ -10,6 +10,7 @@
 
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <rbus/rbus.h>
@@ -91,13 +92,16 @@ bool platform_wan_is_reachable(void)
 
 void platform_set_unbound_failover(bool enable)
 {
+    const char *cmd = enable ? "systemctl start unbound" : "systemctl stop unbound";
+
     fprintf(stderr, "ACTION: Unbound failover %s (RDK-B)\n", enable ? "ENABLE" : "DISABLE");
 
+    int rc = system(cmd);
+    if (rc != 0)
+        fprintf(stderr, "ACTION: '%s' failed (rc=%d)\n", cmd, rc);
+
     /*
-     * Replace with platform control, e.g. Firewall Manager/DNS Manager/RBUS.
-     * Typical behavior when enabled:
-     *   - transparently redirect client UDP/53 and TCP/53 to local Unbound
-     *   - preserve normal routing when disabled
-     * Avoid system()/shelling out in production.
+     * Also wire into Firewall Manager/DNS Manager/RBUS to redirect client
+     * UDP/53 and TCP/53 to local Unbound when enabled.
      */
 }
