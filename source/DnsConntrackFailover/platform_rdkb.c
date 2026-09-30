@@ -90,18 +90,45 @@ bool platform_wan_is_reachable(void)
     return atomic_load(&g_wan_up);
 }
 
+/* Inserts rule if not already present (enable) or removes it if present
+ * (disable); avoids duplicate inserts across repeated failover cycles. */
+static void apply_iptables_rule(const char *rule_args, bool enable)
+{
+    char cmd[256];
+
+    snprintf(cmd, sizeof(cmd), "iptables -t nat -C %s >/dev/null 2>&1", rule_args);
+    bool exists = (system(cmd) == 0);
+
+    if (enable && !exists) {
+        snprintf(cmd, sizeof(cmd), "iptables -t nat -I %s", rule_args);
+        system(cmd);
+    } else if (!enable && exists) {
+        snprintf(cmd, sizeof(cmd), "iptables -t nat -D %s", rule_args);
+        system(cmd);
+    }
+}
+
 void platform_set_unbound_failover(bool enable)
 {
-    const char *cmd = enable ? "systemctl start unbound" : "systemctl stop unbound";
+    const char *svc_cmd = enable ? "systemctl start unbound" : "systemctl stop unbound";
+    static const char *const rules[] = {
+        "OUTPUT -p udp --dport 53 -m owner --uid-owner unbound -j ACCEPT",
+        "OUTPUT -p tcp --dport 53 -m owner --uid-owner unbound -j ACCEPT",
+        "OUTPUT -p udp ! -d 127.0.0.0/8 --dport 53 -j REDIRECT --to-ports 5353",
+        "OUTPUT -p tcp ! -d 127.0.0.0/8 --dport 53 -j REDIRECT --to-ports 5353",
+    };
 
     fprintf(stderr, "ACTION: Unbound failover %s (RDK-B)\n", enable ? "ENABLE" : "DISABLE");
 
-    int rc = system(cmd);
-    if (rc != 0)
-        fprintf(stderr, "ACTION: '%s' failed (rc=%d)\n", cmd, rc);
+    /* Enable: start Unbound before redirecting so 5353 is already serving.
+     * Disable: remove the redirect before stopping Unbound so DNS is never
+     * pointed at a resolver that's no longer running. */
+    if (enable && system(svc_cmd) != 0)
+        fprintf(stderr, "ACTION: '%s' failed\n", svc_cmd);
 
-    /*
-     * Also wire into Firewall Manager/DNS Manager/RBUS to redirect client
-     * UDP/53 and TCP/53 to local Unbound when enabled.
-     */
+    for (size_t i = 0; i < sizeof(rules) / sizeof(rules[0]); ++i)
+        apply_iptables_rule(rules[i], enable);
+
+    if (!enable && system(svc_cmd) != 0)
+        fprintf(stderr, "ACTION: '%s' failed\n", svc_cmd);
 }
