@@ -459,6 +459,12 @@ static void record_failure_episode_locked(struct monitor_ctx *ctx,
     if (!s)
         return;
 
+    /* Stop recording passive episodes once threshold is reached.
+     * Failover decision is made at 3/3; further episodes don't matter.
+     * Only active verification can bring us out of failure state. */
+    if (s->failure_episodes >= PASSIVE_FAILURE_THRESHOLD)
+        return;
+
     if (s->last_failure_episode_ms != 0 &&
         now_ms - s->last_failure_episode_ms < FAILURE_EPISODE_GAP_MS) {
         return;
