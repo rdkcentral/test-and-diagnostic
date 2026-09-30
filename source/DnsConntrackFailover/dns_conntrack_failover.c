@@ -432,8 +432,14 @@ static void record_reply_locked(struct monitor_ctx *ctx, uint32_t server_ip)
         return;
 
     s->last_reply_ms = monotonic_ms();
+
+    /* An active verification is already scheduled/pending: let it run and
+     * make the authoritative call instead of letting a single stray passive
+     * reply cancel the in-flight decision and restart episode counting. */
+    if (s->verify_at_ms != 0)
+        return;
+
     s->failure_episodes = 0;
-    s->verify_at_ms = 0;
 
     if (s->state == SERVER_SUSPECT) {
         s->state = SERVER_HEALTHY;

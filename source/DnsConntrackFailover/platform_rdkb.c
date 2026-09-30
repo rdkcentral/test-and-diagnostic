@@ -118,6 +118,8 @@ void platform_set_unbound_failover(bool enable)
         "OUTPUT -p tcp ! -d 127.0.0.0/8 --dport 53 -j REDIRECT --to-ports 5353",
     };
 
+    const size_t rule_count = sizeof(rules) / sizeof(rules[0]);
+
     fprintf(stderr, "ACTION: Unbound failover %s (RDK-B)\n", enable ? "ENABLE" : "DISABLE");
 
     /* Enable: start Unbound before redirecting so 5353 is already serving.
@@ -126,8 +128,18 @@ void platform_set_unbound_failover(bool enable)
     if (enable && system(svc_cmd) != 0)
         fprintf(stderr, "ACTION: '%s' failed\n", svc_cmd);
 
-    for (size_t i = 0; i < sizeof(rules) / sizeof(rules[0]); ++i)
-        apply_iptables_rule(rules[i], enable);
+    if (enable) {
+        /* Insert in reverse: each -I prepends to the chain, so applying the
+         * array back-to-front leaves it in listed order -- the uid-owner
+         * ACCEPT exemptions must sit ABOVE the REDIRECT rules, otherwise
+         * Unbound's own upstream queries get redirected back to 5353 and
+         * loop onto itself. */
+        for (size_t i = rule_count; i-- > 0; )
+            apply_iptables_rule(rules[i], true);
+    } else {
+        for (size_t i = 0; i < rule_count; ++i)
+            apply_iptables_rule(rules[i], false);
+    }
 
     if (!enable && system(svc_cmd) != 0)
         fprintf(stderr, "ACTION: '%s' failed\n", svc_cmd);
