@@ -452,19 +452,19 @@ static void record_reply_locked(struct monitor_ctx *ctx, uint32_t server_ip)
     if (s->verify_at_ms != 0)
         return;
 
+    /* While failed, all client DNS is redirected to the local resolver, so
+     * these passive "replies" actually come from it -- conntrack still shows
+     * the original upstream tuple, so they must NOT be read as upstream
+     * recovery. Recovery is decided only by the active marked probe in
+     * evaluate_server_locked(), which reaches the real upstream. */
+    if (s->state == SERVER_FAILED)
+        return;
+
     s->failure_episodes = 0;
 
     if (s->state == SERVER_SUSPECT) {
         s->state = SERVER_HEALTHY;
         s->recovery_successes = 0;
-    } else if (s->state == SERVER_FAILED) {
-        /* Client traffic generally will not reach ISP DNS while redirected.
-         * Recovery normally comes from sparse explicit recovery probes. */
-        if (++s->recovery_successes >= RECOVERY_SUCCESS_THRESHOLD) {
-            s->state = SERVER_HEALTHY;
-            s->recovery_successes = 0;
-            platform_set_unbound_failover(false);
-        }
     }
 }
 
@@ -476,6 +476,12 @@ static void record_failure_episode_locked(struct monitor_ctx *ctx,
     char ip[INET_ADDRSTRLEN];
 
     if (!s)
+        return;
+
+    /* Already failed: the decision is made and recovery is owned by the active
+     * probe. Passive timeouts now mostly hit the local resolver, so they carry
+     * no upstream-health signal -- stop counting. */
+    if (s->state == SERVER_FAILED)
         return;
 
     /* Stop recording passive episodes once threshold is reached.
