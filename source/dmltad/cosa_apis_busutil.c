@@ -81,6 +81,9 @@
 #include "cosa_apis_busutil.h"
 #include "ansc_platform.h"
 #include "safec_lib_common.h"
+#include "secure_wrapper.h"
+
+#define BUFSIZE 128
 
 extern void * g_pDslhDmlAgent;
 /**********************************************************************
@@ -225,11 +228,60 @@ CosaGetInterfaceAddrByName
         ERR_CHK(rc);
     }
 
-    if ( !pInterfaceName || AnscSizeOfString(pInterfaceName) == 0 )
+    if ( !pInterfaceName )
     {
         CcspTraceInfo(("Interface is NULL!\n"));
 
         goto EXIT2;
+    }
+    else if ( AnscSizeOfString(pInterfaceName) == 0 )
+    {
+        FILE *pOpenPtr = NULL;
+        size_t interfaceLength = 0;
+
+        AnscTraceFlow(("Finding Default WAN Interface using ip route \n"));
+        pOpenPtr = v_secure_popen("r", "/sbin/iproute | awk '/default/ { print $3 }'");
+
+        if (pOpenPtr == NULL)
+        {
+            AnscTraceWarning(("%s Failed to Find Default WAN Interface using ip route\n", __FUNCTION__));
+            goto EXIT2;
+        }
+
+        if (pReturnName == NULL)
+        {
+            pReturnName = (char*)AnscAllocateMemory(BUFSIZE);
+            if (pReturnName == NULL)
+            {
+                AnscTraceWarning(("%s Memory allocation for pReturnName Failed\n", __FUNCTION__));
+                v_secure_pclose(pOpenPtr);
+                goto EXIT2;
+            }
+        }
+
+        interfaceLength = fread(pReturnName, 1, BUFSIZE - 1, pOpenPtr);
+
+        if (interfaceLength > 0)
+        {
+            pReturnName[interfaceLength] = '\0';
+            while (interfaceLength > 0 &&
+                    (pReturnName[interfaceLength - 1] == '\n' ||
+                     pReturnName[interfaceLength - 1] == '\r'))
+            {
+                pReturnName[--interfaceLength] = '\0';
+            }
+        }
+
+        if ((pOpenPtr != NULL) && (v_secure_pclose(pOpenPtr) == -1))
+        {
+            AnscTraceWarning(("%s pclose Failed\n", __FUNCTION__));
+            goto EXIT2;
+        }
+        else
+        {
+            CcspTraceInfo(("Setting the default interface to trigger test as : %s\n", pReturnName));
+            goto EXIT1;
+        }
     }
     else
     {
@@ -272,6 +324,12 @@ CosaGetInterfaceAddrByName
 
               size--;
           }
+
+          if (ppComponents)
+          {
+              AnscFreeMemory(ppComponents);
+              ppComponents = NULL;
+          }
         }
         else
         {
@@ -301,6 +359,8 @@ CosaGetInterfaceAddrByName
 
             free_parameterValStruct_t(g_MessageBusHandle, size, parameterVal);
 
+            parameterVal = NULL;
+
             goto EXIT1;
         }
         else
@@ -314,9 +374,41 @@ CosaGetInterfaceAddrByName
 
 EXIT2:
 
+    if (pReturnName)
+    {
+        AnscFreeMemory(pReturnName);
+        pReturnName = NULL;
+    }
+    if (parameterVal)
+    {
+        free_parameterValStruct_t(g_MessageBusHandle, size, parameterVal);
+        parameterVal = NULL;
+    }
+    if (dst_componentid)
+    {
+        AnscFreeMemory(dst_componentid);
+        dst_componentid = NULL;
+    }
+    if (dst_pathname)
+    {
+        AnscFreeMemory(dst_pathname);
+        dst_pathname = NULL;
+    }
+
     return AnscCloneString("::");
 
 EXIT1:
+
+    if (dst_componentid)
+    {
+        AnscFreeMemory(dst_componentid);
+        dst_componentid = NULL;
+    }
+    if (dst_pathname)
+    {
+        AnscFreeMemory(dst_pathname);
+        dst_pathname = NULL;
+    }
 
     return pReturnName;
 }
