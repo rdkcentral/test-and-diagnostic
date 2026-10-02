@@ -55,7 +55,19 @@ bool gLowLatency_Enable=false;
 bool monitor_wakeup_pending=false;
 static bool bIsMonitorThreadRunning=false;
 static bool bIsSysEventThreadRunning=false;
-static bool bIsSysEventThreadJoinable=false;
+
+static void SysEventHandlerThreadCleanup(int fd, token_t token)
+{
+	pthread_mutex_lock(&lock);
+	if (fd >= 0)
+	{
+		sysevent_close(fd, token);
+	}
+	bIsSysEventThreadRunning = false;
+	monitor_wakeup_pending = true;
+	pthread_cond_signal(&Monitor_cond);
+	pthread_mutex_unlock(&lock);
+}
 
 /*adding _SCER11BEL_PRODUCT_REQ_ , because both lan_prefix and ipv6_prefix has same value in XER10 US Device*/
 /*For Example:
@@ -187,6 +199,14 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 		pthread_mutex_unlock(&lock);
 		SendConditional_pthread_cond_signal();
 		CcspTraceInfo(("%s: latencyMeasurementCount:%d\n", __FUNCTION__,count_snapshot));
+		if (count_snapshot == 0)
+		{
+			if (sysevent_fd_g < 0 || sysevent_set(sysevent_fd_g, sysevent_token_g, LATENCY_MEASUREMENT_DISABLE, " ", 0) != 0)
+			{
+				CcspTraceInfo(("Failed to publish %s from %s:%d\n", LATENCY_MEASUREMENT_DISABLE, __FUNCTION__, __LINE__));
+				return FALSE;
+			}
+		}
 		//set updated value in db
 		sprintf(new_val_buf, "%d", count_snapshot);
 		if (!LowLatency_SetValueToDb(LATENCY_MEASUREMENT_ENABLE_COUNT, new_val_buf, SYSCFG_DB)) {
@@ -653,10 +673,16 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
     }
 	if (sysevent_fd < 0)
 	{
-		pthread_mutex_lock(&lock);
-		bIsSysEventThreadRunning = false;
-		pthread_mutex_unlock(&lock);
+		SysEventHandlerThreadCleanup(-1, sysevent_token);
 		CcspTraceInfo(("Failed to open sysevent in %s.\n", __func__));
+		return NULL;
+	}
+	pthread_mutex_lock(&lock);
+	bool latency_measurement_enabled = (latencyMeasurementCount > 0);
+	pthread_mutex_unlock(&lock);
+	if (!latency_measurement_enabled)
+	{
+		SysEventHandlerThreadCleanup(sysevent_fd, sysevent_token);
 		return NULL;
 	}
 	sysevent_set_options(sysevent_fd, sysevent_token, "bridge_mode", TUPLE_FLAG_EVENT);
@@ -669,12 +695,21 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 	sysevent_setnotification(sysevent_fd, sysevent_token,"current_wan_ifname",  &interface_asyncid);
 	sysevent_set_options(sysevent_fd, sysevent_token, "current_wan_mode_update", TUPLE_FLAG_EVENT);
 	sysevent_setnotification(sysevent_fd, sysevent_token,"current_wan_mode_update",  &interface_asyncid);
+	sysevent_set_options(sysevent_fd, sysevent_token, LATENCY_MEASUREMENT_DISABLE, TUPLE_FLAG_EVENT);
+	sysevent_setnotification(sysevent_fd, sysevent_token,LATENCY_MEASUREMENT_DISABLE,  &interface_asyncid);
 	sysevent_set_options(sysevent_fd, sysevent_token,"LatencyMeasure_PercentileCalc_Enable",TUPLE_FLAG_EVENT);
 	sysevent_setnotification(sysevent_fd, sysevent_token,"LatencyMeasure_PercentileCalc_Enable",  &interface_asyncid);
 	/*Get_IPv4_addr();
 	sysevent_get(sysevent_fd, sysevent_token, "lan_prefix", IPv6_addr, sizeof(IPv6_addr));*/
 	while(1)
 	{
+		pthread_mutex_lock(&lock);
+		latency_measurement_enabled = (latencyMeasurementCount > 0);
+		pthread_mutex_unlock(&lock);
+		if (!latency_measurement_enabled)
+		{
+			break;
+		}
 		async_id_t getnotification_asyncid;
 		memset(name,0,sizeof(name)); 
 		memset(value,0,sizeof(value));
@@ -684,7 +719,10 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 		if (err)
 		{
 			CcspTraceInfo(("sysevent_getnotification failed with error: %d %s\n", err,__FUNCTION__));
-			if (err == ERR_NOT_CONNECTED)
+			pthread_mutex_lock(&lock);
+			latency_measurement_enabled = (latencyMeasurementCount > 0);
+			pthread_mutex_unlock(&lock);
+			if (!latency_measurement_enabled || err == ERR_NOT_CONNECTED)
 			{
 				break;
 			}
@@ -701,8 +739,17 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 		else
 		{
 			CcspTraceInfo(("%s Recieved notification event  %s value is %s\n",__FUNCTION__,name,value));
-			
-			if(strcmp(name,"bridge_mode")==0)
+			if(strcmp(name,LATENCY_MEASUREMENT_DISABLE)==0)
+			{
+				pthread_mutex_lock(&lock);
+				latency_measurement_enabled = (latencyMeasurementCount > 0);
+				pthread_mutex_unlock(&lock);
+				if(!latency_measurement_enabled)
+				{
+					break;
+				}
+			}
+			else if(strcmp(name,"bridge_mode")==0)
 			{
 				BridgeMode_value=atoi(value);
 				if(BridgeMode_value==ROUTER_MODE)// router mode 
@@ -787,16 +834,8 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 			}
 		}
 	}
-	if(sysevent_fd >= 0)
-	{
-		sysevent_close(sysevent_fd, sysevent_token);
-		sysevent_fd = -1;
-	}
-	/* Tell the parent this child is gone so it can join and recreate it. */
-	pthread_mutex_lock(&lock);
-	bIsSysEventThreadRunning = false;
-	pthread_mutex_unlock(&lock);
-	CcspTraceInfo(("Exiting SYSEVENT_PTHREAD_ID %s\n",__func__));
+	SysEventHandlerThreadCleanup(sysevent_fd, sysevent_token);
+	CcspTraceInfo(("Exiting %s\n",__func__));
 	return NULL;
 }
 /*****************************************************************************
@@ -805,7 +844,19 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 ******************************************************************************/
 static int StartSysEventHandlerThread(void)
 {
-	int Error = pthread_create(&tid[SYSEVENT_PTHREAD_ID], NULL, SysEventHandlerThrd_for_Monitorservice, NULL);
+	pthread_attr_t ThreadAttr;
+	int Error = pthread_attr_init(&ThreadAttr);
+	if (Error != 0)
+	{
+		CcspTraceInfo(("%s pthread_attr_init failed: %d\n", __func__, Error));
+		return Error;
+	}
+	Error = pthread_attr_setdetachstate(&ThreadAttr, PTHREAD_CREATE_DETACHED);
+	if (Error == 0)
+	{
+		Error = pthread_create(&tid[SYSEVENT_PTHREAD_ID], &ThreadAttr, SysEventHandlerThrd_for_Monitorservice, NULL);
+	}
+	pthread_attr_destroy(&ThreadAttr);
 	if (Error)
 	{
 		CcspTraceInfo(("%s Failed create SysEventHandlerThrd_for_Monitorservice thread. Error num:%d\n", __func__, Error));
@@ -813,7 +864,6 @@ static int StartSysEventHandlerThread(void)
 	else
 	{
 		bIsSysEventThreadRunning = true;
-		bIsSysEventThreadJoinable = true;
 		CcspTraceInfo(("%s Successfully created SysEventHandlerThrd_for_Monitorservice thread \n", __func__));
 	}
 	return Error;
@@ -885,18 +935,10 @@ void* LatencyMeasurement_MonitorService(void *arg)
         {
             MonitorLatencyMeasurementServices();
         }
-		if(!bIsSysEventThreadRunning)
+		if(!bIsSysEventThreadRunning && latencyMeasurementCount > 0)
         {
-			if(bIsSysEventThreadJoinable)
-			{
-				pthread_join(tid[SYSEVENT_PTHREAD_ID], NULL);
-				bIsSysEventThreadJoinable = false;
-			}
-			if(latencyMeasurementCount > 0)
-			{
-				CcspTraceInfo(("%s sys-event handler thread is not running, recreating it.\n", __func__));
-				StartSysEventHandlerThread();
-			}
+			CcspTraceInfo(("%s sys-event handler thread is not running, recreating it.\n", __func__));
+			StartSysEventHandlerThread();
         }
 	    pthread_mutex_unlock(&lock);
         if(IsTR181_triger_at_PthreadisBusy == true)
@@ -920,8 +962,10 @@ int LatencyMeasurement_Config_Init()
 	pthread_mutex_lock(&lock);
 	if (bIsMonitorThreadRunning)
 	{
+		monitor_wakeup_pending = true;
+		pthread_cond_signal(&Monitor_cond);
 		pthread_mutex_unlock(&lock);
-		CcspTraceInfo(("LatencyMeasurement_MonitorService is already running.\n"));
+		CcspTraceInfo(("LatencyMeasurement_MonitorService is already running; signaled it to process the enable.\n"));
 		return 0;
 	}
 	Error=pthread_create(&tid[MONITOR_PTHREAD_ID],NULL,LatencyMeasurement_MonitorService,NULL);
