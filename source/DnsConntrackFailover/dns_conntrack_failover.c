@@ -7,7 +7,8 @@
  * Design:
  *   - Subscribe to Linux conntrack NEW/UPDATE/DESTROY events via
  *     libnetfilter_conntrack.
- *   - Track only UDP/53 flows in a fixed-size in-memory table.
+ *   - Track UDP/53 and TCP/53 flows, IPv4 and IPv6, in a fixed-size
+ *     in-memory table.
  *   - A reply-direction packet is detected by IPS_SEEN_REPLY.
  *   - If a DNS flow remains unreplied longer than DNS_REPLY_DEADLINE_MS,
  *     convert it to passive failure evidence.
@@ -17,40 +18,33 @@
  *     hook. Only if verification fails AND WAN is known reachable should the
  *     platform redirect DNS to Unbound.
  *
- * Everything that differs between RDK-B and a generic Linux host (WAN
- * status source, the failover trigger action) is behind platform.h and
- * implemented once in platform_rdkb.c (RBUS) or platform_generic.c
- * (default-route probe + logging stub); see platform.h for the seam.
- * Passive DNS-timeout evidence is only recorded while WAN is known to be
- * up; while WAN is down or unknown, all upstream DNS traffic is expected
- * to fail, so conntrack timeouts on the WAN itself would be meaningless as
- * a DNS-server-health signal.
+ * WAN status source and the failover trigger action are behind platform.h,
+ * implemented once in platform_generic.c using only /proc and /sys (no
+ * platform-specific dependency); see platform.h for the seam. Passive
+ * DNS-timeout evidence is only recorded while WAN is known to be up; while
+ * WAN is down or unknown, all upstream DNS traffic is expected to fail, so
+ * conntrack timeouts on the WAN itself would be meaningless as a
+ * DNS-server-health signal.
  *
  * active_verify_dns() confirms passive failure evidence against a fixed list
  * of upstream DNS servers cached once at startup from /etc/resolv.conf (see
- * load_dns_servers_from_resolv_conf()), and sends each one a direct UDP/53
- * DNS query. The cache is read before any DNS redirection can rewrite
- * resolv.conf to point at the local resolver, so it always reflects the
- * real upstream servers. Failover is only declared if every cached server
- * fails to reply; a single working server means clients still have DNS, so
- * no failover is triggered. Recovery uses the same cached list: as soon as
- * one cached server replies again, the failed state is cleared.
+ * load_dns_servers_from_resolv_conf()), and sends each one a direct DNS
+ * query, UDP/53 first with a TCP/53 fallback if UDP gets no reply. The
+ * cache is read before any DNS redirection can rewrite resolv.conf to point
+ * at the local resolver, so it always reflects the real upstream servers.
+ * Failover is only declared if every cached server fails to reply; a single
+ * working server means clients still have DNS, so no failover is
+ * triggered. Recovery uses the same cached list: as soon as one cached
+ * server replies again, the failed state is cleared.
  *
- * Build (generic Linux host):
+ * Build:
  *   gcc -O2 -Wall -Wextra -pthread dns_conntrack_failover.c \
  *       platform_generic.c -lnetfilter_conntrack -o dns_conntrack_failover
- *
- * Build (RDK-B):
- *   gcc -O2 -Wall -Wextra -pthread dns_conntrack_failover.c \
- *       platform_rdkb.c -lnetfilter_conntrack -lrbus -lrbuscore \
- *       -o dns_conntrack_failover
  *
  * Run:
  *   sudo ./dns_conntrack_failover
  *
  * Notes:
- *   - IPv4 UDP/53 is implemented for clarity. Add IPv6 tuple handling and
- *     TCP/53 as separate extensions.
  *   - Conntrack proves reply-direction traffic was seen; it does NOT parse
  *     DNS RCODEs. SERVFAIL/NXDOMAIN semantics require DNS-layer inspection.
  */
@@ -73,6 +67,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -105,12 +100,21 @@
  * failover rules exempt (see redirect scripts). */
 #define DNS_PROBE_FWMARK               0x4453U
 
+/* Holds either an IPv4 or IPv6 address; family is AF_INET or AF_INET6. */
+struct ip_addr {
+    uint8_t family;
+    union {
+        struct in_addr  v4;
+        struct in6_addr v6;
+    } a;
+};
+
 struct flow_key {
-    uint32_t src_ip;       /* network byte order */
-    uint32_t dst_ip;       /* network byte order */
+    struct ip_addr src_ip;
+    struct ip_addr dst_ip;
     uint16_t src_port;     /* host byte order */
     uint16_t dst_port;     /* host byte order */
-    uint8_t  proto;
+    uint8_t  proto;        /* IPPROTO_UDP or IPPROTO_TCP */
 };
 
 struct pending_flow {
@@ -128,7 +132,7 @@ enum server_state {
 
 struct dns_server_health {
     bool used;
-    uint32_t address;      /* network byte order */
+    struct ip_addr address;
     enum server_state state;
     uint32_t failure_episodes;
     uint32_t recovery_successes;
@@ -167,27 +171,50 @@ static void sleep_ms(unsigned ms)
     }
 }
 
-static const char *ip4_to_str(uint32_t addr, char *buf, size_t len)
+static const char *ip_addr_to_str(const struct ip_addr *addr, char *buf, size_t len)
 {
-    struct in_addr a = { .s_addr = addr };
-    return inet_ntop(AF_INET, &a, buf, (socklen_t)len) ? buf : "?";
+    const void *src = (addr->family == AF_INET6) ? (const void *)&addr->a.v6 : (const void *)&addr->a.v4;
+    return inet_ntop(addr->family, src, buf, (socklen_t)len) ? buf : "?";
+}
+
+static bool ip_addr_equal(const struct ip_addr *a, const struct ip_addr *b)
+{
+    if (a->family != b->family)
+        return false;
+    return (a->family == AF_INET6) ?
+           memcmp(&a->a.v6, &b->a.v6, sizeof(a->a.v6)) == 0 :
+           a->a.v4.s_addr == b->a.v4.s_addr;
 }
 
 static bool flow_key_equal(const struct flow_key *a, const struct flow_key *b)
 {
-    return a->src_ip == b->src_ip &&
-           a->dst_ip == b->dst_ip &&
+    return ip_addr_equal(&a->src_ip, &b->src_ip) &&
+           ip_addr_equal(&a->dst_ip, &b->dst_ip) &&
            a->src_port == b->src_port &&
            a->dst_port == b->dst_port &&
            a->proto == b->proto;
+}
+
+static uint32_t addr_hash(const struct ip_addr *addr)
+{
+    uint32_t h = 2166136261u;
+#define MIX(v) do { h ^= (uint32_t)(v); h *= 16777619u; } while (0)
+    if (addr->family == AF_INET6) {
+        const uint32_t *w = (const uint32_t *)&addr->a.v6;
+        MIX(w[0]); MIX(w[1]); MIX(w[2]); MIX(w[3]);
+    } else {
+        MIX(addr->a.v4.s_addr);
+    }
+#undef MIX
+    return h;
 }
 
 static uint32_t flow_hash(const struct flow_key *k)
 {
     uint32_t h = 2166136261u;
 #define MIX(v) do { h ^= (uint32_t)(v); h *= 16777619u; } while (0)
-    MIX(k->src_ip);
-    MIX(k->dst_ip);
+    MIX(addr_hash(&k->src_ip));
+    MIX(addr_hash(&k->dst_ip));
     MIX(k->src_port);
     MIX(k->dst_port);
     MIX(k->proto);
@@ -244,14 +271,14 @@ static void pending_remove(struct monitor_ctx *ctx, const struct flow_key *key)
 }
 
 static struct dns_server_health *server_get(struct monitor_ctx *ctx,
-                                            uint32_t address,
+                                            const struct ip_addr *address,
                                             bool create)
 {
     struct dns_server_health *free_slot = NULL;
 
     for (uint32_t i = 0; i < MAX_DNS_SERVERS; ++i) {
         struct dns_server_health *s = &ctx->servers[i];
-        if (s->used && s->address == address)
+        if (s->used && ip_addr_equal(&s->address, address))
             return s;
         if (!s->used && !free_slot)
             free_slot = s;
@@ -262,7 +289,7 @@ static struct dns_server_health *server_get(struct monitor_ctx *ctx,
 
     memset(free_slot, 0, sizeof(*free_slot));
     free_slot->used = true;
-    free_slot->address = address;
+    free_slot->address = *address;
     free_slot->state = SERVER_HEALTHY;
     return free_slot;
 }
@@ -271,14 +298,15 @@ static struct dns_server_health *server_get(struct monitor_ctx *ctx,
 /* Active DNS verification: query every configured resolver directly         */
 /* ------------------------------------------------------------------------- */
 
-/* Upstream DNS servers cached once at startup from /etc/resolv.conf, before
- * any failover logic can redirect it to the local resolver. */
+/* Upstream DNS servers cached from /etc/resolv.conf; reloaded whenever its
+ * mtime changes so an ISP-side DNS server change doesn't leave this stale. */
 static char g_cached_dns_servers[MAX_VERIFY_SERVERS][INET6_ADDRSTRLEN];
 static int g_cached_dns_server_count;
+static time_t g_resolv_mtime;
 
 /* Parses "nameserver <ip>" lines out of /etc/resolv.conf and caches every
- * valid IPv4/IPv6 address. Must be called once at startup, before Unbound
- * (or anything else) rewrites resolv.conf to point at a local resolver. */
+ * valid IPv4/IPv6 address. Called once at startup and again whenever
+ * refresh_dns_server_cache() detects the file has changed. */
 static void load_dns_servers_from_resolv_conf(void)
 {
     FILE *fp = fopen(RESOLV_CONF_PATH, "r");
@@ -286,6 +314,8 @@ static void load_dns_servers_from_resolv_conf(void)
         fprintf(stderr, "VERIFY: failed to open %s: %s\n", RESOLV_CONF_PATH, strerror(errno));
         return;
     }
+
+    g_cached_dns_server_count = 0;
 
     char line[256];
     while (g_cached_dns_server_count < MAX_VERIFY_SERVERS && fgets(line, sizeof(line), fp)) {
@@ -310,6 +340,25 @@ static void load_dns_servers_from_resolv_conf(void)
             g_cached_dns_server_count, RESOLV_CONF_PATH);
 }
 
+/* Reloads the cache only if /etc/resolv.conf's mtime changed since the last
+ * load, so a verification probe stays cheap (one stat()) when nothing
+ * changed, but always sees a current server list otherwise. */
+static void refresh_dns_server_cache(void)
+{
+    struct stat st;
+
+    if (stat(RESOLV_CONF_PATH, &st) != 0) {
+        fprintf(stderr, "VERIFY: stat(%s) failed: %s\n", RESOLV_CONF_PATH, strerror(errno));
+        return;
+    }
+
+    if (st.st_mtime == g_resolv_mtime)
+        return;
+
+    g_resolv_mtime = st.st_mtime;
+    load_dns_servers_from_resolv_conf();
+}
+
 /* Copies the cached nameserver list into out[]. Returns the number of
  * entries copied. */
 static int fetch_dns_server_list(char out[][INET6_ADDRSTRLEN], int max)
@@ -322,38 +371,64 @@ static int fetch_dns_server_list(char out[][INET6_ADDRSTRLEN], int max)
     return count;
 }
 
+/* Fills in a minimal DNS query (header + one question for the root name,
+ * type A, class IN) at msg[0..16] and returns its length (17 bytes). */
+static size_t build_dns_query_msg(uint8_t *msg, uint16_t id)
+{
+    memset(msg, 0, 17);
+    msg[0] = (uint8_t)(id >> 8);
+    msg[1] = (uint8_t)(id & 0xFF);
+    msg[2] = 0x01; /* flags: recursion desired */
+    msg[5] = 0x01; /* qdcount = 1 */
+    size_t off = 12;
+    msg[off++] = 0x00;             /* root name terminator */
+    msg[off++] = 0x00; msg[off++] = 0x01; /* qtype = A */
+    msg[off++] = 0x00; msg[off++] = 0x01; /* qclass = IN */
+    return off;
+}
+
+static bool resolve_dns_server_addr(const char *server_ip, struct sockaddr_storage *addr,
+                                    socklen_t *addr_len, int *family)
+{
+    struct in_addr a4;
+    struct in6_addr a6;
+
+    memset(addr, 0, sizeof(*addr));
+    if (inet_pton(AF_INET, server_ip, &a4) == 1) {
+        struct sockaddr_in *sin = (struct sockaddr_in *)addr;
+        sin->sin_family = AF_INET;
+        sin->sin_port = htons(DNS_PORT);
+        sin->sin_addr = a4;
+        *addr_len = sizeof(*sin);
+        *family = AF_INET;
+        return true;
+    }
+    if (inet_pton(AF_INET6, server_ip, &a6) == 1) {
+        struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)addr;
+        sin6->sin6_family = AF_INET6;
+        sin6->sin6_port = htons(DNS_PORT);
+        sin6->sin6_addr = a6;
+        *addr_len = sizeof(*sin6);
+        *family = AF_INET6;
+        return true;
+    }
+    fprintf(stderr, "VERIFY: invalid DNS server address '%s'\n", server_ip);
+    return false;
+}
+
 /* Sends one minimal "A ." query to server_ip over UDP/53 and waits up to
  * timeout_ms for any well-formed response. Any reply (including SERVFAIL/
  * NXDOMAIN) proves the server process is up and answering, which is all this
  * check needs -- RCODE-level interpretation is out of scope. */
-static bool dns_probe(const char *server_ip, unsigned timeout_ms)
+static bool dns_probe_udp(const char *server_ip, unsigned timeout_ms)
 {
     struct sockaddr_storage addr;
     socklen_t addr_len;
     int family;
-    struct in_addr a4;
-    struct in6_addr a6;
     static uint16_t query_id;
 
-    memset(&addr, 0, sizeof(addr));
-    if (inet_pton(AF_INET, server_ip, &a4) == 1) {
-        struct sockaddr_in *sin = (struct sockaddr_in *)&addr;
-        sin->sin_family = AF_INET;
-        sin->sin_port = htons(DNS_PORT);
-        sin->sin_addr = a4;
-        addr_len = sizeof(*sin);
-        family = AF_INET;
-    } else if (inet_pton(AF_INET6, server_ip, &a6) == 1) {
-        struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&addr;
-        sin6->sin6_family = AF_INET6;
-        sin6->sin6_port = htons(DNS_PORT);
-        sin6->sin6_addr = a6;
-        addr_len = sizeof(*sin6);
-        family = AF_INET6;
-    } else {
-        fprintf(stderr, "VERIFY: invalid DNS server address '%s'\n", server_ip);
+    if (!resolve_dns_server_addr(server_ip, &addr, &addr_len, &family))
         return false;
-    }
 
     int fd = socket(family, SOCK_DGRAM, IPPROTO_UDP);
     if (fd < 0) {
@@ -367,22 +442,11 @@ static bool dns_probe(const char *server_ip, unsigned timeout_ms)
     if (setsockopt(fd, SOL_SOCKET, SO_MARK, &mark, sizeof(mark)) != 0)
         fprintf(stderr, "VERIFY: SO_MARK failed: %s\n", strerror(errno));
 
-    /* DNS header (id, flags, qdcount, ancount, nscount, arcount) + one
-     * question for the root name, type A, class IN. */
-    uint8_t query[32];
-    uint16_t id = ++query_id;
-    memset(query, 0, sizeof(query));
-    query[0] = (uint8_t)(id >> 8);
-    query[1] = (uint8_t)(id & 0xFF);
-    query[2] = 0x01; /* flags: recursion desired */
-    query[5] = 0x01; /* qdcount = 1 */
-    size_t off = 12;
-    query[off++] = 0x00;             /* root name terminator */
-    query[off++] = 0x00; query[off++] = 0x01; /* qtype = A */
-    query[off++] = 0x00; query[off++] = 0x01; /* qclass = IN */
+    uint8_t query[17];
+    size_t off = build_dns_query_msg(query, ++query_id);
 
     if (sendto(fd, query, off, 0, (struct sockaddr *)&addr, addr_len) < 0) {
-        fprintf(stderr, "VERIFY: sendto(%s) failed: %s\n", server_ip, strerror(errno));
+        fprintf(stderr, "VERIFY: UDP sendto(%s) failed: %s\n", server_ip, strerror(errno));
         close(fd);
         return false;
     }
@@ -406,15 +470,97 @@ static bool dns_probe(const char *server_ip, unsigned timeout_ms)
     return id_matches && is_response;
 }
 
+/* TCP/53 fallback probe, used only when UDP got no reply: some resolvers
+ * rate-limit or block UDP (or the path drops it) while still answering
+ * TCP, so this catches servers that passive UDP-only monitoring would
+ * otherwise misreport as down. Message is length-prefixed per RFC 1035. */
+static bool dns_probe_tcp(const char *server_ip, unsigned timeout_ms)
+{
+    struct sockaddr_storage addr;
+    socklen_t addr_len;
+    int family;
+    static uint16_t query_id;
+
+    if (!resolve_dns_server_addr(server_ip, &addr, &addr_len, &family))
+        return false;
+
+    int fd = socket(family, SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_TCP);
+    if (fd < 0) {
+        fprintf(stderr, "VERIFY: TCP socket() failed: %s\n", strerror(errno));
+        return false;
+    }
+
+    unsigned mark = DNS_PROBE_FWMARK;
+    if (setsockopt(fd, SOL_SOCKET, SO_MARK, &mark, sizeof(mark)) != 0)
+        fprintf(stderr, "VERIFY: SO_MARK failed: %s\n", strerror(errno));
+
+    if (connect(fd, (struct sockaddr *)&addr, addr_len) < 0 && errno != EINPROGRESS) {
+        fprintf(stderr, "VERIFY: TCP connect(%s) failed: %s\n", server_ip, strerror(errno));
+        close(fd);
+        return false;
+    }
+
+    struct pollfd pfd = { .fd = fd, .events = POLLOUT, .revents = 0 };
+    int rc = poll(&pfd, 1, (int)timeout_ms);
+    int so_err = 0;
+    socklen_t so_err_len = sizeof(so_err);
+    if (rc <= 0 || getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_err, &so_err_len) != 0 || so_err != 0) {
+        close(fd);
+        return false;
+    }
+
+    uint8_t query[17];
+    size_t msg_len = build_dns_query_msg(query, ++query_id);
+    uint8_t pkt[2 + sizeof(query)];
+    pkt[0] = (uint8_t)(msg_len >> 8);
+    pkt[1] = (uint8_t)(msg_len & 0xFF);
+    memcpy(pkt + 2, query, msg_len);
+
+    if (send(fd, pkt, 2 + msg_len, 0) < 0) {
+        fprintf(stderr, "VERIFY: TCP send(%s) failed: %s\n", server_ip, strerror(errno));
+        close(fd);
+        return false;
+    }
+
+    pfd.events = POLLIN;
+    rc = poll(&pfd, 1, (int)timeout_ms);
+    if (rc <= 0) {
+        close(fd);
+        return false;
+    }
+
+    uint8_t resp[514];
+    ssize_t n = recv(fd, resp, sizeof(resp), 0);
+    close(fd);
+
+    if (n < 14) /* 2-byte length prefix + 12-byte DNS header */
+        return false;
+
+    bool id_matches = resp[2] == query[0] && resp[3] == query[1];
+    bool is_response = (resp[4] & 0x80) != 0; /* QR bit */
+    return id_matches && is_response;
+}
+
+/* UDP first (cheap, how real client traffic mostly works), TCP only as a
+ * fallback when UDP gets no reply at all. */
+static bool dns_probe(const char *server_ip, unsigned timeout_ms)
+{
+    if (dns_probe_udp(server_ip, timeout_ms))
+        return true;
+    return dns_probe_tcp(server_ip, timeout_ms);
+}
+
 /*
  * Confirms passive failure evidence by directly querying every configured
  * DNS server (Device.DNS.Client.Server.*.DNSServer). Only if every server
  * fails to reply do we treat DNS as truly down -- a single working
  * server means clients still have working resolution, so no failover.
  */
-static bool active_verify_dns(uint32_t dns_server)
+static bool active_verify_dns(const struct ip_addr *dns_server)
 {
     (void)dns_server; /* verification covers all configured resolvers, not just this one */
+
+    refresh_dns_server_cache();
 
     char servers[MAX_VERIFY_SERVERS][INET6_ADDRSTRLEN];
     int count = fetch_dns_server_list(servers, MAX_VERIFY_SERVERS);
@@ -438,7 +584,7 @@ static bool active_verify_dns(uint32_t dns_server)
 
 /* ------------------------------------------------------------------------- */
 
-static void record_reply_locked(struct monitor_ctx *ctx, uint32_t server_ip)
+static void record_reply_locked(struct monitor_ctx *ctx, const struct ip_addr *server_ip)
 {
     struct dns_server_health *s = server_get(ctx, server_ip, true);
     if (!s)
@@ -469,11 +615,11 @@ static void record_reply_locked(struct monitor_ctx *ctx, uint32_t server_ip)
 }
 
 static void record_failure_episode_locked(struct monitor_ctx *ctx,
-                                          uint32_t server_ip,
+                                          const struct ip_addr *server_ip,
                                           uint64_t now_ms)
 {
     struct dns_server_health *s = server_get(ctx, server_ip, true);
-    char ip[INET_ADDRSTRLEN];
+    char ip[INET6_ADDRSTRLEN];
 
     if (!s)
         return;
@@ -503,7 +649,7 @@ static void record_failure_episode_locked(struct monitor_ctx *ctx,
         s->state = SERVER_SUSPECT;
 
     fprintf(stderr, "PASSIVE: %s failure episode %u/%u\n",
-            ip4_to_str(server_ip, ip, sizeof(ip)),
+            ip_addr_to_str(server_ip, ip, sizeof(ip)),
             s->failure_episodes, PASSIVE_FAILURE_THRESHOLD);
 }
 
@@ -521,7 +667,7 @@ static void evaluate_server_locked(struct monitor_ctx *ctx,
 
         s->last_verify_ms = now_ms;
 
-        if (active_verify_dns(s->address)) {
+        if (active_verify_dns(&s->address)) {
             fprintf(stderr, "DECISION: upstream DNS recovered\n");
             s->state = SERVER_HEALTHY;
             s->failure_episodes = 0;
@@ -554,7 +700,7 @@ static void evaluate_server_locked(struct monitor_ctx *ctx,
     s->verify_at_ms = 0;
     s->last_verify_ms = now_ms;
 
-    if (active_verify_dns(s->address)) {
+    if (active_verify_dns(&s->address)) {
         s->state = SERVER_HEALTHY;
         s->failure_episodes = 0;
         return;
@@ -575,22 +721,44 @@ static void evaluate_server_locked(struct monitor_ctx *ctx,
 
 static bool extract_dns_key(const struct nf_conntrack *ct, struct flow_key *key)
 {
-    if (!nfct_attr_is_set(ct, ATTR_ORIG_L4PROTO) ||
+    if (!nfct_attr_is_set(ct, ATTR_ORIG_L3PROTO) ||
+        !nfct_attr_is_set(ct, ATTR_ORIG_L4PROTO) ||
         !nfct_attr_is_set(ct, ATTR_ORIG_PORT_SRC) ||
-        !nfct_attr_is_set(ct, ATTR_ORIG_PORT_DST) ||
-        !nfct_attr_is_set(ct, ATTR_ORIG_IPV4_SRC) ||
-        !nfct_attr_is_set(ct, ATTR_ORIG_IPV4_DST)) {
+        !nfct_attr_is_set(ct, ATTR_ORIG_PORT_DST)) {
         return false;
     }
 
+    uint8_t l3proto = nfct_get_attr_u8(ct, ATTR_ORIG_L3PROTO);
     uint8_t proto = nfct_get_attr_u8(ct, ATTR_ORIG_L4PROTO);
     uint16_t dport = ntohs(nfct_get_attr_u16(ct, ATTR_ORIG_PORT_DST));
 
-    if (proto != IPPROTO_UDP || dport != DNS_PORT)
+    if ((proto != IPPROTO_UDP && proto != IPPROTO_TCP) || dport != DNS_PORT)
         return false;
 
-    key->src_ip = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_SRC);
-    key->dst_ip = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_DST);
+    memset(key, 0, sizeof(*key));
+
+    if (l3proto == AF_INET) {
+        if (!nfct_attr_is_set(ct, ATTR_ORIG_IPV4_SRC) || !nfct_attr_is_set(ct, ATTR_ORIG_IPV4_DST))
+            return false;
+        key->src_ip.family = AF_INET;
+        key->src_ip.a.v4.s_addr = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_SRC);
+        key->dst_ip.family = AF_INET;
+        key->dst_ip.a.v4.s_addr = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_DST);
+    } else if (l3proto == AF_INET6) {
+        if (!nfct_attr_is_set(ct, ATTR_ORIG_IPV6_SRC) || !nfct_attr_is_set(ct, ATTR_ORIG_IPV6_DST))
+            return false;
+        const void *src6 = nfct_get_attr(ct, ATTR_ORIG_IPV6_SRC);
+        const void *dst6 = nfct_get_attr(ct, ATTR_ORIG_IPV6_DST);
+        if (!src6 || !dst6)
+            return false;
+        key->src_ip.family = AF_INET6;
+        memcpy(&key->src_ip.a.v6, src6, sizeof(key->src_ip.a.v6));
+        key->dst_ip.family = AF_INET6;
+        memcpy(&key->dst_ip.a.v6, dst6, sizeof(key->dst_ip.a.v6));
+    } else {
+        return false;
+    }
+
     key->src_port = ntohs(nfct_get_attr_u16(ct, ATTR_ORIG_PORT_SRC));
     key->dst_port = dport;
     key->proto = proto;
@@ -617,7 +785,7 @@ static int conntrack_event_cb(enum nf_conntrack_msg_type type,
 
     if (seen_reply) {
         pending_remove(ctx, &key);
-        record_reply_locked(ctx, key.dst_ip);
+        record_reply_locked(ctx, &key.dst_ip);
         pthread_mutex_unlock(&ctx->lock);
         return NFCT_CB_CONTINUE;
     }
@@ -634,7 +802,7 @@ static int conntrack_event_cb(enum nf_conntrack_msg_type type,
         {
             struct pending_flow *p = pending_lookup(ctx, &key);
             if (p && !p->expired_reported && platform_wan_is_reachable())
-                record_failure_episode_locked(ctx, key.dst_ip, monotonic_ms());
+                record_failure_episode_locked(ctx, &key.dst_ip, monotonic_ms());
             pending_remove(ctx, &key);
         }
         break;
@@ -683,7 +851,7 @@ static void monitor_tick(struct monitor_ctx *ctx)
             /* A WAN outage makes every DNS flow time out; that is not
              * evidence of DNS server failure, so skip recording it. */
             if (wan_up)
-                record_failure_episode_locked(ctx, p->key.dst_ip, now);
+                record_failure_episode_locked(ctx, &p->key.dst_ip, now);
         }
     }
 
@@ -717,7 +885,7 @@ int main(void)
     srand((unsigned)(monotonic_ms() ^ (uint64_t)getpid()));
 
     /* Must happen before anything can redirect resolv.conf to a local resolver. */
-    load_dns_servers_from_resolv_conf();
+    refresh_dns_server_cache();
 
     /* Non-fatal: if the platform WAN-status source is not up yet, WAN is
      * treated as down until it becomes available, so no false failures are

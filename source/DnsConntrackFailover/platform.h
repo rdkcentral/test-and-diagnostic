@@ -3,13 +3,10 @@
  *
  * Platform abstraction seam for dns_conntrack_failover.c.
  *
- * The core file (conntrack monitoring, passive/active DNS verification)
- * is plain POSIX/Linux and has no knowledge of RDK-B. Anything that differs
- * between a generic Linux host and an RDK-B gateway (WAN status source,
- * failover action trigger) is declared here and implemented once per
- * platform in platform_rdkb.c / platform_generic.c. Exactly one of those
- * two translation units is compiled in, selected by the build
- * (see Makefile.am / configure.ac: --enable-rdkb-platform).
+ * The core file (conntrack monitoring, passive/active DNS verification) is
+ * plain POSIX/Linux and has no platform-specific dependency. WAN status and
+ * the failover trigger action are declared here and implemented once, in
+ * platform_generic.c, using only /proc and /sys (see Makefile.am).
  */
 
 #ifndef DNS_CONNTRACK_FAILOVER_PLATFORM_H
