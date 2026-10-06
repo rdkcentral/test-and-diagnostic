@@ -290,9 +290,12 @@ CheckandSetConnectivityStatus() {
         else
             #check if dig is available
             if which dig > /dev/null; then
-                output=$(dig @$3 $2)
+                # any DNS response (incl. NXDOMAIN) = reachable; only a
+                # timeout / no reply from the server is a failure
+                output=$(dig @$3 $2 2>&1)
+                result=$?
                 echo_t "$output"
-                if [ -z "$output" ]; then
+                if [ $result -ne 0 ] || echo "$output" | grep -qiE "connection timed out|no servers could be reached"; then
                     result=1
                 else
                     result=0

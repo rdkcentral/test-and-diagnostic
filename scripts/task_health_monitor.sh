@@ -17,13 +17,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #######################################################################################
-
 UTOPIA_PATH="/etc/utopia/service.d"
 TAD_PATH="/usr/ccsp/tad"
 RDKLOGGER_PATH="/rdklogger"
 PRIVATE_LAN="brlan0"
 BR_MODE=0
 CONSOLE_LOG="/rdklogs/logs/Consolelog.txt.0"
+
+if [ -f /etc/ssl/certsel/hrot.properties ]; then
+    source /etc/ssl/certsel/hrot.properties
+fi
 
 #upflowed INTCS-125.patch as part of RDKB-41505.
 if [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "TG4482A" ]; then
@@ -121,6 +124,7 @@ case $BOX_TYPE in
     "VNTXER5") SELFHEAL_TYPE="SYSTEMD";;
     "SCXF11BFL") SELFHEAL_TYPE="SYSTEMD";;
     "ipq") SELFHEAL_TYPE="SYSTEMD";;
+    "XER2") SELFHEAL_TYPE="SYSTEMD";;
     *)
         echo_t "RDKB_SELFHEAL : ERROR: Unknown BOX_TYPE '$BOX_TYPE', using SELFHEAL_TYPE='BASE'"
         SELFHEAL_TYPE="BASE";;
@@ -307,6 +311,14 @@ check_xle_dns_route()
 
 }
 
+self_heal_meshAgent_ensure_running()
+{
+    if ! systemctl is-active --quiet meshAgent; then
+        echo_t "[RDKB_SELFHEAL] : meshAgent is not running. Restarting service..."
+        systemctl restart meshAgent
+    fi
+}
+
 self_heal_meshAgent()
 {
     cpu_max=20
@@ -477,7 +489,7 @@ self_heal_dual_cron()
 
 self_heal_sedaemon()
 {
-    if [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
+    if [ "$hrottype" != "pkcs11" ] && [ -f /tmp/started_ssad ] && ( [ "$kdftype" = "RSA" ] || [ "$kdftype" = "ECC" ] ); then
          accessmgr=`pidof accessManager`
 
          if [ "$kdftype" = "ECC" ]; then
@@ -1465,12 +1477,15 @@ case $SELFHEAL_TYPE in
 esac
 
 CcspHome_Security=`sysevent get HomeSecuritySupport`
-if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ] || [ "$MODEL_NUM" = "CGA4332COM" ]; then
+if [ "$MODEL_NUM" = "DPC3939B" ] || [ "$MODEL_NUM" = "DPC3941B" ]; then
     echo_t "Disabling CcspHomeSecurity and CcspAdvSecurity for BWG"
 elif [ "$MODEL_NUM" = "CVA601ZCOM" ]; then
     echo_t "Disabling CcspHomeSecurity and CcspAdvSecurity for XD4 "
 else
-    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$CcspHome_Security" != "false" ]; then
+    if [ "$MODEL_NUM" = "CGA4332COM" ]; then
+        echo_t "CcspHomeSecurity disabled for CBRv2 "
+    fi
+    if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$CcspHome_Security" != "false" ] && [ "$MODEL_NUM" != "CGA4332COM" ]; then
         
         case $SELFHEAL_TYPE in
             "BASE"|"SYSTEMD")
@@ -2869,6 +2884,8 @@ case $SELFHEAL_TYPE in
                 : #Do nothing for XD4
             elif [ "$MODEL_NUM" = "SCER11BEL" ] && [ "$HomeSecuritySupport" == "false" ]; then
                 : #Do  nothing for XER10 and if HomeSecurity Feature disabled.
+            elif [ "$MODEL_NUM" = "AYER21BEL" ] && [ "$HomeSecuritySupport" == "false" ]; then
+                : #Do  nothing for XER2 and if HomeSecurity Feature disabled.
             elif [ "$l3netRestart" != "done" ]; then
 
                 check_if_brlan1_created=$(ifconfig | grep "brlan1")
@@ -4319,7 +4336,7 @@ fi
 wan_dhcp_client_v4=1
 wan_dhcp_client_v6=1
 #dibbler-client selfheal not required on  SCER11BEL since WAN Unification use case will cover under WANManager.
-if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$WAN_STATUS" = "started" ]  && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ]; then
+if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ]  && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ "$WAN_STATUS" = "started" ]  && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ] && [ "$BOX_TYPE" != "XER2" ]; then
     wan_dhcp_client_v4=1
     wan_dhcp_client_v6=1
 
@@ -4568,7 +4585,7 @@ case $SELFHEAL_TYPE in
     ;;
     "SYSTEMD")
         #dibbler-client selfheal not required on SCER11BEL since WAN Unification use case will cover under WANManager.
-        if [ "x$MAPT_CONFIG" != "xset" ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ $DHCPV4C_STATUS != "false" ] && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ]; then
+        if [ "x$MAPT_CONFIG" != "xset" ] && [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ] && [ $DHCPV4C_STATUS != "false" ] && [ "$DHCPcMonitoring" != "false" ] && [ "$BOX_TYPE" != "SCER11BEL" ] && [ "$BOX_TYPE" != "SCXF11BFL" ] && [ "$BOX_TYPE" != "XER2" ]; then
             if [ $wan_dhcp_client_v4 -eq 0 ]; then
                 if [ "$MANUFACTURE" = "Technicolor" ]; then
                     V4_EXEC_CMD="/sbin/udhcpc -i erouter0 -p /tmp/udhcpc.erouter0.pid -s /etc/udhcpc.script"
@@ -5012,7 +5029,7 @@ self_heal_ethwan_mode_recover()
     fi
 }
 
-if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$MODEL_NUM" = "SCER11BEL" ] || [ "$MODEL_NUM" = "SR203" ] || [ "$MODEL_NUM" = "SR213" ] || [ "$MODEL_NUM" = "CGA4332COM" ]; then
+if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$MODEL_NUM" = "SCER11BEL" ] || [ "$MODEL_NUM" = "SR203" ] || [ "$MODEL_NUM" = "SR213" ] || [ "$MODEL_NUM" = "CGA4332COM" ] || [ "$MODEL_NUM" = "AYER21BEL" ]; then
     mesh_optimization_mode=$(deviceinfo.sh -optimization)
     mesh_enable=$(syscfg get mesh_enable)
     if [[ "$mesh_optimization_mode" == "monitor" || "$mesh_optimization_mode" == "enable" ]] && ! [[ "$mesh_enable" == "true" && "$mesh_optimization_mode" == "enable" ]] && ! [[ "$mesh_enable" == "false" && "$mesh_optimization_mode" == "monitor" ]]
@@ -5182,6 +5199,7 @@ if [ "$BOX_TYPE" = "WNXL11BWL" ]; then
     self_heal_rfc
 fi
 self_heal_dual_cron
+self_heal_meshAgent_ensure_running
 self_heal_meshAgent
 self_heal_meshAgent_hung
 self_heal_sedaemon

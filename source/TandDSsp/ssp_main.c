@@ -369,9 +369,15 @@ int main(int argc, char* argv[])
     // Init LatencyMeasurement
     LatencyMeasurementInit();
 
-    // SelfHeal Subdoc Version Mismatch
+    /* SelfHeal Subdoc Version Mismatch
+       webcfg_selfheal_start() spawns a detached thread that waits until the
+       Device.X_RDK_WebConfig.webcfgSubdocForceReset element is available on RBUS.
+       Readiness is detected by temporarily subscribing to the element's event,
+       indicating the webcfg component has registered its data elements.
+       This avoids the boot-time race where T&D attempts rbus_setStr before
+       webcfg has finished its rbus_regDataElements() call. */
     initWebcfgProperties(WEBCFG_PROPERTIES_FILE);
-    webcfg_subdoc_mismatch_boot_check();
+    webcfg_selfheal_start();
 
     //create a thread to update time thread for ethwan enable mode
     BOOL ethwanEnabled = FALSE;
