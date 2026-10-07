@@ -53,6 +53,8 @@
  * mass outage doesn't make every device probe upstream at the same instant. */
 #define VERIFY_JITTER_MAX_MS 60000U
 
+#define DBG(fmt, ...) fprintf(stderr, "DEBUG: " fmt "\n", ##__VA_ARGS__)
+
 struct flow_key {
     struct ip_addr src_ip;
     struct ip_addr dst_ip;
@@ -251,22 +253,32 @@ static bool verify_server(const struct ip_addr *address,
 
 static void record_reply_locked(struct monitor_ctx *ctx, const struct ip_addr *server_ip)
 {
+    char ip[INET6_ADDRSTRLEN];
     struct dns_server_health *s = server_get(ctx, server_ip, true);
     if (!s)
         return;
 
+    DBG("reply for %s: state=%d episodes=%u verify_at_ms=%" PRIu64,
+        ip_addr_to_str(server_ip, ip, sizeof(ip)), s->state, s->failure_episodes, s->verify_at_ms);
+
     /* A verification is scheduled/pending: let it make the authoritative call
      * rather than letting one stray passive reply restart episode counting. */
-    if (s->verify_at_ms != 0)
+    if (s->verify_at_ms != 0) {
+        DBG("reply ignored: verification pending");
         return;
+    }
 
     /* While FAILED, client DNS is redirected to the local resolver, so these
      * passive "replies" come from it -- conntrack still shows the upstream
      * tuple, so they must NOT be read as upstream recovery. Only the marked
      * active probe in evaluate_server_locked() decides recovery. */
-    if (s->state == SERVER_FAILED)
+    if (s->state == SERVER_FAILED) {
+        DBG("reply ignored: server FAILED");
         return;
+    }
 
+    if (s->failure_episodes != 0)
+        DBG("reply RESETS failure episodes %u -> 0", s->failure_episodes);
     s->failure_episodes = 0;
     if (s->state == SERVER_SUSPECT) {
         s->state = SERVER_HEALTHY;
@@ -282,22 +294,33 @@ static void record_failure_episode_locked(struct monitor_ctx *ctx,
     struct dns_server_health *s = server_get(ctx, server_ip, true);
     char ip[INET6_ADDRSTRLEN];
 
-    if (!s)
+    if (!s) {
+        DBG("failure episode dropped: no free server slot");
         return;
+    }
 
     /* Already FAILED: recovery is owned by the active probe, and redirected
      * timeouts carry no upstream signal -- stop counting. */
-    if (s->state == SERVER_FAILED)
+    if (s->state == SERVER_FAILED) {
+        DBG("episode skipped for %s: already FAILED", ip_addr_to_str(server_ip, ip, sizeof(ip)));
         return;
+    }
 
     /* Enough evidence already gathered; wait for verification to decide. */
-    if (s->failure_episodes >= cfg->failure_threshold)
+    if (s->failure_episodes >= cfg->failure_threshold) {
+        DBG("episode skipped for %s: threshold already reached (%u)",
+            ip_addr_to_str(server_ip, ip, sizeof(ip)), s->failure_episodes);
         return;
+    }
 
     /* Collapse a burst of client lookups into one episode per gap window. */
     if (s->last_failure_episode_ms != 0 &&
-        now_ms - s->last_failure_episode_ms < cfg->failure_episode_gap_ms)
+        now_ms - s->last_failure_episode_ms < cfg->failure_episode_gap_ms) {
+        DBG("episode skipped for %s: within gap window (%" PRIu64 "ms < %ums)",
+            ip_addr_to_str(server_ip, ip, sizeof(ip)),
+            now_ms - s->last_failure_episode_ms, cfg->failure_episode_gap_ms);
         return;
+    }
 
     s->last_failure_episode_ms = now_ms;
     s->failure_episodes++;
@@ -446,6 +469,7 @@ static bool extract_dns_key(const struct nf_conntrack *ct, struct flow_key *key)
         key->dst_ip.family = AF_INET6;
         memcpy(&key->dst_ip.a.v6, dst6, sizeof(key->dst_ip.a.v6));
     } else {
+        DBG("DNS tuple has no IPv4/IPv6 address attributes");
         return false;
     }
 
@@ -461,22 +485,31 @@ static int conntrack_event_cb(enum nf_conntrack_msg_type type,
     struct monitor_ctx *ctx = data;
     struct flow_key key;
     char dst[INET6_ADDRSTRLEN];
+    char src[INET6_ADDRSTRLEN];
     struct failover_config cfg = failover_config_get();
 
-    if (!cfg.enable)
+    if (!cfg.enable) {
+        DBG("event ignored: Enable=0");
         return NFCT_CB_CONTINUE; /* master switch off: ignore all DNS */
+    }
 
     if (!extract_dns_key(ct, &key))
         return NFCT_CB_CONTINUE;
 
     /* Only the gateway's configured upstreams are evidence about its DNS. */
     ip_addr_to_str(&key.dst_ip, dst, sizeof(dst));
-    if (!resolver_list_is_upstream(dst))
-        return NFCT_CB_CONTINUE;
-
+    ip_addr_to_str(&key.src_ip, src, sizeof(src));
     uint32_t status = nfct_attr_is_set(ct, ATTR_STATUS)
                           ? nfct_get_attr_u32(ct, ATTR_STATUS) : 0;
     bool seen_reply = (status & IPS_SEEN_REPLY) != 0;
+
+    DBG("event type=%d proto=%u %s:%u -> %s:%u status=0x%x seen_reply=%d",
+        type, key.proto, src, key.src_port, dst, key.dst_port, status, seen_reply);
+
+    if (!resolver_list_is_upstream(dst)) {
+        DBG("event dropped: %s is not a cached upstream resolver", dst);
+        return NFCT_CB_CONTINUE;
+    }
 
     pthread_mutex_lock(&ctx->lock);
 
@@ -484,15 +517,20 @@ static int conntrack_event_cb(enum nf_conntrack_msg_type type,
         pending_remove(ctx, &key);
         record_reply_locked(ctx, &key.dst_ip);
     } else if (type == NFCT_T_NEW) {
-        if (!pending_lookup(ctx, &key))
+        bool exists = pending_lookup(ctx, &key) != NULL;
+        if (!exists)
             (void)pending_alloc(ctx, &key);
+        DBG("NEW %s -> pending %s", dst, exists ? "already tracked" : "allocated");
     } else if (type == NFCT_T_DESTROY) {
-        /* Destroyed before our timer classified it: count as evidence, unless
-         * the WAN is down (then every DNS flow would time out regardless). */
+        /* Destroyed before our timer classified it: count it as evidence. */
         struct pending_flow *p = pending_lookup(ctx, &key);
-        if (p && !p->expired_reported && wan_status_is_reachable())
+        DBG("DESTROY %s -> pending %s", dst,
+            !p ? "not found" : p->expired_reported ? "already expired" : "unexpired");
+        if (p && !p->expired_reported)
             record_failure_episode_locked(ctx, &key.dst_ip, monotonic_ms(), &cfg);
         pending_remove(ctx, &key);
+    } else {
+        DBG("event type=%d ignored (unreplied, not NEW/DESTROY)", type);
     }
 
     pthread_mutex_unlock(&ctx->lock);
@@ -547,9 +585,13 @@ static void expire_pending_locked(struct monitor_ctx *ctx, uint64_t now,
             continue;
 
         if (now - p->created_ms >= cfg->reply_deadline_ms) {
+            char ip[INET6_ADDRSTRLEN];
             p->expired_reported = true;
-            if (wan_up) /* a WAN outage times out every flow; not DNS evidence */
-                record_failure_episode_locked(ctx, &p->key.dst_ip, now, cfg);
+            DBG("pending flow to %s expired after %" PRIu64 "ms (wan_up=%d)",
+                ip_addr_to_str(&p->key.dst_ip, ip, sizeof(ip)), now - p->created_ms, wan_up);
+            /* Record evidence unconditionally; WAN check gates the decision in
+             * evaluate_failure_locked(), not evidence collection. */
+            record_failure_episode_locked(ctx, &p->key.dst_ip, now, cfg);
         }
     }
 }
