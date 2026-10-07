@@ -19,7 +19,22 @@
 
 bin_PROGRAMS = dns_conntrack_failover
 
-dns_conntrack_failover_SOURCES = dns_conntrack_failover.c platform_generic.c
+dns_conntrack_failover_SOURCES = \
+	main.c \
+	dns_monitor.c \
+	dns_probe.c \
+	resolver_list.c \
+	failover_config.c \
+	wan_status.c \
+	dns_redirect.c \
+	ip_addr.c
 dns_conntrack_failover_LDFLAGS = -lnetfilter_conntrack -lnfnetlink -lpthread
 
-EXTRA_DIST = platform.h platform_generic.c
+EXTRA_DIST = \
+	dns_monitor.h \
+	dns_probe.h \
+	resolver_list.h \
+	failover_config.h \
+	wan_status.h \
+	dns_redirect.h \
+	ip_addr.h
