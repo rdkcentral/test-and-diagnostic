@@ -1733,6 +1733,36 @@ if ip -6 addr show dev $WAN_INTERFACE scope global | grep -q "dadfailed"; then
     else
        echo_t "$PROC Process not running"
     fi
+
+    if [ "$MODEL_NUM" = "SCXF11BFL" ]; then
+        IPV6=$(ip -6 addr show dev $WAN_INTERFACE scope global | grep inet6 | grep -i "dadfailed" | awk '{print $2}')
+        if [ -n "$IPV6" ]; then
+            FAILED_IPV6=${IPV6%/*}
+            GW_LLA=$(ip -6 route show default dev $WAN_INTERFACE | awk '/default/ {print $3}')
+            NDISC_OUT=$(ndisc6 "$FAILED_IPV6" $WAN_INTERFACE 2>/dev/null)
+            RECOVER=0
+
+            if echo "$NDISC_OUT" | grep -qi "No response"; then
+                echo_t "No discovery response for $FAILED_IPV6. Proceeding with recovery."
+                RECOVER=1
+            elif echo "$NDISC_OUT" | grep -qi "$GW_LLA"; then
+                echo_t "Gateway $GW_LLA is responding for $FAILED_IPV6."
+                RECOVER=1
+            else
+                echo_t "Address is claimed by a non-gateway device."
+                echo_t "Skipping recovery."
+                RECOVER=0
+            fi
+
+            if [ "$RECOVER" = "1" ]; then
+                echo_t "Deleting and adding address $IPV6 on $WAN_INTERFACE"
+                ip -6 addr del "$IPV6" dev $WAN_INTERFACE
+                ip -6 addr add "$IPV6" dev $WAN_INTERFACE nodad
+                echo_t "Restarting sshd"
+                sysevent set sshd-restart
+            fi
+        fi
+    fi
 else
    echo_t "SUCCESS: no IPV6 address conflict found - IPV6 is usable"
 fi
