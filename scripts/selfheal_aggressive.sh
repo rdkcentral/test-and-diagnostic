@@ -1734,22 +1734,32 @@ if ip -6 addr show dev $WAN_INTERFACE scope global | grep -q "dadfailed"; then
        echo_t "$PROC Process not running"
     fi
 
+    #xf10 has a dadfailed with WAN DHCP server.
+    #This will recover from that state 
+        #1. if the dadfailed is with BNG/server's address
+        #2. if there is no dadfailed during selfheal
     if [ "$MODEL_NUM" = "SCXF11BFL" ]; then
+        echo_t "Starting Recovery for Global IPv6 address..."
         IPV6=$(ip -6 addr show dev $WAN_INTERFACE scope global | grep inet6 | grep -i "dadfailed" | awk '{print $2}')
         if [ -n "$IPV6" ]; then
-            FAILED_IPV6=${IPV6%/*}
-            GW_LLA=$(ip -6 route show default dev $WAN_INTERFACE | awk '/default/ {print $3}')
-            NDISC_OUT=$(ndisc6 "$FAILED_IPV6" $WAN_INTERFACE 2>/dev/null)
             RECOVER=0
+            FAILED_IPV6=${IPV6%/*}
+            #Get WAN Gateway LL address
+            GW_LLA=$(ip -6 route show default dev $WAN_INTERFACE | awk '/default/ {print $3}')
+            #Run neighbor discovery
+            NDISC_OUT=$(ndisc6 "$FAILED_IPV6" $WAN_INTERFACE 2>/dev/null)
 
-            if echo "$NDISC_OUT" | grep -qi "No response"; then
+            if [ -z "$NDISC_OUT" ]; then
                 echo_t "No discovery response for $FAILED_IPV6. Proceeding with recovery."
                 RECOVER=1
-            elif echo "$NDISC_OUT" | grep -qi "$GW_LLA"; then
-                echo_t "Gateway $GW_LLA is responding for $FAILED_IPV6."
+            elif echo "$NDISC_OUT" | grep -qi "No response"; then
+                echo_t "No discovery response for $FAILED_IPV6. Proceeding with recovery."
+                RECOVER=1
+            elif [ -n "$GW_LLA" ] && echo "$NDISC_OUT" | grep -Fqi "$GW_LLA"; then
+                echo_t "Gateway $GW_LLA is responding for $FAILED_IPV6. Proceeding with recovery"
                 RECOVER=1
             else
-                echo_t "Address is claimed by a non-gateway device."
+                echo_t "Address is claimed by a non-gateway device. Stopping recovery"
                 echo_t "Skipping recovery."
                 RECOVER=0
             fi
@@ -1758,11 +1768,14 @@ if ip -6 addr show dev $WAN_INTERFACE scope global | grep -q "dadfailed"; then
                 echo_t "Deleting and adding address $IPV6 on $WAN_INTERFACE"
                 ip -6 addr del "$IPV6" dev $WAN_INTERFACE
                 ip -6 addr add "$IPV6" dev $WAN_INTERFACE nodad
+                sleep 1
                 echo_t "Restarting sshd"
                 sysevent set sshd-restart
             fi
+        else
+            echo_t "Cannot find global IPV6 address"
         fi
-    fi
+    fi #SCXF11BFL
 else
    echo_t "SUCCESS: no IPV6 address conflict found - IPV6 is usable"
 fi
