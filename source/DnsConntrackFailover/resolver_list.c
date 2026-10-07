@@ -42,12 +42,15 @@ static void load_from_file(const char *path)
         if (sscanf(line, "nameserver %45s", addr) != 1)
             continue;
 
-        if (inet_pton(AF_INET, addr, &a4) != 1 && inet_pton(AF_INET6, addr, &a6) != 1) {
+        /* Re-render through inet_ntop so the cached form matches exactly what
+         * ip_addr_to_str() produces for the same address later (resolv.conf
+         * text isn't guaranteed to already be in canonical form). */
+        if (inet_pton(AF_INET, addr, &a4) == 1)
+            inet_ntop(AF_INET, &a4, servers[count++], INET6_ADDRSTRLEN);
+        else if (inet_pton(AF_INET6, addr, &a6) == 1)
+            inet_ntop(AF_INET6, &a6, servers[count++], INET6_ADDRSTRLEN);
+        else
             fprintf(stderr, "RESOLVER: skipping invalid nameserver '%s'\n", addr);
-            continue;
-        }
-
-        snprintf(servers[count++], INET6_ADDRSTRLEN, "%s", addr);
     }
     fclose(fp);
 

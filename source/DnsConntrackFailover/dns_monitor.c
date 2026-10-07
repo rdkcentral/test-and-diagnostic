@@ -416,13 +416,11 @@ static void evaluate_server_locked(struct dns_server_health *s, uint64_t now_ms,
 
 static bool extract_dns_key(const struct nf_conntrack *ct, struct flow_key *key)
 {
-    if (!nfct_attr_is_set(ct, ATTR_ORIG_L3PROTO) ||
-        !nfct_attr_is_set(ct, ATTR_ORIG_L4PROTO) ||
+    if (!nfct_attr_is_set(ct, ATTR_ORIG_L4PROTO) ||
         !nfct_attr_is_set(ct, ATTR_ORIG_PORT_SRC) ||
         !nfct_attr_is_set(ct, ATTR_ORIG_PORT_DST))
         return false;
 
-    uint8_t l3proto = nfct_get_attr_u8(ct, ATTR_ORIG_L3PROTO);
     uint8_t proto = nfct_get_attr_u8(ct, ATTR_ORIG_L4PROTO);
     uint16_t dport = ntohs(nfct_get_attr_u16(ct, ATTR_ORIG_PORT_DST));
 
@@ -431,15 +429,14 @@ static bool extract_dns_key(const struct nf_conntrack *ct, struct flow_key *key)
 
     memset(key, 0, sizeof(*key));
 
-    if (l3proto == AF_INET) {
-        if (!nfct_attr_is_set(ct, ATTR_ORIG_IPV4_SRC) ||
-            !nfct_attr_is_set(ct, ATTR_ORIG_IPV4_DST))
-            return false;
+    /* ATTR_ORIG_L3PROTO isn't reliably marked "set" on every conntrack build;
+     * infer the family from whichever address attribute is actually present. */
+    if (nfct_attr_is_set(ct, ATTR_ORIG_IPV4_SRC) && nfct_attr_is_set(ct, ATTR_ORIG_IPV4_DST)) {
         key->src_ip.family = AF_INET;
         key->src_ip.a.v4.s_addr = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_SRC);
         key->dst_ip.family = AF_INET;
         key->dst_ip.a.v4.s_addr = nfct_get_attr_u32(ct, ATTR_ORIG_IPV4_DST);
-    } else if (l3proto == AF_INET6) {
+    } else if (nfct_attr_is_set(ct, ATTR_ORIG_IPV6_SRC) && nfct_attr_is_set(ct, ATTR_ORIG_IPV6_DST)) {
         const void *src6 = nfct_get_attr(ct, ATTR_ORIG_IPV6_SRC);
         const void *dst6 = nfct_get_attr(ct, ATTR_ORIG_IPV6_DST);
         if (!src6 || !dst6)
