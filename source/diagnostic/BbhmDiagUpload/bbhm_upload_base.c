@@ -76,7 +76,7 @@
 
 #include "bbhm_upload_global.h"
 #include "safec_lib_common.h"
-PBBHM_UPLOAD_DIAG_OBJECT        g_DiagUploadObj = NULL;
+extern PBBHM_UPLOAD_DIAG_OBJECT        g_DiagUploadObj;
 
 
 /**********************************************************************
