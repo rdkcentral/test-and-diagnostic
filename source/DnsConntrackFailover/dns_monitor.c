@@ -22,6 +22,7 @@
 
 #include "dns_monitor.h"
 
+#include "dns_log.h"
 #include "dns_probe.h"
 #include "dns_redirect.h"
 #include "failover_config.h"
@@ -52,8 +53,6 @@
 /* Upper bound of the random delay before the first active verification, so a
  * mass outage doesn't make every device probe upstream at the same instant. */
 #define VERIFY_JITTER_MAX_MS 60000U
-
-#define DBG(fmt, ...) fprintf(stderr, "DEBUG: " fmt "\n", ##__VA_ARGS__)
 
 struct flow_key {
     struct ip_addr src_ip;
@@ -96,6 +95,7 @@ struct monitor_ctx {
 };
 
 static volatile sig_atomic_t g_running = 1;
+static volatile sig_atomic_t g_event_failed; /* conntrack thread died on an error */
 static bool g_failover_active; /* monitor's view of the current failover state */
 
 /* ------------------------------------------------------------------------- */
@@ -105,8 +105,10 @@ static bool g_failover_active; /* monitor's view of the current failover state *
 static uint64_t monotonic_ms(void)
 {
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        LOG_ERR("clock_gettime(CLOCK_MONOTONIC) failed: %s", strerror(errno));
         return 0;
+    }
     return ((uint64_t)ts.tv_sec * 1000ULL) + ((uint64_t)ts.tv_nsec / 1000000ULL);
 }
 
@@ -181,6 +183,8 @@ static struct pending_flow *pending_alloc(struct monitor_ctx *ctx,
 
     /* Saturation should be rare: reuse the oldest slot rather than allocate. */
     if (oldest) {
+        LOG_WARN("pending DNS flow table full (%u); evicting the oldest entry",
+                 MAX_PENDING_FLOWS);
         memset(oldest, 0, sizeof(*oldest));
         oldest->used = true;
         oldest->key = *key;
@@ -214,8 +218,15 @@ static struct dns_server_health *server_get(struct monitor_ctx *ctx,
             free_slot = s;
     }
 
-    if (!create || !free_slot)
+    if (!create)
         return NULL;
+
+    if (!free_slot) {
+        char ip[INET6_ADDRSTRLEN];
+        LOG_ERR("DNS server table full (%u); not tracking %s",
+                MAX_DNS_SERVERS, ip_addr_to_str(address, ip, sizeof(ip)));
+        return NULL;
+    }
 
     memset(free_slot, 0, sizeof(*free_slot));
     free_slot->used = true;
@@ -238,12 +249,12 @@ static bool verify_server(const struct ip_addr *address,
     unsigned attempts = cfg->verify_attempts ? cfg->verify_attempts : 1;
     for (unsigned a = 1; a <= attempts; ++a) {
         if (dns_probe(ip, cfg->verify_timeout_ms)) {
-            fprintf(stderr, "VERIFY: %s replied (attempt %u/%u)\n", ip, a, attempts);
+            LOG_INFO("VERIFY: %s replied (attempt %u/%u)", ip, a, attempts);
             return true;
         }
     }
 
-    fprintf(stderr, "VERIFY: %s no reply after %u attempt(s)\n", ip, attempts);
+    LOG_INFO("VERIFY: %s no reply after %u attempt(s)", ip, attempts);
     return false;
 }
 
@@ -253,32 +264,27 @@ static bool verify_server(const struct ip_addr *address,
 
 static void record_reply_locked(struct monitor_ctx *ctx, const struct ip_addr *server_ip)
 {
-    char ip[INET6_ADDRSTRLEN];
     struct dns_server_health *s = server_get(ctx, server_ip, true);
     if (!s)
         return;
 
-    DBG("reply for %s: state=%d episodes=%u verify_at_ms=%" PRIu64,
-        ip_addr_to_str(server_ip, ip, sizeof(ip)), s->state, s->failure_episodes, s->verify_at_ms);
-
     /* A verification is scheduled/pending: let it make the authoritative call
      * rather than letting one stray passive reply restart episode counting. */
-    if (s->verify_at_ms != 0) {
-        DBG("reply ignored: verification pending");
+    if (s->verify_at_ms != 0)
         return;
-    }
 
     /* While FAILED, client DNS is redirected to the local resolver, so these
      * passive "replies" come from it -- conntrack still shows the upstream
      * tuple, so they must NOT be read as upstream recovery. Only the marked
      * active probe in evaluate_server_locked() decides recovery. */
-    if (s->state == SERVER_FAILED) {
-        DBG("reply ignored: server FAILED");
+    if (s->state == SERVER_FAILED)
         return;
-    }
 
-    if (s->failure_episodes != 0)
-        DBG("reply RESETS failure episodes %u -> 0", s->failure_episodes);
+    if (s->failure_episodes != 0) {
+        char ip[INET6_ADDRSTRLEN];
+        LOG_INFO("PASSIVE: %s answered; cleared %u failure episode(s)",
+                 ip_addr_to_str(server_ip, ip, sizeof(ip)), s->failure_episodes);
+    }
     s->failure_episodes = 0;
     if (s->state == SERVER_SUSPECT) {
         s->state = SERVER_HEALTHY;
@@ -294,33 +300,22 @@ static void record_failure_episode_locked(struct monitor_ctx *ctx,
     struct dns_server_health *s = server_get(ctx, server_ip, true);
     char ip[INET6_ADDRSTRLEN];
 
-    if (!s) {
-        DBG("failure episode dropped: no free server slot");
-        return;
-    }
+    if (!s)
+        return; /* table-full error already reported by server_get() */
 
     /* Already FAILED: recovery is owned by the active probe, and redirected
      * timeouts carry no upstream signal -- stop counting. */
-    if (s->state == SERVER_FAILED) {
-        DBG("episode skipped for %s: already FAILED", ip_addr_to_str(server_ip, ip, sizeof(ip)));
+    if (s->state == SERVER_FAILED)
         return;
-    }
 
     /* Enough evidence already gathered; wait for verification to decide. */
-    if (s->failure_episodes >= cfg->failure_threshold) {
-        DBG("episode skipped for %s: threshold already reached (%u)",
-            ip_addr_to_str(server_ip, ip, sizeof(ip)), s->failure_episodes);
+    if (s->failure_episodes >= cfg->failure_threshold)
         return;
-    }
 
     /* Collapse a burst of client lookups into one episode per gap window. */
     if (s->last_failure_episode_ms != 0 &&
-        now_ms - s->last_failure_episode_ms < cfg->failure_episode_gap_ms) {
-        DBG("episode skipped for %s: within gap window (%" PRIu64 "ms < %ums)",
-            ip_addr_to_str(server_ip, ip, sizeof(ip)),
-            now_ms - s->last_failure_episode_ms, cfg->failure_episode_gap_ms);
+        now_ms - s->last_failure_episode_ms < cfg->failure_episode_gap_ms)
         return;
-    }
 
     s->last_failure_episode_ms = now_ms;
     s->failure_episodes++;
@@ -328,9 +323,9 @@ static void record_failure_episode_locked(struct monitor_ctx *ctx,
     if (s->state == SERVER_HEALTHY)
         s->state = SERVER_SUSPECT;
 
-    fprintf(stderr, "PASSIVE: %s failure episode %u/%u\n",
-            ip_addr_to_str(server_ip, ip, sizeof(ip)),
-            s->failure_episodes, cfg->failure_threshold);
+    LOG_INFO("PASSIVE: %s failure episode %u/%u",
+             ip_addr_to_str(server_ip, ip, sizeof(ip)),
+             s->failure_episodes, cfg->failure_threshold);
 }
 
 /* True once last_verify_ms is set and fewer than cooldown_ms have elapsed. */
@@ -361,13 +356,13 @@ static void evaluate_recovery_locked(struct dns_server_health *s, uint64_t now_m
     }
 
     if (++s->recovery_successes < cfg->recovery_success_threshold) {
-        fprintf(stderr, "RECOVERY: %s success %u/%u\n",
-                ip_addr_to_str(&s->address, ip, sizeof(ip)),
-                s->recovery_successes, cfg->recovery_success_threshold);
+        LOG_INFO("RECOVERY: %s success %u/%u",
+                 ip_addr_to_str(&s->address, ip, sizeof(ip)),
+                 s->recovery_successes, cfg->recovery_success_threshold);
         return;
     }
 
-    fprintf(stderr, "DECISION: %s recovered\n", ip_addr_to_str(&s->address, ip, sizeof(ip)));
+    LOG_INFO("DECISION: %s recovered", ip_addr_to_str(&s->address, ip, sizeof(ip)));
     s->state = SERVER_HEALTHY;
     s->failure_episodes = 0;
     s->recovery_successes = 0;
@@ -389,8 +384,8 @@ static void evaluate_failure_locked(struct dns_server_health *s, uint64_t now_ms
     /* Stagger the first probe across the jitter window. */
     if (s->verify_at_ms == 0) {
         s->verify_at_ms = now_ms + ((uint64_t)rand() % VERIFY_JITTER_MAX_MS);
-        fprintf(stderr, "VERIFY: %s scheduled in %" PRIu64 " ms\n",
-                ip_addr_to_str(&s->address, ip, sizeof(ip)), s->verify_at_ms - now_ms);
+        LOG_INFO("VERIFY: %s scheduled in %" PRIu64 " ms",
+                 ip_addr_to_str(&s->address, ip, sizeof(ip)), s->verify_at_ms - now_ms);
         return;
     }
     if (now_ms < s->verify_at_ms)
@@ -400,14 +395,16 @@ static void evaluate_failure_locked(struct dns_server_health *s, uint64_t now_ms
     s->last_verify_ms = now_ms;
 
     if (verify_server(&s->address, cfg)) {
+        LOG_INFO("DECISION: %s verified healthy; passive failure evidence discarded",
+                 ip_addr_to_str(&s->address, ip, sizeof(ip)));
         s->state = SERVER_HEALTHY;
         s->failure_episodes = 0;
         return;
     }
 
     if (!wan_status_is_reachable()) {
-        fprintf(stderr, "DECISION: WAN down; suppressing failure for %s\n",
-                ip_addr_to_str(&s->address, ip, sizeof(ip)));
+        LOG_INFO("DECISION: WAN down; suppressing failure for %s",
+                 ip_addr_to_str(&s->address, ip, sizeof(ip)));
         s->state = SERVER_HEALTHY;
         s->failure_episodes = 0;
         return;
@@ -417,8 +414,8 @@ static void evaluate_failure_locked(struct dns_server_health *s, uint64_t now_ms
     s->failure_episodes = 0;
     s->recovery_successes = 0;
     s->recovery_delay_ms = cfg->recovery_initial_ms;
-    fprintf(stderr, "DECISION: %s failed while WAN reachable\n",
-            ip_addr_to_str(&s->address, ip, sizeof(ip)));
+    LOG_WARN("DECISION: %s failed while WAN reachable",
+             ip_addr_to_str(&s->address, ip, sizeof(ip)));
 }
 
 static void evaluate_server_locked(struct dns_server_health *s, uint64_t now_ms,
@@ -469,7 +466,7 @@ static bool extract_dns_key(const struct nf_conntrack *ct, struct flow_key *key)
         key->dst_ip.family = AF_INET6;
         memcpy(&key->dst_ip.a.v6, dst6, sizeof(key->dst_ip.a.v6));
     } else {
-        DBG("DNS tuple has no IPv4/IPv6 address attributes");
+        LOG_WARN("conntrack DNS event has no IPv4/IPv6 address attributes");
         return false;
     }
 
@@ -485,31 +482,22 @@ static int conntrack_event_cb(enum nf_conntrack_msg_type type,
     struct monitor_ctx *ctx = data;
     struct flow_key key;
     char dst[INET6_ADDRSTRLEN];
-    char src[INET6_ADDRSTRLEN];
     struct failover_config cfg = failover_config_get();
 
-    if (!cfg.enable) {
-        DBG("event ignored: Enable=0");
+    if (!cfg.enable)
         return NFCT_CB_CONTINUE; /* master switch off: ignore all DNS */
-    }
 
     if (!extract_dns_key(ct, &key))
         return NFCT_CB_CONTINUE;
 
     /* Only the gateway's configured upstreams are evidence about its DNS. */
     ip_addr_to_str(&key.dst_ip, dst, sizeof(dst));
-    ip_addr_to_str(&key.src_ip, src, sizeof(src));
+    if (!resolver_list_is_upstream(dst))
+        return NFCT_CB_CONTINUE;
+
     uint32_t status = nfct_attr_is_set(ct, ATTR_STATUS)
                           ? nfct_get_attr_u32(ct, ATTR_STATUS) : 0;
     bool seen_reply = (status & IPS_SEEN_REPLY) != 0;
-
-    DBG("event type=%d proto=%u %s:%u -> %s:%u status=0x%x seen_reply=%d",
-        type, key.proto, src, key.src_port, dst, key.dst_port, status, seen_reply);
-
-    if (!resolver_list_is_upstream(dst)) {
-        DBG("event dropped: %s is not a cached upstream resolver", dst);
-        return NFCT_CB_CONTINUE;
-    }
 
     pthread_mutex_lock(&ctx->lock);
 
@@ -517,20 +505,14 @@ static int conntrack_event_cb(enum nf_conntrack_msg_type type,
         pending_remove(ctx, &key);
         record_reply_locked(ctx, &key.dst_ip);
     } else if (type == NFCT_T_NEW) {
-        bool exists = pending_lookup(ctx, &key) != NULL;
-        if (!exists)
+        if (!pending_lookup(ctx, &key))
             (void)pending_alloc(ctx, &key);
-        DBG("NEW %s -> pending %s", dst, exists ? "already tracked" : "allocated");
     } else if (type == NFCT_T_DESTROY) {
         /* Destroyed before our timer classified it: count it as evidence. */
         struct pending_flow *p = pending_lookup(ctx, &key);
-        DBG("DESTROY %s -> pending %s", dst,
-            !p ? "not found" : p->expired_reported ? "already expired" : "unexpired");
         if (p && !p->expired_reported)
             record_failure_episode_locked(ctx, &key.dst_ip, monotonic_ms(), &cfg);
         pending_remove(ctx, &key);
-    } else {
-        DBG("event type=%d ignored (unreplied, not NEW/DESTROY)", type);
     }
 
     pthread_mutex_unlock(&ctx->lock);
@@ -546,7 +528,14 @@ static void *conntrack_thread(void *arg)
         if (rc < 0) {
             if (errno == EINTR)
                 continue;
-            fprintf(stderr, "nfct_catch failed: %s\n", strerror(errno));
+            if (errno == ENOBUFS) {
+                /* Netlink receive buffer overrun: some events were lost, but
+                 * the stream is still usable. */
+                LOG_ERR("conntrack event buffer overrun; events dropped");
+                continue;
+            }
+            LOG_ERR("nfct_catch failed: %s; conntrack monitoring stopped", strerror(errno));
+            g_event_failed = 1;
             break;
         }
     }
@@ -577,7 +566,7 @@ static bool reset_all_locked(struct monitor_ctx *ctx)
 
 /* Expires overdue pending flows into passive failure evidence. */
 static void expire_pending_locked(struct monitor_ctx *ctx, uint64_t now,
-                                  bool wan_up, const struct failover_config *cfg)
+                                  const struct failover_config *cfg)
 {
     for (uint32_t i = 0; i < MAX_PENDING_FLOWS; ++i) {
         struct pending_flow *p = &ctx->pending[i];
@@ -585,10 +574,7 @@ static void expire_pending_locked(struct monitor_ctx *ctx, uint64_t now,
             continue;
 
         if (now - p->created_ms >= cfg->reply_deadline_ms) {
-            char ip[INET6_ADDRSTRLEN];
             p->expired_reported = true;
-            DBG("pending flow to %s expired after %" PRIu64 "ms (wan_up=%d)",
-                ip_addr_to_str(&p->key.dst_ip, ip, sizeof(ip)), now - p->created_ms, wan_up);
             /* Record evidence unconditionally; WAN check gates the decision in
              * evaluate_failure_locked(), not evidence collection. */
             record_failure_episode_locked(ctx, &p->key.dst_ip, now, cfg);
@@ -628,7 +614,9 @@ static void monitor_tick(struct monitor_ctx *ctx)
         last_resolver_reload_ms = now;
     }
 
-    const bool wan_up = wan_status_is_reachable();
+    /* Polled every tick so WAN state changes are logged promptly; the verdict
+     * itself is re-checked where a decision needs it. */
+    (void)wan_status_is_reachable();
     bool want_failover;
 
     pthread_mutex_lock(&ctx->lock);
@@ -636,14 +624,14 @@ static void monitor_tick(struct monitor_ctx *ctx)
     if (!cfg.enable) {
         bool release = reset_all_locked(ctx);
         pthread_mutex_unlock(&ctx->lock);
-        if (release) {
-            dns_redirect_set_failover(false);
+        if (release && dns_redirect_set_failover(false)) {
             g_failover_active = false;
+            LOG_INFO("FAILOVER: disabled by configuration; released");
         }
         return;
     }
 
-    expire_pending_locked(ctx, now, wan_up, &cfg);
+    expire_pending_locked(ctx, now, &cfg);
 
     for (uint32_t i = 0; i < MAX_DNS_SERVERS; ++i)
         evaluate_server_locked(&ctx->servers[i], now, &cfg);
@@ -652,15 +640,19 @@ static void monitor_tick(struct monitor_ctx *ctx)
 
     pthread_mutex_unlock(&ctx->lock);
 
-    /* Apply the aggregate decision outside the lock (it may run systemctl). */
+    /* Apply the aggregate decision outside the lock (it may run systemctl).
+     * Our view only flips once the action succeeded, so a failed attempt is
+     * retried (with backoff inside dns_redirect) rather than forgotten. */
     if (want_failover && !g_failover_active) {
-        fprintf(stderr, "FAILOVER: all upstream resolvers unreachable; engaging\n");
-        dns_redirect_set_failover(true);
-        g_failover_active = true;
+        if (dns_redirect_set_failover(true)) {
+            g_failover_active = true;
+            LOG_WARN("FAILOVER: all upstream resolvers unreachable; engaged");
+        }
     } else if (!want_failover && g_failover_active) {
-        fprintf(stderr, "FAILOVER: an upstream resolver recovered; releasing\n");
-        dns_redirect_set_failover(false);
-        g_failover_active = false;
+        if (dns_redirect_set_failover(false)) {
+            g_failover_active = false;
+            LOG_INFO("FAILOVER: an upstream resolver recovered; released");
+        }
     }
 }
 
@@ -680,7 +672,7 @@ int dns_monitor_run(void)
 
     memset(&ctx, 0, sizeof(ctx));
     if (pthread_mutex_init(&ctx.lock, NULL) != 0) {
-        fprintf(stderr, "pthread_mutex_init failed\n");
+        LOG_ERR("pthread_mutex_init failed");
         return -1;
     }
 
@@ -695,24 +687,24 @@ int dns_monitor_run(void)
     /* Non-fatal: until the WAN source is up, WAN is treated as down, so no
      * false failures are recorded. */
     if (!wan_status_init())
-        fprintf(stderr, "WAN: status unknown, treating WAN as down until available\n");
+        LOG_WARN("WAN: status unknown, treating WAN as down until available");
 
     ctx.nfct = nfct_open(CONNTRACK, NFCT_ALL_CT_GROUPS);
     if (!ctx.nfct) {
-        fprintf(stderr, "nfct_open failed: %s\n", strerror(errno));
+        LOG_ERR("nfct_open failed: %s", strerror(errno));
         pthread_mutex_destroy(&ctx.lock);
         return -1;
     }
 
     if (nfct_callback_register(ctx.nfct, NFCT_T_ALL, conntrack_event_cb, &ctx) < 0) {
-        fprintf(stderr, "nfct_callback_register failed: %s\n", strerror(errno));
+        LOG_ERR("nfct_callback_register failed: %s", strerror(errno));
         nfct_close(ctx.nfct);
         pthread_mutex_destroy(&ctx.lock);
         return -1;
     }
 
     if (pthread_create(&tid, NULL, conntrack_thread, &ctx) != 0) {
-        fprintf(stderr, "pthread_create failed\n");
+        LOG_ERR("pthread_create failed");
         nfct_callback_unregister(ctx.nfct);
         nfct_close(ctx.nfct);
         pthread_mutex_destroy(&ctx.lock);
@@ -720,8 +712,8 @@ int dns_monitor_run(void)
     }
 
     struct failover_config cfg = failover_config_get();
-    fprintf(stderr, "DNS conntrack monitor started: deadline=%ums, threshold=%u episodes\n",
-            cfg.reply_deadline_ms, cfg.failure_threshold);
+    LOG_INFO("DNS conntrack monitor started: deadline=%ums, threshold=%u episodes",
+             cfg.reply_deadline_ms, cfg.failure_threshold);
 
     while (g_running) {
         monitor_tick(&ctx);
@@ -737,6 +729,6 @@ int dns_monitor_run(void)
     pthread_mutex_destroy(&ctx.lock);
     wan_status_exit();
 
-    fprintf(stderr, "DNS conntrack monitor stopped\n");
-    return 0;
+    LOG_INFO("DNS conntrack monitor stopped");
+    return g_event_failed ? -1 : 0;
 }

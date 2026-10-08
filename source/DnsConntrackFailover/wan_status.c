@@ -12,9 +12,14 @@
 
 #include "wan_status.h"
 
+#include "dns_log.h"
+
+#include <errno.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 /* RTF_UP from <linux/route.h>; inlined to avoid pulling in kernel headers. */
 #define RT_FLAG_UP 0x0001U
@@ -26,8 +31,10 @@ static atomic_bool g_wan_up = false;
 static bool find_default_route_iface(char *iface, size_t iface_len)
 {
     FILE *fp = fopen("/proc/net/route", "r");
-    if (!fp)
+    if (!fp) {
+        LOG_ERR("WAN: cannot open /proc/net/route: %s", strerror(errno));
         return false;
+    }
 
     char line[256];
     bool found = false;
@@ -78,8 +85,10 @@ static bool read_sysfs_net_attr(const char *iface, const char *attr,
 static bool route_flag_up(const char *iface)
 {
     FILE *fp = fopen("/proc/net/route", "r");
-    if (!fp)
+    if (!fp) {
+        LOG_ERR("WAN: cannot open /proc/net/route: %s", strerror(errno));
         return false;
+    }
 
     char line[256];
     bool up = false;
@@ -116,8 +125,11 @@ static bool wan_is_up(void)
     bool have_operstate = read_sysfs_net_attr(iface, "operstate", operstate, sizeof(operstate));
     bool have_carrier = read_sysfs_net_attr(iface, "carrier", carrier, sizeof(carrier));
 
-    if (have_operstate)
+    if (have_operstate) {
+        operstate[strcspn(operstate, "\r\n")] = '\0';
+        carrier[strcspn(carrier, "\r\n")] = '\0';
         return strncmp(operstate, "up", 2) == 0 && (!have_carrier || carrier[0] == '1');
+    }
 
     return route_flag_up(iface);
 }
@@ -125,8 +137,7 @@ static bool wan_is_up(void)
 bool wan_status_init(void)
 {
     atomic_store(&g_wan_up, wan_is_up());
-    fprintf(stderr, "WAN: default-route-interface probe, initial state=%s\n",
-            atomic_load(&g_wan_up) ? "UP" : "DOWN");
+    LOG_INFO("WAN: initial state=%s", atomic_load(&g_wan_up) ? "UP" : "DOWN");
     return true;
 }
 

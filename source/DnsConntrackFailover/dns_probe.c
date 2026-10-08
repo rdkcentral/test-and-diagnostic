@@ -6,6 +6,8 @@
 
 #include "dns_probe.h"
 
+#include "dns_log.h"
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
@@ -70,7 +72,7 @@ static bool resolve_addr(const char *server_ip, struct sockaddr_storage *addr,
         return true;
     }
 
-    fprintf(stderr, "VERIFY: invalid DNS server address '%s'\n", server_ip);
+    LOG_ERR("VERIFY: invalid DNS server address '%s'", server_ip);
     return false;
 }
 
@@ -78,7 +80,8 @@ static void tag_probe_socket(int fd)
 {
     unsigned mark = DNS_PROBE_FWMARK;
     if (setsockopt(fd, SOL_SOCKET, SO_MARK, &mark, sizeof(mark)) != 0)
-        fprintf(stderr, "VERIFY: SO_MARK failed: %s\n", strerror(errno));
+        LOG_ERR("VERIFY: SO_MARK failed: %s (probe may be redirected to the local resolver)",
+                strerror(errno));
 }
 
 /* True if resp is a DNS response whose ID matches query[0..1]. */
@@ -108,7 +111,7 @@ static bool probe_udp(const char *server_ip, unsigned timeout_ms)
 
     int fd = socket(family, SOCK_DGRAM, IPPROTO_UDP);
     if (fd < 0) {
-        fprintf(stderr, "VERIFY: UDP socket() failed: %s\n", strerror(errno));
+        LOG_ERR("VERIFY: UDP socket() failed: %s", strerror(errno));
         return false;
     }
     tag_probe_socket(fd);
@@ -118,13 +121,19 @@ static bool probe_udp(const char *server_ip, unsigned timeout_ms)
 
     bool ok = false;
     if (sendto(fd, query, len, 0, (struct sockaddr *)&addr, addr_len) < 0) {
-        fprintf(stderr, "VERIFY: UDP sendto(%s) failed: %s\n", server_ip, strerror(errno));
+        LOG_ERR("VERIFY: UDP sendto(%s) failed: %s", server_ip, strerror(errno));
     } else {
         struct pollfd pfd = { .fd = fd, .events = POLLIN };
-        if (poll(&pfd, 1, (int)timeout_ms) > 0) {
+        int pr = poll(&pfd, 1, (int)timeout_ms);
+        if (pr < 0) {
+            LOG_ERR("VERIFY: UDP poll(%s) failed: %s", server_ip, strerror(errno));
+        } else if (pr > 0) {
             uint8_t resp[512];
             ssize_t n = recv(fd, resp, sizeof(resp), 0);
-            ok = reply_matches(query, resp, n);
+            if (n < 0)
+                LOG_ERR("VERIFY: UDP recv(%s) failed: %s", server_ip, strerror(errno));
+            else if (!(ok = reply_matches(query, resp, n)))
+                LOG_WARN("VERIFY: UDP reply from %s ignored (malformed or ID mismatch)", server_ip);
         }
     }
 
@@ -145,13 +154,13 @@ static bool probe_tcp(const char *server_ip, unsigned timeout_ms)
 
     int fd = socket(family, SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_TCP);
     if (fd < 0) {
-        fprintf(stderr, "VERIFY: TCP socket() failed: %s\n", strerror(errno));
+        LOG_ERR("VERIFY: TCP socket() failed: %s", strerror(errno));
         return false;
     }
     tag_probe_socket(fd);
 
     if (connect(fd, (struct sockaddr *)&addr, addr_len) < 0 && errno != EINPROGRESS) {
-        fprintf(stderr, "VERIFY: TCP connect(%s) failed: %s\n", server_ip, strerror(errno));
+        LOG_ERR("VERIFY: TCP connect(%s) failed: %s", server_ip, strerror(errno));
         close(fd);
         return false;
     }
@@ -159,8 +168,23 @@ static bool probe_tcp(const char *server_ip, unsigned timeout_ms)
     struct pollfd pfd = { .fd = fd, .events = POLLOUT };
     int so_err = 0;
     socklen_t so_err_len = sizeof(so_err);
-    if (poll(&pfd, 1, (int)timeout_ms) <= 0 ||
-        getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_err, &so_err_len) != 0 || so_err != 0) {
+    int pr = poll(&pfd, 1, (int)timeout_ms);
+    if (pr < 0) {
+        LOG_ERR("VERIFY: TCP poll(%s) failed: %s", server_ip, strerror(errno));
+        close(fd);
+        return false;
+    }
+    if (pr == 0) { /* connect timed out: ordinary "no reply", reported by the caller */
+        close(fd);
+        return false;
+    }
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_err, &so_err_len) != 0) {
+        LOG_ERR("VERIFY: TCP getsockopt(%s) failed: %s", server_ip, strerror(errno));
+        close(fd);
+        return false;
+    }
+    if (so_err != 0) {
+        LOG_WARN("VERIFY: TCP connect(%s) failed: %s", server_ip, strerror(so_err));
         close(fd);
         return false;
     }
@@ -174,15 +198,20 @@ static bool probe_tcp(const char *server_ip, unsigned timeout_ms)
 
     bool ok = false;
     if (send(fd, pkt, 2 + len, 0) < 0) {
-        fprintf(stderr, "VERIFY: TCP send(%s) failed: %s\n", server_ip, strerror(errno));
+        LOG_ERR("VERIFY: TCP send(%s) failed: %s", server_ip, strerror(errno));
     } else {
         pfd.events = POLLIN;
-        if (poll(&pfd, 1, (int)timeout_ms) > 0) {
+        pr = poll(&pfd, 1, (int)timeout_ms);
+        if (pr < 0) {
+            LOG_ERR("VERIFY: TCP poll(%s) failed: %s", server_ip, strerror(errno));
+        } else if (pr > 0) {
             uint8_t resp[514];
             ssize_t n = recv(fd, resp, sizeof(resp), 0);
-            /* Skip the 2-byte length prefix before matching the DNS header. */
-            if (n >= 2)
-                ok = reply_matches(query, resp + 2, n - 2);
+            if (n < 0)
+                LOG_ERR("VERIFY: TCP recv(%s) failed: %s", server_ip, strerror(errno));
+            else if (n < 2 || !(ok = reply_matches(query, resp + 2, n - 2)))
+                /* Skip the 2-byte length prefix before matching the DNS header. */
+                LOG_WARN("VERIFY: TCP reply from %s ignored (malformed or ID mismatch)", server_ip);
         }
     }
 

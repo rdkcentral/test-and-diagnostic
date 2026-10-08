@@ -31,6 +31,7 @@ dns_conntrack_failover_SOURCES = \
 dns_conntrack_failover_LDFLAGS = -lnetfilter_conntrack -lnfnetlink -lpthread
 
 EXTRA_DIST = \
+	dns_log.h \
 	dns_monitor.h \
 	dns_probe.h \
 	resolver_list.h \

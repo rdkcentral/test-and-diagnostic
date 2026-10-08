@@ -9,6 +9,9 @@
 
 #include "failover_config.h"
 
+#include "dns_log.h"
+
+#include <errno.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -88,8 +91,12 @@ static bool parse_uint(const char *val, unsigned *out)
 static void apply_line(struct failover_config *cfg, char *line)
 {
     char *eq = strchr(line, '=');
-    if (!eq)
+    if (!eq) {
+        char *t = trim(line);
+        if (t[0] != '\0' && t[0] != '#')
+            LOG_WARN("CONFIG: ignoring malformed line '%s' (expect Key=Value)", t);
         return;
+    }
 
     *eq = '\0';
     char *key = trim(line);
@@ -102,15 +109,18 @@ static void apply_line(struct failover_config *cfg, char *line)
         if (parse_uint(val, &n) && n <= 1)
             cfg->enable = (n != 0);
         else
-            fprintf(stderr, "CONFIG: rejected Enable='%s' (expect 0/1)\n", val);
+            LOG_ERR("CONFIG: rejected Enable='%s' (expect 0/1); keeping default", val);
         return;
     }
 
     if (strcmp(key, "ResolverSource") == 0) {
-        if (val[0] != '\0')
-            snprintf(cfg->resolver_source, sizeof(cfg->resolver_source), "%s", val);
+        if (val[0] == '\0')
+            LOG_ERR("CONFIG: rejected empty ResolverSource; keeping default");
+        else if (strlen(val) >= sizeof(cfg->resolver_source))
+            LOG_ERR("CONFIG: rejected ResolverSource, path longer than %zu chars",
+                    sizeof(cfg->resolver_source) - 1);
         else
-            fprintf(stderr, "CONFIG: rejected empty ResolverSource\n");
+            snprintf(cfg->resolver_source, sizeof(cfg->resolver_source), "%s", val);
         return;
     }
 
@@ -123,61 +133,142 @@ static void apply_line(struct failover_config *cfg, char *line)
         if (parse_uint(val, &n) && n >= p->min)
             *(unsigned *)((char *)cfg + p->offset) = n;
         else
-            fprintf(stderr, "CONFIG: rejected %s='%s' (min %u)\n", key, val, p->min);
+            LOG_ERR("CONFIG: rejected %s='%s' (integer >= %u expected); keeping default",
+                    key, val, p->min);
         return;
     }
 
-    fprintf(stderr, "CONFIG: ignoring unknown key '%s'\n", key);
+    LOG_WARN("CONFIG: ignoring unknown key '%s'", key);
 }
 
-/* Builds a fresh config from defaults overlaid with the file (if present). */
-static struct failover_config build_config(void)
+/* Builds a fresh config from defaults overlaid with the file (if present).
+ * Returns 0 on success (*from_file says whether a file was read), or the
+ * errno of a failed open; cfg holds defaults in that case. */
+static int build_config(struct failover_config *cfg, bool *from_file)
 {
-    struct failover_config cfg = g_defaults;
+    *cfg = g_defaults;
+    *from_file = false;
 
     FILE *fp = fopen(CONFIG_PATH, "r");
-    if (!fp) {
-        fprintf(stderr, "CONFIG: %s not present, using defaults\n", CONFIG_PATH);
-        return cfg;
-    }
+    if (!fp)
+        return errno == ENOENT ? 0 : errno;
 
     char line[320];
     while (fgets(line, sizeof(line), fp))
-        apply_line(&cfg, line);
+        apply_line(cfg, line);
     fclose(fp);
+    *from_file = true;
 
-    if (cfg.recovery_initial_ms > cfg.recovery_max_ms) {
-        fprintf(stderr, "CONFIG: RecoveryInitial > RecoveryMax, clamping to RecoveryMax\n");
-        cfg.recovery_initial_ms = cfg.recovery_max_ms;
+    if (cfg->recovery_initial_ms > cfg->recovery_max_ms) {
+        LOG_WARN("CONFIG: RecoveryInitial (%u) > RecoveryMax (%u), clamping to RecoveryMax",
+                 cfg->recovery_initial_ms, cfg->recovery_max_ms);
+        cfg->recovery_initial_ms = cfg->recovery_max_ms;
     }
 
-    fprintf(stderr, "CONFIG: loaded %s\n", CONFIG_PATH);
-    return cfg;
+    return 0;
+}
+
+static void log_effective_config(const struct failover_config *c, bool from_file)
+{
+    LOG_INFO("CONFIG: %s; Enable=%d ResolverSource=%s ReplyDeadline=%u FailureEpisodeGap=%u "
+             "FailureThreshold=%u MonitorTick=%u VerifyTimeout=%u VerifyAttempts=%u "
+             "VerifyCooldown=%u RecoveryInitial=%u RecoveryMax=%u "
+             "RecoverySuccessThreshold=%u ResolverReload=%u",
+             from_file ? CONFIG_PATH : "no config file, using defaults",
+             c->enable, c->resolver_source, c->reply_deadline_ms, c->failure_episode_gap_ms,
+             c->failure_threshold, c->monitor_tick_ms, c->verify_timeout_ms,
+             c->verify_attempts, c->verify_cooldown_ms, c->recovery_initial_ms,
+             c->recovery_max_ms, c->recovery_success_threshold, c->resolver_reload_ms);
+}
+
+/* One line per setting whose value differs between old and fresh. */
+static void log_config_changes(const struct failover_config *old,
+                               const struct failover_config *fresh, bool from_file)
+{
+    bool changed = false;
+
+    if (old->enable != fresh->enable) {
+        LOG_INFO("CONFIG: Enable %d -> %d", old->enable, fresh->enable);
+        changed = true;
+    }
+    if (strcmp(old->resolver_source, fresh->resolver_source) != 0) {
+        LOG_INFO("CONFIG: ResolverSource %s -> %s", old->resolver_source, fresh->resolver_source);
+        changed = true;
+    }
+    for (size_t i = 0; i < sizeof(g_uint_params) / sizeof(g_uint_params[0]); ++i) {
+        const struct uint_param *p = &g_uint_params[i];
+        unsigned o = *(const unsigned *)((const char *)old + p->offset);
+        unsigned n = *(const unsigned *)((const char *)fresh + p->offset);
+        if (o != n) {
+            LOG_INFO("CONFIG: %s %u -> %u", p->key, o, n);
+            changed = true;
+        }
+    }
+
+    if (!changed)
+        LOG_INFO("CONFIG: %s reloaded, no setting changed", from_file ? CONFIG_PATH : "defaults");
 }
 
 void failover_config_refresh(void)
 {
+    static bool missing_logged, read_err_logged;
     struct stat st;
     bool have_stat = stat(CONFIG_PATH, &st) == 0;
+    int stat_err = errno;
 
     /* After the first load, only rebuild when the file is present and its
      * mtime changed. A vanished file keeps the last-known config rather than
      * snapping back to defaults or rebuilding every tick. */
     if (g_initialized) {
-        if (!have_stat)
+        if (!have_stat) {
+            if (!missing_logged) {
+                missing_logged = true;
+                LOG_WARN("CONFIG: %s not accessible (%s); keeping last-known configuration",
+                         CONFIG_PATH, strerror(stat_err));
+            }
             return;
+        }
+        if (missing_logged) {
+            missing_logged = false;
+            LOG_INFO("CONFIG: %s is back", CONFIG_PATH);
+        }
         if (st.st_mtime == g_mtime)
             return;
     }
 
-    struct failover_config fresh = build_config();
+    struct failover_config fresh;
+    bool from_file;
+    int err = build_config(&fresh, &from_file);
+
+    if (err) {
+        if (!read_err_logged) {
+            read_err_logged = true;
+            LOG_ERR("CONFIG: cannot read %s: %s; %s", CONFIG_PATH, strerror(err),
+                    g_initialized ? "keeping last-known configuration" : "using defaults");
+        }
+        if (g_initialized)
+            return; /* retried next tick; error reported once */
+    } else if (read_err_logged) {
+        read_err_logged = false;
+        LOG_INFO("CONFIG: %s readable again", CONFIG_PATH);
+    }
+
+    struct failover_config old;
+    bool first;
 
     pthread_mutex_lock(&g_lock);
+    first = !g_initialized;
+    old = g_config;
     g_config = fresh;
     g_initialized = true;
     pthread_mutex_unlock(&g_lock);
 
-    if (have_stat)
+    if (first)
+        log_effective_config(&fresh, from_file);
+    else
+        log_config_changes(&old, &fresh, from_file);
+
+    if (have_stat && !err)
         g_mtime = st.st_mtime;
 }
 
