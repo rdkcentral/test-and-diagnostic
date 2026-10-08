@@ -1313,6 +1313,7 @@ TEST_F(WanConnectivityCheckTest, WANCNCTVTYCHK_StartConnectivityCheck_InvalidPar
 {
     char intfFile[] = "/sys/class/net/brlan0";
     PWANCNCTVTY_CHK_GLOBAL_INTF_INFO intf_list = NULL;
+    
     rbusHandle_t handle = NULL;
     rbusObject_t inParams;
     rbusObject_t outParams = NULL;
@@ -1388,4 +1389,5 @@ TEST_F(WanConnectivityCheckTest, WANCNCTVTYCHK_StartConnectivityCheck_InvalidPar
 
     rbusError_t result = WANCNCTVTYCHK_StartConnectivityCheck(handle, "Device.X_RDK_DNSInternet.StartConnectivityCheck()", inParams, outParams, NULL);
     EXPECT_EQ(result, RBUS_ERROR_INVALID_INPUT);
+
 }
