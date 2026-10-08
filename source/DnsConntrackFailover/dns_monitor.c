@@ -342,6 +342,10 @@ static void evaluate_recovery_locked(struct dns_server_health *s, uint64_t now_m
 {
     char ip[INET6_ADDRSTRLEN];
 
+    /* Ensure backoff is initialized (in case of edge timing) */
+    if (s->recovery_delay_ms == 0)
+        s->recovery_delay_ms = cfg->recovery_initial_ms;
+
     if (in_cooldown(s, now_ms, s->recovery_delay_ms))
         return;
 
@@ -414,6 +418,7 @@ static void evaluate_failure_locked(struct dns_server_health *s, uint64_t now_ms
     s->failure_episodes = 0;
     s->recovery_successes = 0;
     s->recovery_delay_ms = cfg->recovery_initial_ms;
+    s->last_verify_ms = now_ms;  /* Initialize so recovery backoff works on first retry */
     LOG_WARN("DECISION: %s failed while WAN reachable",
              ip_addr_to_str(&s->address, ip, sizeof(ip)));
 }
