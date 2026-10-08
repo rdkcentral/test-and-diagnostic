@@ -168,12 +168,10 @@ BOOL SelfHeal_SetParamBoolValue
                 CcspTraceInfo(("%s : SelfHealCronEnable is disabled, running as background process\n", __FUNCTION__));
                 if ( bValue == TRUE )
                 {
-                    CcspTraceInfo(("SelfHeal cron is disabled, starting selfheal scripts as process\n"));
 			        start_self_heal_scripts();
 	            }
                 else
 	            {
-                    CcspTraceInfo(("SelfHeal cron and selfheal is disabled, stopping selfheal scripts process\n"));
 			        stop_self_heal_scripts();
 	            }
 	        }
@@ -871,7 +869,6 @@ ConnectivityTest_SetParamUlongValue
 	    }
         if(g_boot_cron_mode == 1)
         {
-            CcspTraceInfo(("Connectivity ping Interval updated from %lu to %lu minutes\n", currentInterval, uValue));
             // First, remove old cron entry
             v_secure_system("crontab -l 2>/dev/null | sed '/self_heal_connectivity_test.sh/d' | crontab -");
             // Then, add new cron entry with updated interval
@@ -1640,7 +1637,6 @@ ResourceMonitor_SetParamUlongValue
 
         if(g_boot_cron_mode == 1)
         {
-            CcspTraceInfo(("resource monitor Interval updated to %lu minutes\n", uValue));
             // First, remove old cron entry
             v_secure_system("crontab -l 2>/dev/null | sed '/resource_monitor.sh/d' | crontab -");
             // Then, add new cron entry with updated interval
