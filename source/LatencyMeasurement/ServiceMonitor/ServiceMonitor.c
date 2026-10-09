@@ -201,10 +201,18 @@ int UpdateLatencyMeasurement_EnableCount(bool LowLatency_Enable)
 		CcspTraceInfo(("%s: latencyMeasurementCount:%d\n", __FUNCTION__,count_snapshot));
 		if (count_snapshot == 0)
 		{
-			if (sysevent_fd_g < 0 || sysevent_set(sysevent_fd_g, sysevent_token_g, LATENCY_MEASUREMENT_DISABLE, " ", 0) != 0)
+			if(0 > sysevent_fd_g)
 			{
-				CcspTraceInfo(("Failed to publish %s from %s:%d\n", LATENCY_MEASUREMENT_DISABLE, __FUNCTION__, __LINE__));
+				CcspTraceInfo(("Failed to execute sysevent_set. sysevent_fd_g have no value:'%d'\n", sysevent_fd_g));
 				return FALSE;
+			}
+			else
+			{
+				if(sysevent_set(sysevent_fd_g, sysevent_token_g, LATENCY_MEASUREMENT_DISABLE, " ", 0) != 0)
+				{
+					CcspTraceInfo(("Failed to execute sysevent_set from %s:%d\n", __FUNCTION__, __LINE__));
+					return FALSE;
+				}
 			}
 		}
 		//set updated value in db
