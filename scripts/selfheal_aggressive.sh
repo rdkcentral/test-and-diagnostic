@@ -1729,10 +1729,56 @@ if ip -6 addr show dev $WAN_INTERFACE scope global | grep -q "dadfailed"; then
     PID=$(ps | grep $PROC | grep -v grep  | awk '{print $1}')
 
     if [ -n "$PID" ]; then
-       Kill -9 $PID
+       kill -9 $PID
     else
        echo_t "$PROC Process not running"
     fi
+
+    #xf10 global ipv6 has a dadfailed with WAN BNG/DHCP server's address due to stale entries in the server .
+    #Restarting dibbler-client is not resolving this issue
+    #Recovery code will re-configure the L3 intrface
+        #1.if the dadfailed is with BNG/server's address
+        #2.if there is no dadfailed during selfheal
+    if [ "$MODEL_NUM" = "SCXF11BFL" ]; then
+        echo_t "Starting Recovery for Global IPv6 address..."
+        IPV6=$(ip -6 addr show dev $WAN_INTERFACE scope global | grep inet6 | grep -i "dadfailed" | awk '{print $2}')
+        if [ -n "$IPV6" ]; then
+            RECOVER=0
+            FAILED_IPV6=${IPV6%/*}
+            #Get WAN Gateway LL address
+            GW_LLA=$(ip -6 route show default dev $WAN_INTERFACE | awk '/default/ {print $3}')
+            #Run neighbor discovery for DAD check
+            NDISC_OUT=$(ndisc6 "$FAILED_IPV6" $WAN_INTERFACE 2>/dev/null)
+
+            if [ -z "$NDISC_OUT" ]; then
+                echo_t "No discovery response for $FAILED_IPV6. Proceeding with recovery."
+                RECOVER=1
+            elif echo "$NDISC_OUT" | grep -qi "No response"; then
+                echo_t "No discovery response for $FAILED_IPV6. Proceeding with recovery."
+                RECOVER=1
+            elif [ -n "$GW_LLA" ] && echo "$NDISC_OUT" | grep -Fqi "$GW_LLA"; then
+                echo_t "Gateway $GW_LLA is responding for $FAILED_IPV6. Proceeding with recovery"
+                RECOVER=1
+            else
+                echo_t "Address is claimed by a non-gateway device. Skipping recovery"
+                RECOVER=0
+            fi
+
+            if [ "$RECOVER" = "1" ]; then
+                echo_t "No valid Duplicate Address Detected..."
+                echo_t "Deleting and adding address $IPV6 on $WAN_INTERFACE"
+                ip -6 addr del "$IPV6" dev $WAN_INTERFACE
+                #Kernel performs DAD check when ipv6 added on the interface
+                #So set nodad for this address since dad check is already performed
+                ip -6 addr add "$IPV6" dev $WAN_INTERFACE nodad
+                sleep 1
+                echo_t "Restarting sshd..."
+                sysevent set sshd-restart
+            fi
+        else
+            echo_t "Cannot find global IPV6 address"
+        fi
+    fi #SCXF11BFL
 else
    echo_t "SUCCESS: no IPV6 address conflict found - IPV6 is usable"
 fi
