@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <stdlib.h>
 
+#include "rdk_debug.h"
 #include <telemetry_busmessage_sender.h>
 
 static void on_signal(int signo)
@@ -23,6 +24,9 @@ int main(void)
 {
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
+
+    setenv("LOG4C_RCPATH", "/rdklogger", 1);
+    rdk_logger_init("/etc/debug.ini");
 
     t2_init("dns_conntrack_failover");
     int rc = dns_monitor_run();

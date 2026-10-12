@@ -256,15 +256,11 @@ static bool verify_server(const struct ip_addr *address,
     unsigned attempts = cfg->verify_attempts ? cfg->verify_attempts : 1;
     for (unsigned a = 1; a <= attempts; ++a) {
         if (dns_probe(ip, cfg->verify_timeout_ms)) {
-            LOG_INFO("VERIFY: %s replied (attempt %u/%u)", ip, a, attempts);
             g_last_verification = "Success";
             return true;
         }
     }
 
-    /* Log only at state transitions, not on every retry cycle. The health
-     * decision points below already emit a single message when a server enters
-     * FAILED/HEALTHY, which is the meaningful event for operators. */
     g_last_verification = "Failed";
     return false;
 }
@@ -291,11 +287,6 @@ static void record_reply_locked(struct monitor_ctx *ctx, const struct ip_addr *s
     if (s->state == SERVER_FAILED)
         return;
 
-    if (s->failure_episodes != 0) {
-        char ip[INET6_ADDRSTRLEN];
-        LOG_INFO("PASSIVE: %s answered; cleared %u failure episode(s)",
-                 ip_addr_to_str(server_ip, ip, sizeof(ip)), s->failure_episodes);
-    }
     s->failure_episodes = 0;
     if (s->state == SERVER_SUSPECT) {
         s->state = SERVER_HEALTHY;
@@ -309,7 +300,6 @@ static void record_failure_episode_locked(struct monitor_ctx *ctx,
                                           const struct failover_config *cfg)
 {
     struct dns_server_health *s = server_get(ctx, server_ip, true);
-    char ip[INET6_ADDRSTRLEN];
 
     if (!s)
         return; /* table-full error already reported by server_get() */
@@ -333,10 +323,6 @@ static void record_failure_episode_locked(struct monitor_ctx *ctx,
     s->recovery_successes = 0;
     if (s->state == SERVER_HEALTHY)
         s->state = SERVER_SUSPECT;
-
-    LOG_INFO("PASSIVE: %s failure episode %u/%u",
-             ip_addr_to_str(server_ip, ip, sizeof(ip)),
-             s->failure_episodes, cfg->failure_threshold);
 }
 
 /* True once last_verify_ms is set and fewer than cooldown_ms have elapsed. */
@@ -351,8 +337,6 @@ static bool in_cooldown(const struct dns_server_health *s, uint64_t now_ms,
 static void evaluate_recovery_locked(struct dns_server_health *s, uint64_t now_ms,
                                      const struct failover_config *cfg)
 {
-    char ip[INET6_ADDRSTRLEN];
-
     /* Ensure backoff is initialized (in case of edge timing) */
     if (s->recovery_delay_ms == 0)
         s->recovery_delay_ms = cfg->recovery_initial_ms;
@@ -370,14 +354,9 @@ static void evaluate_recovery_locked(struct dns_server_health *s, uint64_t now_m
         return;
     }
 
-    if (++s->recovery_successes < cfg->recovery_success_threshold) {
-        LOG_INFO("RECOVERY: %s success %u/%u",
-                 ip_addr_to_str(&s->address, ip, sizeof(ip)),
-                 s->recovery_successes, cfg->recovery_success_threshold);
+    if (++s->recovery_successes < cfg->recovery_success_threshold)
         return;
-    }
 
-    LOG_INFO("DECISION: %s recovered", ip_addr_to_str(&s->address, ip, sizeof(ip)));
     t2_event_d("SYS_INFO_DNS_resolver_recovered", 1);
     g_last_recovery_time = time(NULL);
     s->state = SERVER_HEALTHY;
@@ -390,8 +369,6 @@ static void evaluate_recovery_locked(struct dns_server_health *s, uint64_t now_m
 static void evaluate_failure_locked(struct dns_server_health *s, uint64_t now_ms,
                                     const struct failover_config *cfg)
 {
-    char ip[INET6_ADDRSTRLEN];
-
     if (s->failure_episodes < cfg->failure_threshold)
         return;
 
@@ -401,8 +378,6 @@ static void evaluate_failure_locked(struct dns_server_health *s, uint64_t now_ms
     /* Stagger the first probe across the jitter window. */
     if (s->verify_at_ms == 0) {
         s->verify_at_ms = now_ms + ((uint64_t)rand() % VERIFY_JITTER_MAX_MS);
-        LOG_INFO("VERIFY: %s scheduled in %" PRIu64 " ms",
-                 ip_addr_to_str(&s->address, ip, sizeof(ip)), s->verify_at_ms - now_ms);
         return;
     }
     if (now_ms < s->verify_at_ms)
@@ -412,16 +387,12 @@ static void evaluate_failure_locked(struct dns_server_health *s, uint64_t now_ms
     s->last_verify_ms = now_ms;
 
     if (verify_server(&s->address, cfg)) {
-        LOG_INFO("DECISION: %s verified healthy; passive failure evidence discarded",
-                 ip_addr_to_str(&s->address, ip, sizeof(ip)));
         s->state = SERVER_HEALTHY;
         s->failure_episodes = 0;
         return;
     }
 
     if (!wan_status_is_reachable()) {
-        LOG_INFO("DECISION: WAN down; suppressing failure for %s",
-                 ip_addr_to_str(&s->address, ip, sizeof(ip)));
         s->state = SERVER_HEALTHY;
         s->failure_episodes = 0;
         return;
@@ -433,8 +404,6 @@ static void evaluate_failure_locked(struct dns_server_health *s, uint64_t now_ms
     s->recovery_delay_ms = cfg->recovery_initial_ms;
     s->last_verify_ms = now_ms;  /* Initialize so recovery backoff works on first retry */
     g_last_failure_time = time(NULL);
-    LOG_WARN("DECISION: %s failed while WAN reachable",
-             ip_addr_to_str(&s->address, ip, sizeof(ip)));
 }
 
 static void evaluate_server_locked(struct dns_server_health *s, uint64_t now_ms,
@@ -604,19 +573,23 @@ static void expire_pending_locked(struct monitor_ctx *ctx, uint64_t now,
 /* Summarises server health; FailoverActive is layered on by publish_status(). */
 static struct status_info collect_status_locked(const struct monitor_ctx *ctx, bool enabled)
 {
-    bool any_failed = false, any_suspect = false;
+    uint32_t total = 0, failed = 0;
+    bool any_suspect = false;
 
     for (uint32_t i = 0; i < MAX_DNS_SERVERS; ++i) {
         const struct dns_server_health *s = &ctx->servers[i];
         if (!s->used)
             continue;
-        any_failed  |= (s->state == SERVER_FAILED);
+        total++;
+        failed += (s->state == SERVER_FAILED);
         any_suspect |= (s->state == SERVER_SUSPECT);
     }
 
+    /* Failed only when every resolver is down; a partial outage is Suspect. */
     struct status_info info = {
-        .state = !enabled ? "Disabled" : any_failed ? "Failed" :
-                 any_suspect ? "Suspect" : "Healthy",
+        .state = !enabled ? "Disabled" :
+                 (total > 0 && failed == total) ? "Failed" :
+                 (failed > 0 || any_suspect) ? "Suspect" : "Healthy",
         .last_failure_time  = g_last_failure_time,
         .last_recovery_time = g_last_recovery_time,
         .last_verification  = g_last_verification,
