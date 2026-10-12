@@ -11,6 +11,8 @@
 #include <signal.h>
 #include <stdlib.h>
 
+#include <telemetry_busmessage_sender.h>
+
 static void on_signal(int signo)
 {
     (void)signo;
@@ -22,5 +24,9 @@ int main(void)
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
 
-    return dns_monitor_run() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    t2_init("dns_conntrack_failover");
+    int rc = dns_monitor_run();
+    t2_uninit();
+
+    return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

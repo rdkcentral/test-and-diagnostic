@@ -24,4 +24,7 @@ void resolver_list_refresh(void);
  * all DNS rather than nothing. */
 bool resolver_list_is_upstream(const char *ip);
 
+/* Number of configured upstream resolvers currently loaded. */
+int resolver_list_count(void);
+
 #endif /* RESOLVER_LIST_H */

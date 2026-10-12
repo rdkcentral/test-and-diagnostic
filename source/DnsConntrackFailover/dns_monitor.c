@@ -28,6 +28,7 @@
 #include "failover_config.h"
 #include "ip_addr.h"
 #include "resolver_list.h"
+#include "status_file.h"
 #include "wan_status.h"
 
 #include <errno.h>
@@ -45,6 +46,7 @@
 #include <unistd.h>
 
 #include <libnetfilter_conntrack/libnetfilter_conntrack.h>
+#include <telemetry_busmessage_sender.h>
 
 #define DNS_PORT            53U
 #define MAX_PENDING_FLOWS   2048U
@@ -97,6 +99,11 @@ struct monitor_ctx {
 static volatile sig_atomic_t g_running = 1;
 static volatile sig_atomic_t g_event_failed; /* conntrack thread died on an error */
 static bool g_failover_active; /* monitor's view of the current failover state */
+
+/* Status-file inputs; guarded by monitor_ctx.lock. */
+static time_t g_last_failure_time;
+static time_t g_last_recovery_time;
+static const char *g_last_verification = "None";
 
 /* ------------------------------------------------------------------------- */
 /* Time helpers                                                              */
@@ -250,11 +257,15 @@ static bool verify_server(const struct ip_addr *address,
     for (unsigned a = 1; a <= attempts; ++a) {
         if (dns_probe(ip, cfg->verify_timeout_ms)) {
             LOG_INFO("VERIFY: %s replied (attempt %u/%u)", ip, a, attempts);
+            g_last_verification = "Success";
             return true;
         }
     }
 
-    LOG_INFO("VERIFY: %s no reply after %u attempt(s)", ip, attempts);
+    /* Log only at state transitions, not on every retry cycle. The health
+     * decision points below already emit a single message when a server enters
+     * FAILED/HEALTHY, which is the meaningful event for operators. */
+    g_last_verification = "Failed";
     return false;
 }
 
@@ -367,6 +378,8 @@ static void evaluate_recovery_locked(struct dns_server_health *s, uint64_t now_m
     }
 
     LOG_INFO("DECISION: %s recovered", ip_addr_to_str(&s->address, ip, sizeof(ip)));
+    t2_event_d("SYS_INFO_DNS_resolver_recovered", 1);
+    g_last_recovery_time = time(NULL);
     s->state = SERVER_HEALTHY;
     s->failure_episodes = 0;
     s->recovery_successes = 0;
@@ -419,6 +432,7 @@ static void evaluate_failure_locked(struct dns_server_health *s, uint64_t now_ms
     s->recovery_successes = 0;
     s->recovery_delay_ms = cfg->recovery_initial_ms;
     s->last_verify_ms = now_ms;  /* Initialize so recovery backoff works on first retry */
+    g_last_failure_time = time(NULL);
     LOG_WARN("DECISION: %s failed while WAN reachable",
              ip_addr_to_str(&s->address, ip, sizeof(ip)));
 }
@@ -587,6 +601,38 @@ static void expire_pending_locked(struct monitor_ctx *ctx, uint64_t now,
     }
 }
 
+/* Summarises server health; FailoverActive is layered on by publish_status(). */
+static struct status_info collect_status_locked(const struct monitor_ctx *ctx, bool enabled)
+{
+    bool any_failed = false, any_suspect = false;
+
+    for (uint32_t i = 0; i < MAX_DNS_SERVERS; ++i) {
+        const struct dns_server_health *s = &ctx->servers[i];
+        if (!s->used)
+            continue;
+        any_failed  |= (s->state == SERVER_FAILED);
+        any_suspect |= (s->state == SERVER_SUSPECT);
+    }
+
+    struct status_info info = {
+        .state = !enabled ? "Disabled" : any_failed ? "Failed" :
+                 any_suspect ? "Suspect" : "Healthy",
+        .last_failure_time  = g_last_failure_time,
+        .last_recovery_time = g_last_recovery_time,
+        .last_verification  = g_last_verification,
+    };
+    return info;
+}
+
+/* Call after any failover action so the state reflects g_failover_active. */
+static void publish_status(struct status_info *info, bool enabled)
+{
+    if (enabled && g_failover_active)
+        info->state = "FailoverActive";
+    info->active_resolver_count = resolver_list_count();
+    status_file_update(info);
+}
+
 /* Returns true when at least one server is known and every one is FAILED. */
 static bool all_servers_failed_locked(struct monitor_ctx *ctx)
 {
@@ -623,16 +669,19 @@ static void monitor_tick(struct monitor_ctx *ctx)
      * itself is re-checked where a decision needs it. */
     (void)wan_status_is_reachable();
     bool want_failover;
+    static bool failure_reported;
 
     pthread_mutex_lock(&ctx->lock);
 
     if (!cfg.enable) {
         bool release = reset_all_locked(ctx);
+        struct status_info info = collect_status_locked(ctx, false);
         pthread_mutex_unlock(&ctx->lock);
         if (release && dns_redirect_set_failover(false)) {
             g_failover_active = false;
             LOG_INFO("FAILOVER: disabled by configuration; released");
         }
+        publish_status(&info, false);
         return;
     }
 
@@ -642,23 +691,35 @@ static void monitor_tick(struct monitor_ctx *ctx)
         evaluate_server_locked(&ctx->servers[i], now, &cfg);
 
     want_failover = all_servers_failed_locked(ctx);
+    struct status_info info = collect_status_locked(ctx, true);
 
     pthread_mutex_unlock(&ctx->lock);
 
     /* Apply the aggregate decision outside the lock (it may run systemctl).
      * Our view only flips once the action succeeded, so a failed attempt is
      * retried (with backoff inside dns_redirect) rather than forgotten. */
+    if (want_failover && !failure_reported) {
+        failure_reported = true;
+        t2_event_d("SYS_INFO_DNS_Failure_Detected", 1);
+    } else if (!want_failover) {
+        failure_reported = false;
+    }
+
     if (want_failover && !g_failover_active) {
         if (dns_redirect_set_failover(true)) {
             g_failover_active = true;
             LOG_WARN("FAILOVER: all upstream resolvers unreachable; engaged");
+            t2_event_d("SYS_INFO_DNS_unbound_failover_started", 1);
         }
     } else if (!want_failover && g_failover_active) {
         if (dns_redirect_set_failover(false)) {
             g_failover_active = false;
             LOG_INFO("FAILOVER: an upstream resolver recovered; released");
+            t2_event_d("SYS_INFO_DNS_unbound_failover_stopped", 1);
         }
     }
+
+    publish_status(&info, true);
 }
 
 /* ------------------------------------------------------------------------- */

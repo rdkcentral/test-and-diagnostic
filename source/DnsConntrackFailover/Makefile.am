@@ -27,8 +27,9 @@ dns_conntrack_failover_SOURCES = \
 	failover_config.c \
 	wan_status.c \
 	dns_redirect.c \
+	status_file.c \
 	ip_addr.c
-dns_conntrack_failover_LDFLAGS = -lnetfilter_conntrack -lnfnetlink -lpthread
+dns_conntrack_failover_LDFLAGS = -lnetfilter_conntrack -lnfnetlink -lpthread -ltelemetry_msgsender
 
 EXTRA_DIST = \
 	dns_log.h \
@@ -38,4 +39,5 @@ EXTRA_DIST = \
 	failover_config.h \
 	wan_status.h \
 	dns_redirect.h \
+	status_file.h \
 	ip_addr.h

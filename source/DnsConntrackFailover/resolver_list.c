@@ -174,3 +174,12 @@ bool resolver_list_is_upstream(const char *ip)
 
     return match;
 }
+
+int resolver_list_count(void)
+{
+    pthread_mutex_lock(&g_lock);
+    int count = g_count;
+    pthread_mutex_unlock(&g_lock);
+
+    return count;
+}
