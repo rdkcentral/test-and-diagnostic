@@ -17,4 +17,8 @@ int dns_monitor_run(void);
 /* Requests shutdown of the run loop. Async-signal-safe (for signal handlers). */
 void dns_monitor_stop(void);
 
+/* Requests a configuration reload from /nvram/dns_failover.conf; applied by the
+ * run loop on its next tick without interrupting monitoring. Async-signal-safe. */
+void dns_monitor_reload_config(void);
+
 #endif /* DNS_MONITOR_H */

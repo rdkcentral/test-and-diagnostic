@@ -25,7 +25,7 @@ static const char *format_time(time_t t, char *buf, size_t len)
 
     if (t == 0 || !gmtime_r(&t, &tm) ||
         strftime(buf, len, "%Y-%m-%dT%H:%M:%SZ", &tm) == 0)
-        return "None";
+        return "0001-01-01T00:00:00Z"; /* "never" */
     return buf;
 }
 

@@ -29,9 +29,11 @@ struct failover_config {
     unsigned resolver_reload_ms;         /* ResolverReload: ResolverSource re-read period */
 };
 
-/* Re-reads the config file if its mtime changed since the last load; a cheap
- * stat() no-op otherwise. Missing/invalid keys revert to defaults. */
-void failover_config_refresh(void);
+/* Loads the config file; called at startup and on SIGUSR1 only. Keys absent
+ * from the file use the built-in defaults; an invalid value keeps that key's
+ * previous value. A missing/unreadable file on reload keeps the whole previous
+ * config; at startup it yields the defaults. */
+void failover_config_load(void);
 
 /* Returns a thread-safe snapshot of the current configuration. */
 struct failover_config failover_config_get(void);
