@@ -3628,8 +3628,22 @@ if [ -s $Ipv4_error_file ] || [ -s $Ipv6_error_file ];then
         echo_t "[RDKB_SELFHEAL] : iptables error , restarting firewall"
         echo ">>>> $Ipv4_error_file <<<<"
         cat $Ipv4_error_file
+        if [ -s "$Ipv4_error_file" ]; then
+            Ipv4_error_line=$(grep -Eo 'Error occurred at line: [0-9]+|line [0-9]+ failed' "$Ipv4_error_file" | tail -n1 | grep -Eo '[0-9]+')
+            if [ -n "$Ipv4_error_line" ]; then
+                Ipv4_rules_file="/tmp/.ipt"
+                echo "Error rule: $(sed -n "${Ipv4_error_line}p" "$Ipv4_rules_file")"
+            fi
+        fi
         echo ">>>> $Ipv6_error_file <<<<"
         cat $Ipv6_error_file
+        if [ -s "$Ipv6_error_file" ]; then
+            Ipv6_error_line=$(grep -Eo 'Error occurred at line: [0-9]+|line [0-9]+ failed' "$Ipv6_error_file" | tail -n1 | grep -Eo '[0-9]+')
+            if [ -n "$Ipv6_error_line" ]; then
+                Ipv6_rules_file="/tmp/.ipt_v6"
+                echo "Error rule: $(sed -n "${Ipv6_error_line}p" "$Ipv6_rules_file")"
+            fi
+        fi
         sysevent set firewall-restart
         firewall_selfheal_count=$((firewall_selfheal_count + 1))
         sysevent set firewall_selfheal_count $firewall_selfheal_count
