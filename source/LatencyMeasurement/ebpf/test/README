@@ -1,0 +1,99 @@
+# LatencyMeasurement eBPF — Performance Test Harness
+
+Scripts to validate the eBPF TCP-handshake RTT tool (tcp_loader) and compare it
+against the existing xNetSniffer/xNetDP (libpcap) approach for CPU, memory, and
+accuracy.
+
+Two machines are involved:
+  * GATEWAY  — runs the gw_*.sh scripts (the device under test).
+  * LAN CLIENT — runs stress_test.sh / client_test.sh to generate TCP handshakes.
+
+
+## Scripts
+
+  gw_ebpf_launch.sh   Launch tcp_loader for a test round AND snapshot KERNEL
+                      memory before/after (the BPF maps are kernel-side and do
+                      NOT appear in process RSS).  `-k` kills the loader and
+                      verifies the kernel memory is reclaimed (leak check).
+  gw_xnetsniffer.sh   Launch xNetSniffer + xNetDP with a short report interval.
+  gw_cpu_measure.sh   Measure process CPU%, RSS, and system-wide CPU breakdown
+                      (incl. softirq) of a tool over a fixed window, via
+                      /proc/[pid]/stat (no observer effect).  Kills the
+                      competing tool to isolate the measurement.
+  gw_ebpf_capture.sh  Alternative: run tcp_loader and timestamp each RTT line
+                      (per-event logging instead of the raw -o file).
+  stress_test.sh      LAN client: generate many TCP HANDSHAKES (curl -I) across
+                      a rotating server pool; drops throttled servers.
+  client_test.sh      LAN client: single-connection loop logging time_connect
+                      (ground truth for the accuracy comparison).
+  analyze.sh          Correlate client time_connect vs eBPF RTT by source port;
+                      `--xnetsniffer` parses the dmcli TR-181 report.
+
+
+## Fair-comparison rules (READ FIRST)
+
+  * Run the two rounds SEPARATELY — gw_cpu_measure.sh kills the competing tool
+    to isolate CPU, so they cannot overlap.
+  * Match the load: keep COUNT/PARALLEL identical and compare softirq% between
+    rounds to confirm equal load.
+  * Use a DIFFERENT server set per round — a public server that was throttled in
+    round A will skew round B.  Best: point stress_test.sh at your OWN server
+    with -l (e.g. `python3 -m http.server 80` on a wired box) — it never throttles.
+  * Verify data is actually flowing before trusting numbers:
+        wc -l /tmp/ebpf_log.txt      # must be growing
+  * Do NOT use 1.1.1.1 as a target (refuses port 80 -> no handshake).
+
+
+## Round A — eBPF (tcp_loader)
+
+  # GATEWAY, terminal 1 — launch loader + capture kernel memory before/after:
+  ./gw_ebpf_launch.sh /usr/bin/ebpf/tcp_loader 20 /tmp/ebpf_log.txt
+
+  # GATEWAY, terminal 2 — measure CPU/RSS for 300s (kills xNetSniffer/xNetDP):
+  ./gw_cpu_measure.sh tcp_loader 300
+
+  # LAN CLIENT — drive the handshake load into that window:
+  ./stress_test.sh -l <YOUR_SERVER_IP> 60000 50      # or public pool: ./stress_test.sh 60000 50
+
+  # GATEWAY — after the window, stop loader + verify kernel memory reclaim:
+  ./gw_ebpf_launch.sh -k
+
+  Record: connected/attempted (client), CPU%/RSS + softirq% (measure),
+          kernel-mem delta (launch) and reclaim (stop).
+
+
+## Round B — xNetSniffer / xNetDP
+
+  # GATEWAY, terminal 1 — start the xNet apps (60s report interval):
+  ./gw_xnetsniffer.sh 300
+
+  # GATEWAY, terminal 2 — measure both (kills tcp_loader to isolate):
+  ./gw_cpu_measure.sh xNetSniffer 300 xNetDP
+
+  # LAN CLIENT — same load, but rotate to a DIFFERENT server set than round A:
+  ./stress_test.sh -l <YOUR_SERVER_IP> 60000 50
+
+
+## Accuracy round (ground truth)
+
+  # LAN CLIENT — log per-connection time_connect:
+  ./client_test.sh <TARGET> 20
+
+  # GATEWAY — capture eBPF RTT with timestamps while the above runs:
+  ./gw_ebpf_capture.sh /usr/bin/ebpf/tcp_loader
+
+  # Then correlate by source port:
+  ./analyze.sh /tmp/client_log.txt /tmp/ebpf_results.txt
+  ./analyze.sh --xnetsniffer ...          # compare against the TR-181 report
+
+
+## Notes
+
+  * tcp_loader consumes the ring buffer on a timer (default 30s; use 20 here to
+    flush results faster during tests).  Ring buffer is 4 MB (~74,900 events).
+  * BPF maps (~5.1 MB raw kernel: syn ~384K + synack ~768K + ring 4096K) are
+    exempt from RLIMIT_MEMLOCK on kernel 5.11+ and live in KERNEL space — measure
+    them with gw_ebpf_launch.sh, not with the RSS shown by gw_cpu_measure.sh.
+  * stress_test.sh usage:  ./stress_test.sh [-l LOCAL_SERVER] [COUNT] [PARALLEL] [TARGET ...]
+    STRIKES=<n> env var drops a server from rotation after n failed handshakes
+    (default 3) and fails over to the next healthy server.
