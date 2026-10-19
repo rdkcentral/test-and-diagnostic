@@ -2,7 +2,7 @@
  * status_file.h
  *
  * Publishes the monitor's status as key=value lines in
- * /tmp/dns_conntrack_failover_status.txt for scripts and diagnostics.
+ * /tmp/dns_failover_status.txt for scripts and diagnostics.
  */
 
 #ifndef STATUS_FILE_H

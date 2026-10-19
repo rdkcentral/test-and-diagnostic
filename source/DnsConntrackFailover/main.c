@@ -17,7 +17,7 @@
 #include "rdk_debug.h"
 #include <telemetry_busmessage_sender.h>
 
-#define PID_FILE "/tmp/dns_conntrack_failover.pid"
+#define PID_FILE "/tmp/dns_failover_manager.pid"
 
 static void write_pid_file(void)
 {
@@ -49,7 +49,7 @@ int main(void)
 
     write_pid_file(); /* after handlers are installed so SIGUSR1 is never fatal */
 
-    t2_init("dns_conntrack_failover");
+    t2_init("dns_failover_manager");
     int rc = dns_monitor_run();
     t2_uninit();
 

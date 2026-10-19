@@ -17,19 +17,19 @@
 # limitations under the License.
 ##########################################################################
 
-bin_PROGRAMS = dns_conntrack_failover
+bin_PROGRAMS = dns-failover-manager
 
-dns_conntrack_failover_SOURCES = \
-	main.c \
-	dns_monitor.c \
-	dns_probe.c \
-	resolver_list.c \
-	failover_config.c \
-	wan_status.c \
-	dns_redirect.c \
-	status_file.c \
-	ip_addr.c
-dns_conntrack_failover_LDFLAGS = -lnetfilter_conntrack -lnfnetlink -lpthread -ltelemetry_msgsender
+dns_failover_manager_SOURCES = \
+        main.c \
+        dns_monitor.c \
+        dns_probe.c \
+        resolver_list.c \
+        failover_config.c \
+        wan_status.c \
+        dns_redirect.c \
+        status_file.c \
+        ip_addr.c
+dns_failover_manager_LDFLAGS = -lnetfilter_conntrack -lnfnetlink -lpthread -ltelemetry_msgsender
 
 EXTRA_DIST = \
 	dns_log.h \

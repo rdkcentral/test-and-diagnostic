@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define STATUS_PATH     "/tmp/dns_conntrack_failover_status.txt"
+#define STATUS_PATH     "/tmp/dns_failover_status.txt"
 #define STATUS_TMP_PATH STATUS_PATH ".tmp"
 
 static const char *format_time(time_t t, char *buf, size_t len)
