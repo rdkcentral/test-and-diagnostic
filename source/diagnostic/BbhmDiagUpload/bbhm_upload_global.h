@@ -94,6 +94,7 @@
 #include "bbhm_upload_interface.h"
 #include "bbhm_upload_exported_api.h"
 #include "bbhm_upload_internal_api.h"
+#include "bbhm_common_internal_api.h"
 
 /*
 #include "bbhm_srvco_interface.h"
@@ -122,5 +123,6 @@
 #include "http_ifo_hfp.h"
 
 #include "ansc_string_util.h"
+#include "cosa_apis_ip_priv.h"
 
 #endif
