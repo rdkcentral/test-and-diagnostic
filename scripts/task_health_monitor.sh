@@ -5019,30 +5019,6 @@ self_heal_rfc()
     fi
 }
 
-self_heal_ethwan_mode_recover()
-{
-
-    if [ "$MODEL_NUM" == "CGM601TCOM" ] || [ "$MODEL_NUM" == "CWA438TCOM" ] || [ "$MODEL_NUM" == "SG417DBCT" ];then
-
-        echo_t "RDKB_SELFHEAL : Checking for XB10 in EthWan mode "
-        CurrWanMode=$(dmcli eRT getv Device.X_RDKCENTRAL-COM_EthernetWAN.CurrentOperationalMode | grep "value" | cut -f3 -d":" | cut -f2 -d" ")
-        SelWanMode=$(dmcli eRT getv Device.X_RDKCENTRAL-COM_EthernetWAN.SelectedOperationalMode | grep "value" | cut -f3 -d":" | cut -f2 -d" ")
-
-        XB10_EWAN_ENABLE="/nvram/.xb10_enable_ethwan_mode"
-
-	if ([ "$CurrWanMode" = "Ethernet" ] || [ "$SelWanMode" = "Ethernet" ])  && [ ! -f $XB10_EWAN_ENABLE ];then
-
-            echo_t "RDKB_SELFHEAL : XB10 in EthWan mode and no override file detected, to recover switching to Docsis mode .."
-
-            rm -f /nvram/ethwan_interface
-            rm -f /nvram/ETHWAN_ENABLE
-            syscfg set selected_wan_mode 2
-            syscfg commit
-	    dmcli eRT setv Device.X_RDKCENTRAL-COM_EthernetWAN.SelectedOperationalMode string DOCSIS
-        fi
-    fi
-}
-
 if [ "$MODEL_NUM" = "CGM4331COM" ] || [ "$MODEL_NUM" = "CGM4140COM" ] || [ "$MODEL_NUM" = "CGM4981COM" ] || [ "$MODEL_NUM" = "TG4482A" ] || [ "$MODEL_NUM" = "TG3482G" ] || [ "$MODEL_NUM" = "CGM601TCOM" ] || [ "$MODEL_NUM" = "CWA438TCOM" ] || [ "$MODEL_NUM" = "SG417DBCT" ] || [ "$MODEL_NUM" = "SCER11BEL" ] || [ "$MODEL_NUM" = "SR203" ] || [ "$MODEL_NUM" = "SR213" ] || [ "$MODEL_NUM" = "CGA4332COM" ] || [ "$MODEL_NUM" = "AYER21BEL" ]; then
     mesh_optimization_mode=$(deviceinfo.sh -optimization)
     mesh_enable=$(syscfg get mesh_enable)
@@ -5220,7 +5196,6 @@ self_heal_sedaemon
 if [ "$BOX_TYPE" != "HUB4" ] && [ "$BOX_TYPE" != "SR300" ] && [ "$BOX_TYPE" != "SE501" ] && [ "$BOX_TYPE" != "SR213" ] && [ "$BOX_TYPE" != "WNXL11BWL" ]; then
     check_br403_is_created
 fi
-self_heal_ethwan_mode_recover
 if [ "$T2_ENABLE" = "true" ]; then
     self_heal_t2
 fi
