@@ -86,6 +86,7 @@
 #include "bbhm_diageo_interface.h"
 #include "dslh_definitions_tr143.h"
 #include "dslh_definitions_diagnostics.h"
+#include <stdint.h>
 
 
 /***********************************************************
@@ -96,6 +97,8 @@
 #define  BBHM_DOWNLOAD_RR_NAME_URL                  "DownloadURL"
 #define  BBHM_DOWNLOAD_RR_NAME_DSCP                 "DSCP"
 #define  BBHM_DOWNLOAD_RR_NAME_EthernetPriority     "EthernetPriority"
+#define  BBHM_DOWNLOAD_RR_NAME_TimeBasedTestDuration                "TimeBasedTestDuration"
+#define  BBHM_DOWNLOAD_RR_NAME_TimeBasedTestMeasurementOffset       "TimeBasedTestMeasurementOffset"
 
 /***********************************************************
       TR143 DOWNLOAD DIAGNOSTICS STATS STRUCTURE
@@ -105,8 +108,10 @@ typedef struct
 _DSLH_TR143_DOWNLOAD_DIAG_STATS
 {
     ULONG                           DiagStates;
-    ULONG                           TestBytesReceived;
-    ULONG                           TotalBytesReceived;
+    ULONG64                          TestBytesReceived;
+    ULONG64                          TotalBytesReceived;
+    ULONG                           TimeBasedTestMeasurementOffset;
+    DOUBLE                          TimeBasedTestDuration;
     ANSC_UNIVERSAL_TIME             ROMTime;
     ANSC_UNIVERSAL_TIME             BOMTime;
     ANSC_UNIVERSAL_TIME             EOMTime;
@@ -118,6 +123,7 @@ DSLH_TR143_DOWNLOAD_DIAG_STATS, *PDSLH_TR143_DOWNLOAD_DIAG_STATS;
 #define DslhResetDownloadDiagStats(d_info)                                       \
         {                                                                        \
             AnscZeroMemory(d_info, sizeof(DSLH_TR143_DOWNLOAD_DIAG_STATS));      \
+            d_info->TimeBasedTestMeasurementOffset = 2;                          \
         }                                                                        \
         
 

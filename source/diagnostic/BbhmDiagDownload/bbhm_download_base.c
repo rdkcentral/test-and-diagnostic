@@ -76,7 +76,7 @@
 
 #include "bbhm_download_global.h"
 #include "safec_lib_common.h"
-PBBHM_DOWNLOAD_DIAG_OBJECT      g_DiagDownloadObj = NULL;
+extern PBBHM_DOWNLOAD_DIAG_OBJECT      g_DiagDownloadObj;
 
 
 /**********************************************************************
