@@ -102,6 +102,18 @@ static char* s_downloadRecvBuffer = NULL;
 extern pthread_cond_t  DownloadDiagCond;
 extern pthread_mutex_t DownloadDiagMutex;
 
+/* Coverity LOCK_EVASION: all bStopDownDiag reads/writes share DownloadDiagMutex. */
+static BOOL
+BbhmDownloadIsStopRequested(PBBHM_DOWNLOAD_DIAG_OBJECT pMyObject)
+{
+    BOOL stop;
+
+    pthread_mutex_lock(&DownloadDiagMutex);
+    stop = pMyObject->bStopDownDiag;
+    pthread_mutex_unlock(&DownloadDiagMutex);
+    return stop;
+}
+
 /**********************************************************************
 
   prototype:
@@ -421,7 +433,7 @@ bbhmDownloadStartDiagTask
     Notify_change("Device.IP.Diagnostics.DownloadDiagnostics.DiagnosticsState", bufferState);
     getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Download, PrevDiagState);
 
-    if ( pMyObject->bStopDownDiag )
+    if ( BbhmDownloadIsStopRequested(pMyObject) )
     {
         returnStatus = ANSC_STATUS_FAILURE;
         goto done;
@@ -639,11 +651,12 @@ bbhmDownloadStartDiagTask
 
     AnscGetSystemTime(&pStats->BOMTime);
 
-    if (s_result > 0 && s_result <= (int)DOWNLOAD_SINGLE_BUFFER_SIZE)
+    /* Always null-terminate the buffer safely */
+    if (s_result >= 0 && (ULONG)s_result <= recv_size)
     {
-        recv_buffer[s_result] = '\0'; /* allocated one more byte, so no problem */
+        recv_buffer[s_result] = '\0';
     }
-
+    
     /*
      * TR-143: TimeBasedTestDuration window uses wall time sampled immediately after BOMTime
      * (same clock family as loop gettimeofday), so the receive loop budget aligns to BOM.
@@ -666,7 +679,8 @@ bbhmDownloadStartDiagTask
     CcspTraceInfo(("initialRxBytes = %" PRIu64 "\n", (uint64_t)initialRxBytes));
 
     /* check whether it succededd or not */
-    if ( s_result <= 0 || _ansc_strstr(recv_buffer, "HTTP/1.1 2") != recv_buffer )
+    if (s_result <= 0 || (ULONG)s_result > recv_size ||
+        _ansc_strstr(recv_buffer, "HTTP/1.1 2") != recv_buffer)
     {
         /* failed to receive the request */
         AnscTraceWarning(("Failed to recv or not 200 OK.\n"));
@@ -712,7 +726,7 @@ bbhmDownloadStartDiagTask
             }
 
             pStats->TestBytesReceived += (ULONG)s_result;
-            if ( pMyObject->bStopDownDiag )
+            if ( BbhmDownloadIsStopRequested(pMyObject) )
             {
                 returnStatus = ANSC_STATUS_FAILURE;
                 goto done;
@@ -870,14 +884,14 @@ done:
     }
 
     /* if the task is stopped, reset the stats */
+    pthread_mutex_lock(&DownloadDiagMutex);
     if ( pMyObject->bStopDownDiag )
     {
         DslhResetDownloadDiagStats((&pMyObject->DownloadDiagStats));
-        pthread_mutex_lock(&DownloadDiagMutex);
         pMyObject->bStopDownDiag       = FALSE;
         pthread_cond_signal(&DownloadDiagCond);
-        pthread_mutex_unlock(&DownloadDiagMutex);
     }
+    pthread_mutex_unlock(&DownloadDiagMutex);
 
     pMyObject->DownloadDiagInfo.DiagnosticsState = pStats->DiagStates;
         
@@ -965,7 +979,9 @@ BbhmDownloadStopDiag
 
     if ( pMyObject->bDownDiagOn )
     {
+        pthread_mutex_lock(&DownloadDiagMutex);
         pMyObject->bStopDownDiag = TRUE;
+        pthread_mutex_unlock(&DownloadDiagMutex);
     }
     else
     {

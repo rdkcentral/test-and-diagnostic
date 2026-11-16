@@ -1723,10 +1723,19 @@ int send_query (PCOSA_DML_WANCNCTVTY_CHK_QUERYNOW_CTXT_INFO pQuerynowCtxt, struc
         int flags = fcntl(pfd[idx].fd, F_GETFL);
         if (fcntl(pfd[idx].fd, F_SETFL, flags | O_NONBLOCK) == -1) {
             WANCHK_LOG_ERROR("Unable to set close-on-exec flag!\n");
+            close(pfd[idx].fd);
+            pfd[idx].fd = -1;
             idx++;
             continue;
         }
     
+        // Tracks whether a query has already been written on this socket, so a later
+        // failure doesn't discard an earlier response still pending on the same fd.
+        BOOL query_sent_on_socket = FALSE;
+        // Tracks whether idx was already advanced this iteration, to avoid double-advancing
+        // when ret is still 0 from an earlier slot's success.
+        BOOL idx_advanced = FALSE;
+
         // Iterate through the queries and send them
         for (int i = 0; i < query_info.query_count; i++) {
             if (query_list[i].resp_recvd) {
@@ -1740,7 +1749,12 @@ int send_query (PCOSA_DML_WANCNCTVTY_CHK_QUERYNOW_CTXT_INFO pQuerynowCtxt, struc
                 if (!pkt_len) {
                     // Error in sending raw packet
                     WANCHK_LOG_ERROR("Error in Sending Raw Packet for nameserver %s\n", query_info.ns);
-                    idx++;
+                    if (!query_sent_on_socket) {
+                        close(pfd[idx].fd);
+                        pfd[idx].fd = -1;
+                        idx++;
+                        idx_advanced = TRUE;
+                    }
                     break;
                 }
             }
@@ -1761,14 +1775,21 @@ int send_query (PCOSA_DML_WANCNCTVTY_CHK_QUERYNOW_CTXT_INFO pQuerynowCtxt, struc
             if (write(pfd[idx].fd, packet, pkt_len) < 0) {
                 // Error writing to socket
                 WANCHK_LOG_WARN("Write failed for nameserver %s on interface %s\n", query_info.ns, query_info.ifname);
+                if (!query_sent_on_socket) {
+                    close(pfd[idx].fd);
+                    pfd[idx].fd = -1;
+                    idx++;
+                    idx_advanced = TRUE;
+                }
                 break;
             } else {
                 WANCHK_LOG_DBG("Write success for nameserver %s on interface %s\n", query_info.ns, query_info.ifname);
                 ret = 0; // Successful write
+                query_sent_on_socket = TRUE;
             }
         }
 
-        if (ret == 0) {
+        if (ret == 0 && !idx_advanced) {
             idx++;
         }
         // Update the previous query type

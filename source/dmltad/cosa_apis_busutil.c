@@ -325,11 +325,8 @@ CosaGetInterfaceAddrByName
               size--;
           }
 
-          if (ppComponents)
-          {
-              AnscFreeMemory(ppComponents);
-              ppComponents = NULL;
-          }
+          AnscFreeMemory(ppComponents);
+          ppComponents = NULL;
         }
         else
         {

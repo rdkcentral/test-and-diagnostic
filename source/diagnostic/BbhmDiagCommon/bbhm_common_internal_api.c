@@ -186,25 +186,16 @@ ANSC_STATUS Tad_GetParamValues(char *pchComponent, char *pchBus, char *pchParamN
     {
         return ANSC_STATUS_FAILURE;
     }
-    else if (CCSP_SUCCESS == iRet)
+
+    if (ppRetVal && (NULL != ppRetVal[0]->parameterValue))
     {
-        if (ppRetVal && (NULL != ppRetVal[0]->parameterValue))
-        {
-            *pulReturnVal = (ULONG64)strtoull(ppRetVal[0]->parameterValue, NULL, 10);
-
-        }
-        if (ppRetVal)
-        {
-            free_parameterValStruct_t(bus_handle, iNVal, ppRetVal);
-        }
-        return ANSC_STATUS_SUCCESS;
+        *pulReturnVal = (ULONG64)strtoull(ppRetVal[0]->parameterValue, NULL, 10);
     }
-
     if (ppRetVal)
     {
-       free_parameterValStruct_t(bus_handle, iNVal, ppRetVal);
+        free_parameterValStruct_t(bus_handle, iNVal, ppRetVal);
     }
-    return ANSC_STATUS_FAILURE;
+    return ANSC_STATUS_SUCCESS;
 }
 
 /* Fetch a DM parameter as a string into pchBuf buffer. */

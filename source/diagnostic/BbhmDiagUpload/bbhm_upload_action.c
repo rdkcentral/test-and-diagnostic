@@ -112,6 +112,18 @@ extern PBBHM_UPLOAD_DIAG_OBJECT g_DiagUploadObj;
 extern pthread_cond_t  UploadDiagCond;
 extern pthread_mutex_t UploadDiagMutex;
 
+/* Coverity LOCK_EVASION: all bStopUpDiag reads/writes share UploadDiagMutex. */
+static BOOL
+BbhmUploadIsStopRequested(PBBHM_UPLOAD_DIAG_OBJECT pMyObject)
+{
+    BOOL stop;
+
+    pthread_mutex_lock(&UploadDiagMutex);
+    stop = pMyObject->bStopUpDiag;
+    pthread_mutex_unlock(&UploadDiagMutex);
+    return stop;
+}
+
 /**********************************************************************
 
   prototype:
@@ -601,7 +613,7 @@ bbhmUploadStartDiagTask
     }
     getDiagnosticState(DSLH_DIAGNOSTIC_TYPE_Upload, PrevDiagState);
 
-    if ( pMyObject->bStopUpDiag )
+    if ( BbhmUploadIsStopRequested(pMyObject) )
     {
         returnStatus = ANSC_STATUS_FAILURE;
         goto done;
@@ -774,10 +786,14 @@ bbhmUploadStartDiagTask
 	    }
 	    if (aSocket != XSKT_SOCKET_INVALID_SOCKET)
 		    _xskt_closesocket(aSocket);
-	    if (servInfo)
-		    _xskt_freeaddrinfo(servInfo);
+	    /* servInfo already used above on this path; always free and clear before retry */
+	    _xskt_freeaddrinfo(servInfo);
+	    servInfo = NULL;
 	    if (cliInfo)
+	    {
 		    _xskt_freeaddrinfo(cliInfo);
+		    cliInfo = NULL;
+	    }
 	    if (pHost)
 		    AnscFreeMemory(pHost);
 	    if (pServ)
@@ -938,7 +954,7 @@ bbhmUploadStartDiagTask
                 break;
             }
 
-            if ( pMyObject->bStopUpDiag )
+            if ( BbhmUploadIsStopRequested(pMyObject) )
             {
                 returnStatus = ANSC_STATUS_FAILURE;
                 goto done;
@@ -1102,14 +1118,14 @@ done:
 		AnscFreeMemory(pPath);
 
     /* if the task is stopped, reset the stats */
+    pthread_mutex_lock(&UploadDiagMutex);
     if ( pMyObject->bStopUpDiag)
     {
         DslhResetUploadDiagStats((pStats));
-        pthread_mutex_lock(&UploadDiagMutex);
         pMyObject->bStopUpDiag       = FALSE;
         pthread_cond_signal(&UploadDiagCond);
-        pthread_mutex_unlock(&UploadDiagMutex);
     }
+    pthread_mutex_unlock(&UploadDiagMutex);
 
     pMyObject->UploadDiagInfo.DiagnosticsState = pStats->DiagStates;
 
@@ -1228,7 +1244,9 @@ BbhmUploadStopDiag
 
     if ( pMyObject->bUpDiagOn )
     {
+        pthread_mutex_lock(&UploadDiagMutex);
         pMyObject->bStopUpDiag = TRUE;
+        pthread_mutex_unlock(&UploadDiagMutex);
     }
     else
     {
