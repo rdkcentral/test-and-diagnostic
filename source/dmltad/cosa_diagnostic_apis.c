@@ -539,6 +539,10 @@ CosaDmlDiagScheduleDiagnostic
                 (ANSC_HANDLE)pInfo,
                 "AsyncSheduleDiagnostic"
             );
+
+        /* Spawn queued the async diagnostic; report success so DML Commit
+         * (Download/Upload) does not treat a successful schedule as failure. */
+        returnStatus = ANSC_STATUS_SUCCESS;
     }
 
     return returnStatus;
