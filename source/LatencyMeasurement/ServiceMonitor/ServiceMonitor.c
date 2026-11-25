@@ -26,6 +26,8 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <arpa/inet.h>
+#include <stdint.h>
 #include "ccsp_trace.h"
 #include <syscfg/syscfg.h>
 #include <sysevent/sysevent.h>
@@ -604,27 +606,65 @@ int Get_Status_of_bridge_mode()
 
 void Get_IPv4_addr( )
 {
-	char lan_ipaddr[ARRAY_LEN]={0};
-	char lan_ifname[ARRAY_LEN]={0};
-	char Command[ARRAY_SIZE]={0};
-	char buf[ARRAY_LEN]={0};
-	FILE *fp;
-	syscfg_get(NULL, "lan_ifname", lan_ifname, sizeof(lan_ifname));
-	syscfg_get(NULL, "lan_ipaddr", lan_ipaddr, sizeof(lan_ipaddr));
-	CcspTraceInfo(("%slan_ipaddr : %s  : lan_ifname:%s\n",__func__, lan_ipaddr,lan_ifname));
-	//ip route show | grep brlan0 | grep 10.0.0.1 | awk '{print $1}
-	snprintf(Command,ARRAY_SIZE,"ip route show | grep %s | grep %s | awk '{print $1}' ",lan_ifname,lan_ipaddr);
-	CcspTraceInfo(("command:%s IP\n",Command));
-	fp = popen(Command,"r");
-	if(fp==NULL)
-	{
-		CcspTraceInfo(("popen failed :%s\n",Command));
-		return;
-	}
-    copy_command_output(fp, buf, sizeof(buf));
-    pclose(fp);
-    fp=NULL;
-	strcpy(IPv4_addr,buf);	
+        char lan_ipaddr[ARRAY_LEN]={0};
+        char lan_netmask[ARRAY_LEN]={0};
+        char network_text[INET_ADDRSTRLEN]={0};
+        struct in_addr ip_addr;
+        struct in_addr netmask;
+        struct in_addr network_addr;
+        uint32_t ip_value;
+        uint32_t mask_value;
+        unsigned int prefix_len=0;
+        bool host_bits_seen=false;
+        int bit;
+
+        IPv4_addr[0]='\0';
+        syscfg_get(NULL, "lan_ipaddr", lan_ipaddr, sizeof(lan_ipaddr));
+        syscfg_get(NULL, "lan_netmask", lan_netmask, sizeof(lan_netmask));
+        CcspTraceInfo(("%s: lan_ipaddr:%s lan_netmask:%s\n", __func__, lan_ipaddr, lan_netmask));
+
+        if (lan_ipaddr[0] == '\0' || lan_netmask[0] == '\0' ||
+                        inet_pton(AF_INET, lan_ipaddr, &ip_addr) != 1 ||
+                        inet_pton(AF_INET, lan_netmask, &netmask) != 1)
+        {
+                CcspTraceInfo(("%s: invalid LAN IPv4 address or netmask\n", __func__));
+                return;
+        }
+
+        ip_value = ntohl(ip_addr.s_addr);
+        mask_value = ntohl(netmask.s_addr);
+        for (bit = 31; bit >= 0; --bit)
+        {
+                if (mask_value & (UINT32_C(1) << bit))
+                {
+                        if (host_bits_seen)
+                        {
+                                CcspTraceInfo(("%s: non-contiguous LAN IPv4 netmask:%s\n", __func__, lan_netmask));
+                                return;
+                        }
+                        prefix_len++;
+                }
+                else
+                {
+                        host_bits_seen = true;
+                }
+        }
+
+        if (prefix_len == 0)
+        {
+                CcspTraceInfo(("%s: LAN IPv4 netmask is too broad:%s\n", __func__, lan_netmask));
+                return;
+        }
+
+        network_addr.s_addr = htonl(ip_value & mask_value);
+        if (inet_ntop(AF_INET, &network_addr, network_text, sizeof(network_text)) == NULL)
+        {
+                CcspTraceInfo(("%s: failed to format LAN IPv4 network\n", __func__));
+                return;
+        }
+
+        snprintf(IPv4_addr, sizeof(IPv4_addr), "%s/%u", network_text, prefix_len);
+        CcspTraceInfo(("%s: LAN IPv4 network:%s\n", __func__, IPv4_addr));
 }
 /*****************************************************************************
 	SendConditional_pthread_cond_signal(): using this function sent signal to
@@ -762,7 +802,6 @@ void *SysEventHandlerThrd_for_Monitorservice(void *data)
 				BridgeMode_value=atoi(value);
 				if(BridgeMode_value==ROUTER_MODE)// router mode 
 				{
-					Get_IPv4_addr();
 					sysevent_get(sysevent_fd, sysevent_token, LAN_PREFIX_SYSEVENT, IPv6_addr, sizeof(IPv6_addr));
 					SendConditional_pthread_cond_signal();
 				}
